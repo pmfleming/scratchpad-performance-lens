@@ -3,10 +3,15 @@
 Scratchpad-specific measurement JSON producers for the Overview, Telemetry, and
 Performance dashboard tabs.
 
-This repository owns producer logic only. Scratchpad keeps the dashboard UI,
-local API server, and static viewer. The lens runs against a configured
+This repository owns producer logic only. It runs against a configured
 Scratchpad checkout and writes JSON artifacts into that checkout's
 `target/analysis` directory.
+
+The dashboard is no longer owned by Scratchpad or by this lens. The sibling
+`project-management-board` repository owns the React/TypeScript dashboard, task
+catalog, local run API, and UI workflow that calls this lens. Scratchpad is now
+only the Rust editor project under measurement: it provides app source, Cargo
+targets, probe binaries, benches, and the artifact output directory.
 
 ## Quick Start
 
@@ -48,8 +53,14 @@ Included here:
 - telemetry payload helpers
 - shared performance metadata
 
+Owned by `project-management-board`:
+
+- dashboard UI and local web server
+- task catalog and run orchestration
+- calls into `scratchpad-performance-lens` and `rust-quality-lens`
+
 Still in Scratchpad:
 
-- dashboard server and viewer
 - Rust probe binaries and Criterion benches that compile against the Scratchpad crate
 - packaging and app runtime code
+- `target/analysis` as the local artifact destination
