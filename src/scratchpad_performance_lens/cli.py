@@ -81,6 +81,8 @@ def measure(args: argparse.Namespace) -> None:
             argv.append("--skip-bench")
         if tool == "search" and args.skip_bench:
             argv.append("--skip-bench")
+        if tool in {"slowspots", "search"} and args.fail_on_slow:
+            argv.append("--fail-on-slow")
         if tool == "flamegraphs" and args.index_only:
             argv.append("--index-only")
         run_tool(module_name, argv, config)
@@ -136,6 +138,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     measure_parser.add_argument("--config", type=Path, default=None)
     measure_parser.add_argument("--skip-bench", action="store_true")
+    measure_parser.add_argument("--fail-on-slow", action="store_true")
     measure_parser.add_argument("--index-only", action="store_true")
     measure_parser.set_defaults(func=measure)
 
