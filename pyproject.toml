@@ -1,0 +1,18 @@
+[project]
+name = "scratchpad-performance-lens"
+version = "0.1.0"
+description = "Scratchpad-specific measurement JSON producers for overview, telemetry, and performance tabs."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+scratchpad-performance-lens = "scratchpad_performance_lens.cli:main"
+splens = "scratchpad_performance_lens.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
