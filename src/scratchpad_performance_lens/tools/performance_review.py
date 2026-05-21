@@ -106,6 +106,7 @@ SCENARIOS: List[Dict[str, Any]] = [
         "capacity_scenarios": ["many_file_count_ceiling", "search_target_count_ceiling"],
         "resource_scenarios": [
             "many_file_resource_tracking",
+            "many_file_lazy_open_tracking",
             "search_target_resource_tracking",
             "session_persist_cost",
             "session_restore_cost",
@@ -120,6 +121,7 @@ SCENARIOS: List[Dict[str, Any]] = [
                 "sources": [
                     "many_file_count_ceiling",
                     "many_file_resource_tracking",
+                    "many_file_lazy_open_tracking",
                     "search_target_count_ceiling",
                     "search_target_resource_tracking",
                 ],
@@ -132,7 +134,7 @@ SCENARIOS: List[Dict[str, Any]] = [
                 "sources": ["session_persist_cost", "session_restore_cost"],
             },
         ],
-        "next_measurement": "Add file-backed 10k/100k-file corpus open, restore, and all-files search probes.",
+        "next_measurement": "Extend lazy-open coverage to 100k-file corpora and add all-files search probes over cold tabs.",
     },
     {
         "id": "search",
@@ -160,6 +162,7 @@ SCENARIOS: List[Dict[str, Any]] = [
         "resource_scenarios": [
             "search_file_size_resource_tracking",
             "search_target_resource_tracking",
+            "search_app_result_tracking",
             "edited_buffer_search_preview_rendering",
         ],
         "profile_ids": [
@@ -185,7 +188,11 @@ SCENARIOS: List[Dict[str, Any]] = [
                 "label": "10,000+ search targets",
                 "kind": "files",
                 "minimum": 10_000,
-                "sources": ["search_target_count_ceiling", "search_target_resource_tracking"],
+                "sources": [
+                    "search_target_count_ceiling",
+                    "search_target_resource_tracking",
+                    "search_app_result_tracking",
+                ],
             },
             {
                 "id": "first_response_budget",
@@ -208,6 +215,7 @@ SCENARIOS: List[Dict[str, Any]] = [
             "tab_build_targeted",
             "tab_split_targeted",
             "tab_combine_targeted",
+            "tab_strip_frame_rendering",
             "session_persist_cost",
             "session_restore_cost",
             "startup_visible_restore_cost",
@@ -225,11 +233,12 @@ SCENARIOS: List[Dict[str, Any]] = [
                     "tab_build_targeted",
                     "tab_split_targeted",
                     "tab_combine_targeted",
+                    "tab_strip_frame_rendering",
                     "startup_visible_restore_cost",
                 ],
             },
         ],
-        "next_measurement": "Extend tab-count latency, memory, and restore sweeps to 10,000+ tabs.",
+        "next_measurement": "Add per-frame tab-strip rendering trends for horizontal and vertical tab lists.",
     },
     {
         "id": "many_views",

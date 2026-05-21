@@ -28,9 +28,12 @@ MEASUREMENT_GAP_SCENARIOS = {
     "provenance_retained_memory": "provenance-store retained memory after hundreds of thousands of edits and history-budget eviction",
     "anchor_heavy_view_editing": "anchor-heavy editing with many views, selections, search results, and scroll anchors",
     "fragmented_long_session_mutation": "fragmented-buffer paste/cut/undo/redo after long sessions",
+    "many_file_lazy_open_tracking": "large open batches should install path-backed shells and defer file content hydration",
+    "search_app_result_tracking": "app-level search result storage should avoid eager matched-text allocation",
     "session_persist_cost": "session persistence broken down into snapshot cost, serialization cost, file I/O, and restore reconstruction",
     "session_restore_cost": "session persistence broken down into snapshot cost, serialization cost, file I/O, and restore reconstruction",
     "startup_visible_restore_cost": "session persistence broken down into snapshot cost, serialization cost, file I/O, and restore reconstruction",
+    "tab_strip_frame_rendering": "render cost for horizontal and vertical tab-strip virtualization at many-tab scale",
 }
 
 
@@ -82,8 +85,10 @@ def fallback_probe_events() -> List[Dict[str, Any]]:
             "bytes",
         ),
         ("many_file_resource_tracking", "Many-file allocation and workspace tracking", "many-files", "memory", [1_000, 10_000, 50_000], "files"),
+        ("many_file_lazy_open_tracking", "Many-file lazy open tracking", "many-files", "lazy-open", [1_000, 10_000], "files"),
         ("search_file_size_resource_tracking", "Search file-size allocation tracking", "search", "allocation", [64 * MB, 256 * MB], "bytes"),
         ("search_target_resource_tracking", "Search target-count allocation tracking", "search", "allocation", [1_000, 10_000], "files"),
+        ("search_app_result_tracking", "Search app result storage tracking", "search", "result-storage", [128, 1_000], "tabs"),
         ("edited_buffer_search_preview_rendering", "Edited-buffer search preview rendering", "search", "preview-rendering", [256, 2_048, 8_192], "pieces"),
         ("paste_allocation", "Paste allocation profile", "edit-paste", "allocation", [8 * MB, 64 * MB, 128 * MB], "bytes"),
         ("provenance_retained_memory", "Provenance retained memory after long edit session", "edit-history", "bounded-memory", [10_000, 100_000], "edits"),
@@ -92,6 +97,7 @@ def fallback_probe_events() -> List[Dict[str, Any]]:
         ("tab_build_targeted", "Tab build targeted path", "tab-management", "tab-build", [128, 512, 4_096, 10_000], "tabs"),
         ("tab_split_targeted", "Tab split targeted path", "tab-management", "tab-split", [128, 512, 4_096, 10_000], "tabs"),
         ("tab_combine_targeted", "Tab combine targeted path", "tab-management", "tab-combine", [128, 512, 4_096, 10_000], "tabs"),
+        ("tab_strip_frame_rendering", "Tab strip frame rendering", "tab-management", "tab-strip-frame", [128, 1_000, 10_000], "tabs"),
         ("view_count_resource_tracking", "View count allocation and layout tracking", "split-layout", "memory", [128, 512, 1_000], "views"),
         ("anchor_heavy_view_editing", "Anchor-heavy many-view editing", "split-layout", "anchors", [1_000, 10_000, 40_000], "anchors"),
         ("session_persist_cost", "Session persist cost", "session-persistence", "session", [100, 1_000, 10_000], "tabs"),
