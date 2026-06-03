@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>scratchpad-performance-lens — Measurement Tool Review</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #161b22;
+    --panel-2: #1c232c;
+    --ink: #e6edf3;
+    --muted: #9aa7b4;
+    --line: #2a323c;
+    --accent: #4c9aff;
+    --accent-2: #7ee787;
+    --warn: #f0b429;
+    --crit: #ff7b72;
+    --ok: #56d364;
+    --chip: #21303f;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); line-height: 1.6; font-size: 16px;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 28px 96px; }
+  header.hero {
+    padding: 56px 28px 40px; border-bottom: 1px solid var(--line);
+    background: radial-gradient(1200px 400px at 20% -10%, #1b2a3a 0%, transparent 60%), var(--bg);
+  }
+  header.hero .inner { max-width: 1040px; margin: 0 auto; }
+  .eyebrow { color: var(--accent); font-family: var(--mono); font-size: 13px; letter-spacing: .12em; text-transform: uppercase; }
+  h1 { font-size: 34px; margin: 8px 0 6px; line-height: 1.2; }
+  .sub { color: var(--muted); font-size: 17px; max-width: 760px; }
+  .meta-row { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 10px; }
+  .pill { font-family: var(--mono); font-size: 12px; background: var(--chip); color: var(--ink);
+    border: 1px solid var(--line); padding: 5px 10px; border-radius: 999px; }
+  h2 { font-size: 24px; margin: 52px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  h3 { font-size: 18px; margin: 30px 0 8px; }
+  h4 { font-size: 15px; margin: 18px 0 6px; color: var(--accent-2); font-family: var(--mono); }
+  p { margin: 10px 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { font-family: var(--mono); font-size: .88em; background: var(--panel-2); padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line); }
+  pre { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.55; }
+  ul, ol { margin: 10px 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px 24px; margin-top: 30px; }
+  .toc h2 { border: 0; margin: 0 0 10px; font-size: 16px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .toc ol { columns: 2; column-gap: 36px; }
+  @media (max-width: 720px) { .toc ol { columns: 1; } h1 { font-size: 27px; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 4px 22px 18px; margin: 18px 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  .stat { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .stat .n { font-size: 26px; font-weight: 700; font-family: var(--mono); }
+  .stat .l { color: var(--muted); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  tbody tr:hover { background: var(--panel-2); }
+  .tag { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+  .sev-crit { color: var(--crit); border-color: #5a2a2a; background: #2a1718; }
+  .sev-high { color: var(--warn); border-color: #5a4a1f; background: #2a2410; }
+  .sev-med  { color: var(--accent); border-color: #28435f; background: #14222f; }
+  .sev-low  { color: var(--muted); }
+  .st-done  { color: var(--ok); border-color: #2c5234; background: #16271a; }
+  .st-part  { color: var(--warn); border-color: #5a4a1f; background: #2a2410; }
+  .st-no    { color: var(--crit); border-color: #5a2a2a; background: #2a1718; }
+  .finding { border-left: 3px solid var(--line); padding: 2px 0 2px 18px; margin: 22px 0; }
+  .finding.crit { border-color: var(--crit); }
+  .finding.high { border-color: var(--warn); }
+  .finding.med  { border-color: var(--accent); }
+  .finding h3 { margin-top: 4px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .finding .id { font-family: var(--mono); color: var(--muted); font-size: 13px; }
+  .kv { color: var(--muted); font-size: 14px; margin: 4px 0; }
+  .kv b { color: var(--ink); font-weight: 600; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+  .footnote { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); margin-top: 60px; padding-top: 18px; }
+  .columns { display:grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 720px){ .columns{ grid-template-columns:1fr; } }
+  .quote { color: var(--muted); font-style: italic; border-left: 3px solid var(--accent); padding-left: 14px; margin: 14px 0; }
+  .num { font-family: var(--mono); }
+  .filemap td:first-child { color: var(--accent); white-space: nowrap; font-family: var(--mono); font-size: 13px; }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="inner">
+    <div class="eyebrow">Follow-up Review</div>
+    <h1>Measurement Tool Review</h1>
+    <div class="sub">A second-pass review of <code>scratchpad-performance-lens</code>: (1) how the current code answers the recommendations in the prior architecture review, and (2) whether the tool can <em>accurately</em> measure performance against the promises it claims to track.</div>
+    <div class="meta-row">
+      <span class="pill">Reviewed 2026-06-03</span>
+      <span class="pill">Rust • clap • serde_json</span>
+      <span class="pill">branch: master</span>
+      <span class="pill">13/13 tests passing</span>
+      <span class="pill">Scope: review only — no code changed</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#summary">Executive summary</a></li>
+      <li><a href="#compliance">Part 1 — Compliance with the prior review</a></li>
+      <li><a href="#accuracy">Part 2 — Measurement accuracy vs the promises</a></li>
+      <li><a href="#nextmoves">Suggested next moves</a></li>
+    </ol>
+  </nav>
+
+  <!-- ============================================================ -->
+  <h2 id="summary">1 · Executive summary</h2>
+  <p>
+    Since the prior review, the repository has done the <b>cheap, high-leverage half of the roadmap</b>
+    (steps 1–2 plus parts of 3) and the single most valuable correctness fix. The 2,648-line producer
+    monolith is now a clean <code>producers/</code> module, the brittle git-LOC parser has been replaced
+    with a real lexer, and the highest-risk scoring kernels now have unit tests. All 13 tests pass.
+  </p>
+  <p>
+    What remains undone is the <b>pivot the prior review hinged on</b>: typed artifacts and a generated
+    schema (I-1). The dashboard contract is still an informal collection of <code>serde_json::Value</code>
+    blobs read by string key. That is a maintainability gap — but the more pressing finding from this pass
+    is on the <em>second</em> question: <b>several paths let the tool present a healthy seven-promise board
+    from data that does not justify it.</b> "Covered" currently means <em>measured</em>, not <em>passing</em>;
+    one of the two synthetic fallbacks is not flagged as synthetic; and the check that the workload actually
+    reached the promised scale is stubbed out.
+  </p>
+  <div class="grid">
+    <div class="stat"><div class="n">✅ 2</div><div class="l">structural recommendations fully resolved (I-2 split, I-5 lexer)</div></div>
+    <div class="stat"><div class="n">🟡 5</div><div class="l">partially addressed (I-3, I-4, I-6, I-8, I-10)</div></div>
+    <div class="stat"><div class="n">❌ 3</div><div class="l">not started (I-1 typed artifacts, I-9 renderers, §6 lens-core)</div></div>
+    <div class="stat"><div class="n">7</div><div class="l">measurement-accuracy issues found, 2 of them outright bugs</div></div>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="compliance">2 · Part 1 — Compliance with the prior review</h2>
+  <p class="legend">
+    <span class="tag st-done">DONE</span> resolved
+    <span class="tag st-part">PARTIAL</span> meaningfully advanced, gaps remain
+    <span class="tag st-no">NOT STARTED</span>
+  </p>
+  <div class="card">
+    <table>
+      <thead><tr><th>ID</th><th>Finding</th><th>Status</th><th>Evidence &amp; gaps</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="num">I-2</td>
+          <td>2,648-line producer monolith</td>
+          <td><span class="tag st-done">DONE</span></td>
+          <td>Split into <code>src/producers/</code> — one file per producer plus <code>render.rs</code> and <code>common/{artifact,probe,stats}.rs</code> and <code>project_code/classifier.rs</code>. Exactly the recommended seam.</td>
+        </tr>
+        <tr>
+          <td class="num">I-5</td>
+          <td>Brittle <code>rust_test_line_mask</code></td>
+          <td><span class="tag st-done">DONE</span></td>
+          <td><code>classifier.rs</code> replaces brace-counting with a real <code>BraceLexer</code> (line/block/nested comments, string + char literals, raw strings, escapes) and adds two unit tests including braces-in-literals. This is the "better" option the review hoped for, not the minimum.</td>
+        </tr>
+        <tr>
+          <td class="num">I-8</td>
+          <td>No tests on the judgment logic</td>
+          <td><span class="tag st-part">PARTIAL</span></td>
+          <td>New tests cover <code>stability_label</code>, <code>latency_score</code>, throughput guards, <code>classify_path</code>, the line mask, and the capacity registry + synthetic flag. Still untested: <code>infer_limiting_resource</code>, <code>family_priority</code>, the review coverage logic, the <code>normalize_*</code> joins.</td>
+        </tr>
+        <tr>
+          <td class="num">I-3</td>
+          <td>Scenario taxonomy restated 4+ places</td>
+          <td><span class="tag st-part">PARTIAL</span></td>
+          <td><code>CAPACITY_SCENARIOS</code> is now a typed registry and its fallback derives from it; <code>PRODUCERS</code> consolidates catalog + run-order. But <code>review_scenarios()</code>, <code>fallback_resource_events</code> (inline tuples), <code>BUILTIN_METADATA</code>, and <code>FLAMEGRAPH_CONFIGS</code> are still independent tables, and the cross-reference strings in <code>review.rs</code> must match the other files by hand. Drift trap reduced, not closed.</td>
+        </tr>
+        <tr>
+          <td class="num">I-4</td>
+          <td>Synthetic data mistakable for real</td>
+          <td><span class="tag st-part">PARTIAL</span></td>
+          <td>Capacity fallback is now registry-derived and tagged <code>synthetic: true</code> at meta <em>and</em> summary. <b>But the resources fallback only sets <code>fallback_reason</code>, not <code>synthetic</code></b> — the larger (~210-line) fabricated dataset is the one left unflagged. See accuracy finding A-2.</td>
+        </tr>
+        <tr>
+          <td class="num">I-6</td>
+          <td>Scattered policy magic-numbers</td>
+          <td><span class="tag st-part">PARTIAL</span></td>
+          <td>capacity.rs promoted named consts. Still inline: stability <code>0.2</code>/<code>0.1</code> (stats.rs), <code>family_priority</code> weights (speed_report.rs), and resource fallback multipliers <code>1.25</code>/<code>4096</code>/<code>1536</code>/<code>/3</code>/<code>/2</code>/<code>.min(50_000)</code>. No central policy module yet.</td>
+        </tr>
+        <tr>
+          <td class="num">I-10</td>
+          <td>Smaller items</td>
+          <td><span class="tag st-part">PARTIAL</span></td>
+          <td>Binary-alias comment added ✅; <code>absolutize_from</code> now errors with context instead of swallowing canonicalize failures ✅. Per-producer failure-policy contract still undocumented.</td>
+        </tr>
+        <tr>
+          <td class="num">I-1</td>
+          <td>Untyped <code>Value</code> pipeline</td>
+          <td><span class="tag st-no">NOT STARTED</span></td>
+          <td>Still <code>json!</code> + <code>.get("k").and_then(Value::as_f64)</code> throughout. This was the pivot (roadmap step 4) and the prerequisite for I-9 and the reuse story.</td>
+        </tr>
+        <tr>
+          <td class="num">I-9</td>
+          <td>Renderers re-parse their own output</td>
+          <td><span class="tag st-no">NOT STARTED</span></td>
+          <td><code>render.rs</code> still reads <code>Value</code> by string key. Coupled to I-1.</td>
+        </tr>
+        <tr>
+          <td class="num">§6</td>
+          <td><code>lens-core</code> extraction / schema export</td>
+          <td><span class="tag st-no">NOT STARTED</span></td>
+          <td>No shared crate, no <code>schemars</code> export.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="kv">
+    Net: the structural cleanup and the trustworthiness of the git-LOC metric improved substantially. The
+    <em>contract</em> — typed JSON plus a generated schema, which is what actually protects the dashboard from
+    silent field drift — is still entirely informal.
+  </p>
+
+  <!-- ============================================================ -->
+  <h2 id="accuracy">3 · Part 2 — Measurement accuracy vs the promises</h2>
+  <p>
+    The tool tracks a set of headline promises (in <code>review.rs</code> as <code>target_promises</code>):
+    GB-class text files, 10,000+ files, 10,000+ tabs, 1,000+ views/splits, sub-100&nbsp;ms visible response,
+    and fast first-search response + completion. The findings below are ordered by how badly they let the board
+    overstate promise health.
+  </p>
+  <p class="legend">
+    <span class="tag sev-crit">CRITICAL</span> can present unjustified promise health
+    <span class="tag sev-high">HIGH</span> measurement fidelity
+    <span class="tag sev-med">MEDIUM</span> drift / consistency
+  </p>
+
+  <div class="finding crit">
+    <h3><span class="tag sev-crit">CRITICAL</span> "Covered" means <em>measured</em>, not <em>passing</em> <span class="id">A-1</span></h3>
+    <p class="kv"><b>Where:</b> <code>build_review_scenario</code> in <code>src/producers/review.rs</code>.</p>
+    <p>
+      <code>coverage_status</code> (<code>covered</code> / <code>thin</code> / <code>missing</code>) is derived purely
+      from <code>!rows.is_empty()</code> via <code>coverage_axis</code> — i.e. whether an artifact row <em>exists</em>.
+      A scenario reads as "covered" even if every benchmark is over budget and every ceiling is breached.
+      <code>budget_misses</code> and <code>ceilings_reached</code> are computed, but they sit <em>beside</em> the
+      headline status rather than feeding it. On a coverage matrix, "covered" will be read as "promise met."
+    </p>
+    <p class="kv"><b>Recommendation:</b> Add a distinct <code>promise_health: pass | at_risk | fail | unmeasured</code> axis
+      that is computed from budget misses, ceilings reached, and input provenance — kept separate from
+      <code>coverage: measured | thin | missing</code>. The matrix should lead with health, not coverage.</p>
+  </div>
+
+  <div class="finding crit">
+    <h3><span class="tag sev-crit">CRITICAL</span> Resources fallback is not flagged synthetic <span class="id">A-2</span></h3>
+    <p class="kv"><b>Where:</b> <code>summarize_resources</code> in <code>src/producers/resources.rs</code>.</p>
+    <p>
+      The fallback branch sets only <code>fallback_reason</code>; unlike the capacity producer it never sets
+      <code>synthetic: true</code>. When the <code>resource_probe</code> binary fails to build, ~210 lines of
+      fabricated allocation / working-set / session-cost numbers flow downstream with <b>no machine-readable
+      synthetic marker</b> for the dashboard to gate on — and (per A-1) they then appear as fully "covered"
+      scenarios in the performance review. This is a one-line inconsistency with real consequences.
+    </p>
+    <p class="kv"><b>Recommendation:</b> Mirror capacity exactly — set <code>meta.synthetic</code> and
+      <code>summary.synthetic</code> in the fallback branch. Add a test asserting it, as capacity already has.</p>
+  </div>
+
+  <div class="finding crit">
+    <h3><span class="tag sev-crit">CRITICAL</span> Capacity fallback fabricates an all-green ceiling <span class="id">A-3</span></h3>
+    <p class="kv"><b>Where:</b> <code>fallback_capacity_events</code> in <code>src/producers/capacity.rs</code>.</p>
+    <p>
+      The synthetic formula <code>elapsed_ns = value.min(10_000) * 1_000</code> caps elapsed time at 10&nbsp;ms,
+      far below every 120–180&nbsp;ms threshold. So <code>ceiling_reached</code> is <code>false</code> for every
+      promise in fallback — a failed probe build yields "all scale promises pass." It is tagged
+      <code>synthetic: true</code> now (good), but nothing forces that flag to override the green status, and
+      a fabricated <em>pass</em> is exactly what the prior review (I-4) warned against.
+    </p>
+    <p class="kv"><b>Recommendation:</b> Emit <code>ceiling_reached: null</code> / <code>failure_mode: "unmeasured"</code>
+      for synthetic capacity rows instead of a fabricated pass, and let A-1's <code>promise_health</code> resolve to
+      <code>unmeasured</code> whenever <code>synthetic</code> is set.</p>
+  </div>
+
+  <div class="finding high">
+    <h3><span class="tag sev-high">HIGH</span> Nothing asserts the sweep reached the promised scale <span class="id">A-4</span></h3>
+    <p class="kv"><b>Where:</b> <code>review.rs</code> — <code>scale_checks</code> is hardcoded <code>[]</code>.</p>
+    <p>
+      <code>scale_checks</code> is an empty literal, so <code>missing_scale_targets</code> always sums to 0, and
+      <code>implementations</code> / <code>implementation_count</code> are always empty/0. The promises are
+      magnitudes ("10,000+ tabs", "GB-class"), yet the natural check — <em>did the workload sweep actually reach
+      the promised number?</em> — is stubbed out. For example <code>file_size_ceiling</code> tops out at exactly
+      1&nbsp;GB; passing at the boundary is not the same as headroom above it, and nothing records that distinction.
+    </p>
+    <p class="kv"><b>Recommendation:</b> Carry a <code>promised_scale</code> on each scenario in the registry and have
+      <code>scale_checks</code> assert <code>max_workload_value &gt;= promised_scale</code>, marking a gap when a sweep
+      stops short of the promise.</p>
+  </div>
+
+  <div class="finding high">
+    <h3><span class="tag sev-high">HIGH</span> Budget compliance is mean-based, but the promise is tail-based <span class="id">A-5</span></h3>
+    <p class="kv"><b>Where:</b> <code>over_threshold</code>, <code>slowspot_signals</code>, <code>search_signals</code>; row construction in <code>slowspots.rs</code> / <code>search.rs</code>.</p>
+    <p>
+      "Sub-100&nbsp;ms visible response" is a tail property, yet the budget checks compare <code>mean_ns</code> to the
+      threshold. Only frame-metrics checks p95/p99. Worse, <code>max_ns</code>/<code>min_ns</code> are <em>fabricated</em>
+      as <code>mean ± 2·std_dev</code> — a Gaussian approximation presented under field names that imply observed
+      extremes. A tail-driven regression with a healthy mean passes silently.
+    </p>
+    <p class="kv"><b>Recommendation:</b> Gate responsiveness promises on a percentile, and either read Criterion's real
+      min/max or rename the derived fields (e.g. <code>approx_p95_ns</code>) so they are not mistaken for measured extremes.</p>
+  </div>
+
+  <div class="finding med">
+    <h3><span class="tag sev-med">MEDIUM</span> Promise list and scenario list have drifted <span class="id">A-6</span></h3>
+    <p class="kv"><b>Where:</b> <code>target_promises</code> vs <code>review_scenarios()</code> in <code>review.rs</code>.</p>
+    <p>
+      The prose says "seven promises"; <code>target_promises</code> lists <b>six</b> strings; <code>review_scenarios()</code>
+      defines <b>seven</b> scenarios — and they do not map 1:1 (no promise string for <em>Large Text Mutation</em> or
+      <em>Session Persistence Restore</em>; "sub-100&nbsp;ms visible response" has no scenario id). This is the I-3 drift
+      trap surfacing at the promise layer itself.
+    </p>
+    <p class="kv"><b>Recommendation:</b> A single <code>Promise → Scenario</code> registry, with the promise string carried on
+      the scenario, so the count and the mapping become a compile-time fact rather than two hand-kept lists.</p>
+  </div>
+
+  <div class="finding med">
+    <h3><span class="tag sev-med">MEDIUM</span> Stale-budget risk from duplicated benchmark metadata <span class="id">A-7</span></h3>
+    <p class="kv"><b>Where:</b> <code>BUILTIN_METADATA</code> (~470 lines) + <code>load_benchmark_metadata</code> in <code>shared.rs</code>.</p>
+    <p>
+      The Rust table still hand-mirrors Scratchpad's bench budgets. <code>load_benchmark_metadata</code> lets the repo
+      JSON override a key when present, so live benches win where they exist — but any benchmark <em>not</em> in the repo
+      JSON is judged against a Rust-side budget that can silently drift from what Scratchpad actually ships, and report
+      "within budget" against a stale number. (This is the prior review's I-7, still open.)
+    </p>
+    <p class="kv"><b>Recommendation:</b> Treat the Scratchpad-shipped JSON as authoritative; keep only minimal defaults in
+      Rust, or generate the builtin table from that JSON at build time.</p>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="nextmoves">4 · Suggested next moves</h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>#</th><th>Move</th><th>Addresses</th><th>Effort</th><th>Why now</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td>Flag the resources fallback <code>synthetic: true</code> (mirror capacity) + test</td><td>A-2, I-4</td><td>XS</td><td>One-line bug; the larger fabricated dataset is currently unprotected</td></tr>
+        <tr><td class="num">2</td><td>Reconcile <code>target_promises</code> with <code>review_scenarios()</code></td><td>A-6, I-3</td><td>S</td><td>Removes a visible count/mapping inconsistency</td></tr>
+        <tr><td class="num">3</td><td>Split <code>coverage_status</code> from a new <code>promise_health</code>; let <code>synthetic</code> force <code>unmeasured</code></td><td>A-1, A-3</td><td>M</td><td>Stops the board claiming promises pass on absent or fabricated data</td></tr>
+        <tr><td class="num">4</td><td>Implement <code>scale_checks</code> against a <code>promised_scale</code> on each scenario</td><td>A-4</td><td>M</td><td>Actually verifies the workload reached the promised magnitude</td></tr>
+        <tr><td class="num">5</td><td>Gate responsiveness on a percentile; rename or source real min/max</td><td>A-5</td><td>M</td><td>Aligns the budget check with the tail-latency promise</td></tr>
+        <tr><td class="num">6</td><td>Typed artifact structs + <code>schemars</code> schema export</td><td>I-1, I-9</td><td>M–L</td><td>The strategic unlock the prior review named; the contract is still informal</td></tr>
+      </tbody>
+    </table>
+    <p class="kv"><b>If you only do two things:</b> moves 1 and 2 are near-free bug fixes. <b>If you want the accuracy win:</b>
+      3 → 4 is the spine — it makes "promise health" mean what a reader assumes it means.</p>
+  </div>
+
+  <p class="footnote">
+    Follow-up review of <code>scratchpad-performance-lens</code> @ <code>master</code> · 2026-06-03 · static read of source plus a
+    full <code>cargo test</code> run (13 passing). No code modified. Severity reflects impact on the trustworthiness of the
+    promise board, not runtime correctness of any single artifact. Cross-references I-1…I-10 point at the prior
+    <a href="performance-lens-review.html">architecture &amp; reuse review</a>.
+  </p>
+</div>
+</body>
+</html>

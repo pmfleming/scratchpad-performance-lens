@@ -1,0 +1,439 @@
+[
+  {
+    "key": "file_load",
+    "targets": [
+      "src/app/services/file_service.rs",
+      "src/app/domain/buffer/document.rs"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 160,
+    "workload_family": "file-load",
+    "limiting_resource_hint": "memory",
+    "description": "Realistic file load path through file service and document creation."
+  },
+  {
+    "key": "file_open_latency",
+    "targets": [
+      "src/app/services/file_service.rs",
+      "src/app/services/file_controller"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 160,
+    "workload_family": "file-load",
+    "limiting_resource_hint": "memory",
+    "description": "File-open latency, including decode and metadata work."
+  },
+  {
+    "key": "scroll_stress_latency",
+    "targets": [
+      "src/app/ui/editor_area",
+      "src/app/ui/editor_content/native_editor"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 16.7,
+    "workload_family": "scroll",
+    "limiting_resource_hint": "cpu",
+    "description": "Repeated visible-window layout and redraw cost while scrolling."
+  },
+  {
+    "key": "ui_render_frame",
+    "targets": [
+      "src/app/ui"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 16.7,
+    "workload_family": "scroll",
+    "limiting_resource_hint": "cpu",
+    "description": "Frame render latency."
+  },
+  {
+    "key": "ui_render_frame_120hz",
+    "targets": [
+      "src/app/app_state/frame.rs",
+      "src/app/ui"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 8.33,
+    "workload_family": "scroll",
+    "limiting_resource_hint": "cpu",
+    "description": "Headless editor frame latency against the 120 Hz frame budget."
+  },
+  {
+    "key": "editor_scroll_frame_120hz",
+    "targets": [
+      "src/app/ui/editor_area",
+      "src/app/ui/scrolling",
+      "src/app/ui/editor_content"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 8.33,
+    "workload_family": "scroll",
+    "limiting_resource_hint": "cpu",
+    "description": "Large-buffer editor frame latency against the 120 Hz frame budget."
+  },
+  {
+    "key": "document_snapshot_creation_latency",
+    "targets": [
+      "src/app/domain/buffer/document.rs"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 40,
+    "workload_family": "snapshot",
+    "limiting_resource_hint": "memory",
+    "description": "Revisioned document snapshot creation latency."
+  },
+  {
+    "key": "viewport_extraction_latency",
+    "targets": [
+      "src/app/domain/view",
+      "src/app/ui/editor_content/native_editor"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 16.7,
+    "workload_family": "viewport",
+    "limiting_resource_hint": "cpu",
+    "description": "Visible-range and overscanned viewport extraction latency."
+  },
+  {
+    "key": "paste_stress_latency",
+    "targets": [
+      "src/app/domain/buffer/document.rs",
+      "src/app/app_state/workspace"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 120,
+    "workload_family": "edit-paste",
+    "limiting_resource_hint": "memory",
+    "description": "Large paste mutation, metadata refresh, and undo-state update latency."
+  },
+  {
+    "key": "split_stress_latency",
+    "targets": [
+      "src/app/domain/tab",
+      "src/app/ui/editor_area"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 80,
+    "workload_family": "split-layout",
+    "limiting_resource_hint": "cpu",
+    "description": "Repeated split, rebalance, close, and tile layout latency."
+  },
+  {
+    "key": "tile_count_scale",
+    "targets": [
+      "src/app/domain/tab",
+      "src/app/ui/editor_area"
+    ],
+    "kind": "scale",
+    "threshold_ms": 80,
+    "workload_family": "split-layout",
+    "limiting_resource_hint": "cpu",
+    "description": "Tile and view-count layout scaling."
+  },
+  {
+    "key": "tab_stress_operations",
+    "targets": [
+      "src/app/domain/tab",
+      "src/app/ui/tab_strip"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 80,
+    "workload_family": "tab-management",
+    "limiting_resource_hint": "cpu",
+    "description": "Tab activation, reorder, and movement latency."
+  },
+  {
+    "key": "tab_count_scale",
+    "targets": [
+      "src/app/domain/tab",
+      "src/app/ui/tab_strip"
+    ],
+    "kind": "scale",
+    "threshold_ms": 140,
+    "workload_family": "tab-management",
+    "limiting_resource_hint": "memory",
+    "description": "Tab-count scaling and live tab-object cost."
+  },
+  {
+    "key": "control_char_load",
+    "targets": [
+      "src/app/services/file_service.rs",
+      "src/app/color_contrast.rs"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 80,
+    "workload_family": "control-char-encoding",
+    "limiting_resource_hint": "cpu",
+    "description": "Load path with control-character and encoding inspection."
+  },
+  {
+    "key": "control_char_visible",
+    "targets": [
+      "src/app/ui/editor_content/native_editor/painting.rs"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 16.7,
+    "workload_family": "control-char-encoding",
+    "limiting_resource_hint": "cpu",
+    "description": "Visible control-character rendering cost."
+  },
+  {
+    "key": "control_char_clean",
+    "targets": [
+      "src/app/ui/editor_content/native_editor/painting.rs"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 16.7,
+    "workload_family": "control-char-encoding",
+    "limiting_resource_hint": "cpu",
+    "description": "Clean text rendering baseline."
+  },
+  {
+    "key": "piece_tree_anchor_remove",
+    "targets": [
+      "src/app/domain/buffer/piece_tree"
+    ],
+    "kind": "micro",
+    "threshold_ms": 10,
+    "workload_family": "anchor-maintenance",
+    "limiting_resource_hint": "cpu",
+    "description": "Piece-tree anchor removal and maintenance cost."
+  },
+  {
+    "key": "buffer_search_regex",
+    "targets": [
+      "src/app/services/search"
+    ],
+    "kind": "micro",
+    "threshold_ms": 50,
+    "workload_family": "search",
+    "limiting_resource_hint": "cpu",
+    "description": "Regex search over a single buffer."
+  },
+  {
+    "key": "search_active_completion_file_size",
+    "targets": [
+      "src/app/services/search",
+      "src/app/app_state/search_state"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 100,
+    "workload_family": "search",
+    "limiting_resource_hint": "cpu",
+    "description": "Active-file search completion while file size grows.",
+    "mode": "active",
+    "latency_kind": "completion",
+    "scaling_axis": "file_size",
+    "parameter_unit": "bytes"
+  },
+  {
+    "key": "search_active_first_response_file_size",
+    "targets": [
+      "src/app/services/search",
+      "src/app/app_state/search_state"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 25,
+    "workload_family": "search",
+    "limiting_resource_hint": "cpu",
+    "description": "Active-file first search response while file size grows.",
+    "mode": "active",
+    "latency_kind": "first_response",
+    "scaling_axis": "file_size",
+    "parameter_unit": "bytes"
+  },
+  {
+    "key": "search_current_completion_file_size",
+    "targets": [
+      "src/app/services/search",
+      "src/app/app_state/search_state"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 100,
+    "workload_family": "search",
+    "limiting_resource_hint": "cpu",
+    "description": "Current-tab search completion while file size grows.",
+    "mode": "current",
+    "latency_kind": "completion",
+    "scaling_axis": "file_size",
+    "parameter_unit": "bytes"
+  },
+  {
+    "key": "search_current_first_response_file_size",
+    "targets": [
+      "src/app/services/search",
+      "src/app/app_state/search_state"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 25,
+    "workload_family": "search",
+    "limiting_resource_hint": "cpu",
+    "description": "Current-tab first search response while file size grows.",
+    "mode": "current",
+    "latency_kind": "first_response",
+    "scaling_axis": "file_size",
+    "parameter_unit": "bytes"
+  },
+  {
+    "key": "search_all_completion_file_size",
+    "targets": [
+      "src/app/services/search",
+      "src/app/domain/tab"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 140,
+    "workload_family": "search",
+    "limiting_resource_hint": "cpu",
+    "description": "All-open-tabs search completion while file size grows.",
+    "mode": "all",
+    "latency_kind": "completion",
+    "scaling_axis": "file_size",
+    "parameter_unit": "bytes"
+  },
+  {
+    "key": "search_all_first_response_file_size",
+    "targets": [
+      "src/app/services/search",
+      "src/app/domain/tab"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 35,
+    "workload_family": "search",
+    "limiting_resource_hint": "cpu",
+    "description": "All-open-tabs first search response while file size grows.",
+    "mode": "all",
+    "latency_kind": "first_response",
+    "scaling_axis": "file_size",
+    "parameter_unit": "bytes"
+  },
+  {
+    "key": "search_current_completion_aggregate_size",
+    "targets": [
+      "src/app/services/search",
+      "src/app/app_state/search_state"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 140,
+    "workload_family": "search",
+    "limiting_resource_hint": "cpu",
+    "description": "Current-tab search completion while file count and corpus size grow.",
+    "mode": "current",
+    "latency_kind": "completion",
+    "scaling_axis": "aggregate_size",
+    "parameter_unit": "files",
+    "bytes_per_item": 65536
+  },
+  {
+    "key": "search_current_first_response_aggregate_size",
+    "targets": [
+      "src/app/services/search",
+      "src/app/app_state/search_state"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 35,
+    "workload_family": "search",
+    "limiting_resource_hint": "cpu",
+    "description": "Current-tab first search response while file count and corpus size grow.",
+    "mode": "current",
+    "latency_kind": "first_response",
+    "scaling_axis": "aggregate_size",
+    "parameter_unit": "files",
+    "bytes_per_item": 65536
+  },
+  {
+    "key": "search_current_app_state_completion_aggregate_size",
+    "targets": [
+      "src/app/services/search",
+      "src/app/app_state/search_state"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 140,
+    "workload_family": "search",
+    "limiting_resource_hint": "cpu",
+    "description": "Current app-state search completion while corpus size grows.",
+    "mode": "current",
+    "latency_kind": "completion",
+    "scaling_axis": "aggregate_size",
+    "parameter_unit": "files",
+    "bytes_per_item": 65536
+  },
+  {
+    "key": "search_all_completion_aggregate_size",
+    "targets": [
+      "src/app/services/search",
+      "src/app/domain/tab"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 180,
+    "workload_family": "search",
+    "limiting_resource_hint": "cpu",
+    "description": "All-tabs search completion while file count and corpus size grow.",
+    "mode": "all",
+    "latency_kind": "completion",
+    "scaling_axis": "aggregate_size",
+    "parameter_unit": "files",
+    "bytes_per_item": 65536
+  },
+  {
+    "key": "search_all_first_response_aggregate_size",
+    "targets": [
+      "src/app/services/search",
+      "src/app/domain/tab"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 45,
+    "workload_family": "search",
+    "limiting_resource_hint": "cpu",
+    "description": "All-tabs first search response while file count and corpus size grow.",
+    "mode": "all",
+    "latency_kind": "first_response",
+    "scaling_axis": "aggregate_size",
+    "parameter_unit": "files",
+    "bytes_per_item": 65536
+  },
+  {
+    "key": "search_current_dispatch_aggregate_size",
+    "targets": [
+      "src/app/app_state/search_state",
+      "src/app/services/search"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 50,
+    "workload_family": "search-dispatch",
+    "limiting_resource_hint": "cpu",
+    "description": "Current-scope search dispatch and target collection overhead.",
+    "mode": "current",
+    "latency_kind": "dispatch",
+    "scaling_axis": "aggregate_size",
+    "parameter_unit": "files",
+    "bytes_per_item": 65536
+  },
+  {
+    "key": "search_all_dispatch_aggregate_size",
+    "targets": [
+      "src/app/app_state/search_state",
+      "src/app/domain/tab"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 50,
+    "workload_family": "search-dispatch",
+    "limiting_resource_hint": "cpu",
+    "description": "All-tabs search dispatch and target collection overhead.",
+    "mode": "all",
+    "latency_kind": "dispatch",
+    "scaling_axis": "aggregate_size",
+    "parameter_unit": "files",
+    "bytes_per_item": 65536
+  },
+  {
+    "key": "search_capacity",
+    "targets": [
+      "src/app/services/search"
+    ],
+    "kind": "capacity",
+    "threshold_ms": 140,
+    "workload_family": "search",
+    "limiting_resource_hint": "cpu",
+    "description": "Standalone search capacity sweep over very large text."
+  }
+]

@@ -1,0 +1,21 @@
+mod capacity;
+mod common;
+mod flamegraphs;
+mod frame_metrics;
+mod project_code;
+mod render;
+mod resources;
+mod review;
+mod search;
+mod slowspots;
+mod speed_report;
+
+pub use capacity::capacity_report;
+pub use flamegraphs::flamegraphs;
+pub use frame_metrics::frame_metrics;
+pub use project_code::project_code_metrics;
+pub use resources::resource_profiles;
+pub use review::performance_review;
+pub use search::search_speed;
+pub use slowspots::slowspots;
+pub use speed_report::speed_efficiency_report;

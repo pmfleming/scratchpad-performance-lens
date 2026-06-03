@@ -1,0 +1,31 @@
+[package]
+name = "scratchpad-performance-lens"
+version = "0.1.0"
+edition = "2021"
+description = "Scratchpad-specific measurement JSON producers for overview, telemetry, and performance tabs."
+license = "MIT"
+
+[lib]
+name = "scratchpad_performance_lens"
+path = "src/lib.rs"
+
+[[bin]]
+name = "splens"
+path = "src/bin/splens.rs"
+
+[[bin]]
+name = "scratchpad-performance-lens"
+path = "src/bin/scratchpad-performance-lens.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+regex = "1.10"
+schemars = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+walkdir = "2.5"
+
+[dev-dependencies]
+tempfile = "3.10"

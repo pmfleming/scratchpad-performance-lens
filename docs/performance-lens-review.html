@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>scratchpad-performance-lens — Architecture &amp; Reuse Review</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #161b22;
+    --panel-2: #1c232c;
+    --ink: #e6edf3;
+    --muted: #9aa7b4;
+    --line: #2a323c;
+    --accent: #4c9aff;
+    --accent-2: #7ee787;
+    --warn: #f0b429;
+    --crit: #ff7b72;
+    --ok: #56d364;
+    --chip: #21303f;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); line-height: 1.6; font-size: 16px;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 28px 96px; }
+  header.hero {
+    padding: 56px 28px 40px; border-bottom: 1px solid var(--line);
+    background: radial-gradient(1200px 400px at 20% -10%, #1b2a3a 0%, transparent 60%), var(--bg);
+  }
+  header.hero .inner { max-width: 1040px; margin: 0 auto; }
+  .eyebrow { color: var(--accent); font-family: var(--mono); font-size: 13px; letter-spacing: .12em; text-transform: uppercase; }
+  h1 { font-size: 34px; margin: 8px 0 6px; line-height: 1.2; }
+  .sub { color: var(--muted); font-size: 17px; max-width: 760px; }
+  .meta-row { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 10px; }
+  .pill { font-family: var(--mono); font-size: 12px; background: var(--chip); color: var(--ink);
+    border: 1px solid var(--line); padding: 5px 10px; border-radius: 999px; }
+  h2 { font-size: 24px; margin: 52px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  h3 { font-size: 18px; margin: 30px 0 8px; }
+  h4 { font-size: 15px; margin: 18px 0 6px; color: var(--accent-2); font-family: var(--mono); }
+  p { margin: 10px 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { font-family: var(--mono); font-size: .88em; background: var(--panel-2); padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line); }
+  pre { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.55; }
+  ul, ol { margin: 10px 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px 24px; margin-top: 30px; }
+  .toc h2 { border: 0; margin: 0 0 10px; font-size: 16px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .toc ol { columns: 2; column-gap: 36px; }
+  @media (max-width: 720px) { .toc ol { columns: 1; } h1 { font-size: 27px; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 4px 22px 18px; margin: 18px 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  .stat { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .stat .n { font-size: 26px; font-weight: 700; font-family: var(--mono); }
+  .stat .l { color: var(--muted); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  tbody tr:hover { background: var(--panel-2); }
+  .tag { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); }
+  .sev-crit { color: var(--crit); border-color: #5a2a2a; background: #2a1718; }
+  .sev-high { color: var(--warn); border-color: #5a4a1f; background: #2a2410; }
+  .sev-med  { color: var(--accent); border-color: #28435f; background: #14222f; }
+  .sev-low  { color: var(--muted); }
+  .badge-reuse { color: var(--accent-2); border-color: #2c5234; background: #16271a; }
+  .badge-keep  { color: var(--warn); border-color: #5a4a1f; background: #2a2410; }
+  .finding { border-left: 3px solid var(--line); padding: 2px 0 2px 18px; margin: 22px 0; }
+  .finding.crit { border-color: var(--crit); }
+  .finding.high { border-color: var(--warn); }
+  .finding.med  { border-color: var(--accent); }
+  .finding h3 { margin-top: 4px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .finding .id { font-family: var(--mono); color: var(--muted); font-size: 13px; }
+  .kv { color: var(--muted); font-size: 14px; margin: 4px 0; }
+  .kv b { color: var(--ink); font-weight: 600; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+  .footnote { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); margin-top: 60px; padding-top: 18px; }
+  .arrow { color: var(--accent-2); font-family: var(--mono); }
+  .columns { display:grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 720px){ .columns{ grid-template-columns:1fr; } }
+  .quote { color: var(--muted); font-style: italic; border-left: 3px solid var(--accent); padding-left: 14px; margin: 14px 0; }
+  .filemap { font-family: var(--mono); font-size: 13px; }
+  .filemap td:first-child { color: var(--accent); white-space: nowrap; }
+  .num { font-family: var(--mono); }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="inner">
+    <div class="eyebrow">Engineering Review</div>
+    <h1>scratchpad-performance-lens</h1>
+    <div class="sub">An architecture and reuse review of the Rust performance-measurement lens: what is solid, where it can be tightened, and which pieces are ready to graduate into shared, multi-project components.</div>
+    <div class="meta-row">
+      <span class="pill">Reviewed 2026-06-03</span>
+      <span class="pill">Rust • clap • serde_json</span>
+      <span class="pill">~3,150 LOC across 7 source files</span>
+      <span class="pill">branch: master</span>
+      <span class="pill">Scope: review only — no code changed</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#summary">Executive summary</a></li>
+      <li><a href="#what">What the tool is</a></li>
+      <li><a href="#map">Code map</a></li>
+      <li><a href="#strengths">What works well</a></li>
+      <li><a href="#improve">Improvement opportunities</a></li>
+      <li><a href="#reuse">Path to reusable components</a></li>
+      <li><a href="#target">Proposed target architecture</a></li>
+      <li><a href="#roadmap">Sequenced roadmap</a></li>
+      <li><a href="#appendix">Appendix: file notes</a></li>
+    </ol>
+  </nav>
+
+  <!-- ============================================================ -->
+  <h2 id="summary">1 · Executive summary</h2>
+  <p>
+    <code>scratchpad-performance-lens</code> is a focused, well-scoped Rust CLI that runs benchmarks
+    and probes against a configured <em>Scratchpad</em> editor checkout and emits JSON artifacts for a
+    dashboard owned by a sibling repo. The boundary between this lens (producer logic), the dashboard
+    (<code>project-management-board</code>), and the app under test (<code>scratchpad</code>) is clearly
+    documented and genuinely respected — that discipline is the project's strongest asset.
+  </p>
+  <p>
+    The codebase is healthy in intent but <b>structurally lopsided</b>: nearly all logic for nine
+    different producers lives in a single 2,648-line file, and the entire data pipeline is built on
+    untyped <code>serde_json::Value</code> blobs accessed by string keys. Both choices work today but
+    cap maintainability and — more importantly for the second half of this review — block reuse. The
+    same project already has a sibling (<code>rust-quality-lens</code>) and an explicit ambition to share
+    infrastructure; roughly <b>half of the current code is project-agnostic engine</b> that could power
+    both lenses if it were typed and extracted.
+  </p>
+  <div class="grid">
+    <div class="stat"><div class="n">9</div><div class="l">producers in one <code>producers.rs</code> file (2,648 lines)</div></div>
+    <div class="stat"><div class="n">~50%</div><div class="l">of code is generic engine, not Scratchpad policy</div></div>
+    <div class="stat"><div class="n">0</div><div class="l">unit tests on scoring / classification / triage logic</div></div>
+    <div class="stat"><div class="n">4+</div><div class="l">places the scenario taxonomy is independently restated</div></div>
+  </div>
+  <p style="margin-top:18px">
+    <b>Headline recommendation:</b> introduce typed artifact structs (serde) as the contract, then carve
+    a <code>lens-core</code> crate out of the generic engine (config, artifact IO, Criterion ingestion,
+    stat primitives, probe runner, flamegraph engine, git LOC metrics). Leave this repo as a thin layer of
+    Scratchpad-specific <em>taxonomy and probes</em>. That single move pays down most of the maintainability
+    debt and unlocks reuse across <code>rust-quality-lens</code> and any future lens.
+  </p>
+
+  <!-- ============================================================ -->
+  <h2 id="what">2 · What the tool is</h2>
+  <p>
+    A Rust binary (exposed as both <code>splens</code> and <code>scratchpad-performance-lens</code>) with three commands:
+  </p>
+  <ul>
+    <li><code>catalog</code> — emits a JSON task manifest describing the producers and their output artifacts.</li>
+    <li><code>telemetry</code> — inspects the live Scratchpad session directory and emits a session/app-package payload.</li>
+    <li><code>measure &lt;tool|all&gt;</code> — runs one or all of nine producers, each writing a JSON artifact into the configured <code>output_dir</code>.</li>
+  </ul>
+  <p>The nine <code>measure</code> producers:</p>
+  <div class="card">
+    <table>
+      <thead><tr><th>Producer</th><th>Artifact</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>slowspots</code></td><td>slowspots.json</td><td>Runs Criterion benches, ranks latency hotspots with stability/score signals.</td></tr>
+        <tr><td><code>frame-metrics</code></td><td>frame_metrics.json</td><td>Builds and runs a release probe binary; captures frame p95/p99 vs budget.</td></tr>
+        <tr><td><code>search</code></td><td>search_speed.json</td><td>Focused search-benchmark view with throughput and scaling axes.</td></tr>
+        <tr><td><code>capacity</code></td><td>capacity_report.json</td><td>Ceiling sweeps; finds first "unusable" workload per promise.</td></tr>
+        <tr><td><code>resources</code></td><td>resource_profiles.json</td><td>Allocation / working-set / session-cost scenarios.</td></tr>
+        <tr><td><code>flamegraphs</code></td><td>flamegraphs.json</td><td>Drives <code>cargo flamegraph</code> and indexes resulting SVGs.</td></tr>
+        <tr><td><code>speed-report</code></td><td>speed_efficiency_report.json</td><td>Joins the above into a triage + sectioned report.</td></tr>
+        <tr><td><code>performance-review</code></td><td>performance_review.json</td><td>Scenario-first coverage matrix against the "seven promises."</td></tr>
+        <tr><td><code>project-code</code></td><td>project_code_metrics.json</td><td>Git first-parent LOC history (application / test / other).</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    Configuration is a three-field TOML (<code>project_name</code>, <code>project_root</code>, <code>output_dir</code>).
+    Two producers (<code>capacity</code>, <code>resources</code>) fall back to large synthesized datasets when their
+    probe binaries fail to build or run, marking the output <code>probe_status: "fallback_completed"</code>.
+  </p>
+
+  <!-- ============================================================ -->
+  <h2 id="map">3 · Code map</h2>
+  <div class="card">
+    <table class="filemap">
+      <thead><tr><th>File</th><th>Lines</th><th>Role</th></tr></thead>
+      <tbody>
+        <tr><td>src/producers.rs</td><td class="num">2,648</td><td>All nine producers + rendering + git metrics + fallbacks + review model</td></tr>
+        <tr><td>src/shared.rs</td><td class="num">778</td><td>Builtin benchmark metadata, flamegraph configs, Criterion + IO helpers, stats</td></tr>
+        <tr><td>src/app_package.rs</td><td class="num">322</td><td>Telemetry: live session manifest / NDJSON diagnostics parsing</td></tr>
+        <tr><td>src/cli.rs</td><td class="num">213</td><td>clap definitions, command dispatch, catalog</td></tr>
+        <tr><td>src/config.rs</td><td class="num">64</td><td>TOML config loading / path resolution</td></tr>
+        <tr><td>src/bin/*.rs</td><td class="num">3 + 3</td><td>Two identical 3-line entrypoints</td></tr>
+        <tr><td>tests/cli.rs</td><td class="num">76</td><td>CLI contract integration tests (catalog / telemetry / project-code)</td></tr>
+      </tbody>
+    </table>
+    <p class="kv">The distribution itself tells the story: <b>84%</b> of source lines sit in two files, and the producer file alone is larger than everything else combined.</p>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="strengths">4 · What works well</h2>
+  <div class="columns">
+    <div>
+      <h4>Clear ownership boundary</h4>
+      <p>The README and extraction notes carve an unambiguous line: this repo owns producers, <code>project-management-board</code> owns the dashboard, <code>scratchpad</code> owns probes/benches. Boundaries this explicit are rare and valuable.</p>
+      <h4>Honest fallback signalling</h4>
+      <p>Synthetic fallbacks are tagged (<code>probe_status: fallback_completed</code>, per-row <code>note: "measurement-layer fallback workload"</code>, <code>fallback_reason</code>). The intent to not silently pass off fabricated numbers is good.</p>
+      <h4>Thoughtful measurement model</h4>
+      <p>The separation of <em>ceiling/promise-health</em> vs <em>targeted-path</em> vs <em>diagnostic-profile</em> probe classes is a genuinely good conceptual frame, and the "seven promises" scenario matrix gives the data a narrative spine.</p>
+    </div>
+    <div>
+      <h4>Defensive IO</h4>
+      <p>Helpers like <code>read_json</code>, <code>load_json_file</code>, and <code>load_ndjson_file</code> degrade gracefully and accumulate warnings rather than crashing — appropriate for a tool pointed at messy live state.</p>
+      <h4>Small, correct config surface</h4>
+      <p><code>LensConfig</code> is minimal and sensible: relative <code>output_dir</code> resolves under <code>project_root</code>, project name defaults from the directory.</p>
+      <h4>Pure, testable kernels exist</h4>
+      <p>Much of the scoring/classification logic is already written as pure functions (<code>latency_score</code>, <code>stability_label</code>, <code>infer_limiting_resource</code>, <code>classify_path</code>). They are <em>shaped</em> for testing even if not yet tested.</p>
+      <h4>The two NDJSON edge-case tests</h4>
+      <p>The only unit tests present (concatenated objects, trailing garbage) target exactly the kind of real-world malformed input that bites parsers. Good instinct — just under-applied.</p>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="improve">5 · Improvement opportunities</h2>
+  <p class="legend">
+    <span class="tag sev-crit">CRITICAL</span> structural / blocks reuse
+    <span class="tag sev-high">HIGH</span> correctness or maintainability risk
+    <span class="tag sev-med">MEDIUM</span> worthwhile cleanup
+    <span class="tag sev-low">LOW</span> polish
+  </p>
+
+  <div class="finding crit">
+    <h3><span class="tag sev-crit">CRITICAL</span> Untyped <code>serde_json::Value</code> is the whole pipeline <span class="id">I-1</span></h3>
+    <p class="kv"><b>Where:</b> <code>producers.rs</code> and <code>shared.rs</code>, pervasive.</p>
+    <p>
+      Every artifact is assembled with <code>json!({...})</code> and later read back with chains like
+      <code>row.get("mean_ns").and_then(Value::as_f64).unwrap_or(0.0)</code>. This pattern appears
+      <b>hundreds of times</b>. The dashboard JSON shape is effectively a public API, yet it is defined
+      only implicitly and enforced nowhere. Consequences:
+    </p>
+    <ul>
+      <li>A mistyped key (<code>"mean_n"</code>) silently yields a default — no compile error, no panic, just wrong data.</li>
+      <li>Producers and their <code>render_*</code> functions independently "know" the same shape; the report producers (<code>speed-report</code>, <code>performance-review</code>) re-parse upstream artifacts by string key, so a field rename must be chased across files by hand.</li>
+      <li>No reusable engine can be built on top of ad-hoc <code>Value</code> shapes — typing is the prerequisite for everything in <a href="#reuse">§6</a>.</li>
+    </ul>
+    <p class="kv"><b>Recommendation:</b> Define <code>#[derive(Serialize, Deserialize)]</code> structs per artifact (<code>Slowspot</code>, <code>SearchRow</code>, <code>CapacityScenario</code>, <code>ReviewScenario</code>, …). Build and read those, serialize at the edge. Optionally derive <a href="https://docs.rs/schemars">JSON Schema</a> and hand it to the TypeScript dashboard so the cross-language contract is generated, not transcribed.</p>
+  </div>
+
+  <div class="finding crit">
+    <h3><span class="tag sev-crit">CRITICAL</span> A 2,648-line producer monolith <span class="id">I-2</span></h3>
+    <p class="kv"><b>Where:</b> <code>src/producers.rs</code>.</p>
+    <p>
+      Nine producers, all their CLI renderers, the git LOC-metrics engine, the capacity/resource fallback
+      datasets, the review-scenario model, and dozens of private helpers share one file. Navigation is
+      hard, ownership is unclear, and unrelated changes collide. Notably, the predecessor Python layout
+      had one module per tool (<code>tools/capacity_report.py</code>, <code>tools/frame_metrics.py</code>, …) —
+      the Rust port <em>collapsed</em> that structure rather than preserving it.
+    </p>
+    <p class="kv"><b>Recommendation:</b> Split into a <code>producers/</code> module — one file per producer plus a small shared <code>render</code> and <code>fallback</code> module. This is mechanical and low-risk, and it is the natural seam along which the reusable engine (<a href="#reuse">§6</a>) later separates.</p>
+  </div>
+
+  <div class="finding high">
+    <h3><span class="tag sev-high">HIGH</span> The scenario taxonomy is restated in 4+ places <span class="id">I-3</span></h3>
+    <p class="kv"><b>Where:</b> <code>BUILTIN_METADATA</code>, <code>FLAMEGRAPH_CONFIGS</code> (shared.rs); <code>capacity_config</code>, <code>fallback_capacity_events</code>, <code>fallback_resource_events</code>, <code>review_scenarios</code>, <code>measurement_gap_scenarios</code>, and inline <code>editor_families</code>/tab lists (producers.rs).</p>
+    <p>
+      The same scenario identifiers and workload families (<code>"tab_count_ceiling"</code>, <code>"search"</code>,
+      <code>"file-load"</code>, …) are independently hand-written across many tables. A capacity scenario, its
+      threshold, its profile mapping, its fallback values, and its membership in a review scenario all live in
+      separate literals that must be kept in lockstep manually. This is a classic drift trap — adding or
+      renaming one scenario means editing five tables and hoping none were missed.
+    </p>
+    <p class="kv"><b>Recommendation:</b> One source-of-truth registry: a typed <code>Scenario</code> table that carries id, family, threshold, profile ids, gap description, and fallback shape. Every producer reads <em>from</em> it. Drift becomes a compile error rather than a silent mismatch.</p>
+  </div>
+
+  <div class="finding high">
+    <h3><span class="tag sev-high">HIGH</span> Large hand-written synthetic datasets can be mistaken for real data <span class="id">I-4</span></h3>
+    <p class="kv"><b>Where:</b> <code>fallback_capacity_events</code> (~95 lines), <code>fallback_resource_events</code> (~210 lines).</p>
+    <p>
+      When a probe fails to build, these produce dozens of fabricated-but-plausible measurements with formulas
+      like <code>elapsed_ns = value.min(50_000) * 1_000</code> and <code>allocated = value * 1536</code>. The
+      tagging (I-credit it in <a href="#strengths">§4</a>) is good, but the <em>volume</em> of fabricated data is
+      high and its shape is identical to real output. On a dashboard, a green "fallback_completed" run can read
+      as a successful measurement.
+    </p>
+    <p class="kv"><b>Recommendation:</b> Keep fallbacks but (a) derive their scenario list from the single registry in I-3 rather than re-listing it, (b) make the synthetic provenance impossible to miss downstream (e.g. a top-level <code>synthetic: true</code> the dashboard must surface), and consider whether an empty/"unmeasured" state is more honest than fabricated numbers for some panels.</p>
+  </div>
+
+  <div class="finding high">
+    <h3><span class="tag sev-high">HIGH</span> <code>rust_test_line_mask</code> is a brittle hand-rolled parser <span class="id">I-5</span></h3>
+    <p class="kv"><b>Where:</b> <code>producers.rs</code> (project-code metrics).</p>
+    <p>
+      Test-vs-application line classification works by counting raw <code>{</code>/<code>}</code> characters to track
+      <code>#[cfg(test)]</code> scope. Braces inside string literals, char literals, or comments will desynchronize
+      the stack and miscount lines. It is also completely untested despite being pure and deterministic — an ideal
+      unit-test target.
+    </p>
+    <p class="kv"><b>Recommendation:</b> At minimum, add table-driven unit tests (nested modules, braces in strings, <code>cfg_attr</code>). Better: when this graduates into the shared engine (<a href="#reuse">§6E</a>), back it with a real lexer pass (e.g. token-aware brace counting) so the metric is trustworthy across projects.</p>
+  </div>
+
+  <div class="finding med">
+    <h3><span class="tag sev-med">MEDIUM</span> Policy magic-numbers are scattered as inline literals <span class="id">I-6</span></h3>
+    <p class="kv"><b>Where:</b> stability thresholds <code>0.1</code>/<code>0.2</code>, score formulas, <code>family_priority</code> weights, <code>capacity_config</code> thresholds, fallback multipliers (<code>1.25</code>, <code>4096</code>, <code>1536</code>, <code>/3</code>, <code>/2</code>).</p>
+    <p>These literals encode Scratchpad's performance <em>policy</em> (what counts as "unstable," how families are prioritized) but are buried mid-expression with no names or rationale. They are exactly the values a reviewer or future maintainer will want to tune.</p>
+    <p class="kv"><b>Recommendation:</b> Promote to named <code>const</code>s grouped in one policy module, each with a one-line comment on its meaning. When the engine is extracted, these constants become the per-project configuration surface.</p>
+  </div>
+
+  <div class="finding med">
+    <h3><span class="tag sev-med">MEDIUM</span> Builtin benchmark metadata duplicates the Scratchpad repo's own tables <span class="id">I-7</span></h3>
+    <p class="kv"><b>Where:</b> <code>BUILTIN_METADATA</code> — ~470 lines of static benchmark descriptors in <code>shared.rs</code>.</p>
+    <p>
+      This table mirrors data that also lives in Scratchpad's <code>benches/benchmark_targets.json</code> /
+      <code>search_benchmark_targets.json</code> (which <code>load_benchmark_metadata</code> already merges in).
+      Maintaining a second copy in Rust risks the lens and the benches drifting apart — the lens could describe
+      a benchmark that no longer exists, or miss one that does.
+    </p>
+    <p class="kv"><b>Recommendation:</b> Treat the Scratchpad-shipped JSON as authoritative and keep only minimal defaults in Rust, or generate the builtin table from that JSON at build time. The lens should follow the benches, not re-declare them.</p>
+  </div>
+
+  <div class="finding med">
+    <h3><span class="tag sev-med">MEDIUM</span> Almost no tests on the logic that matters <span class="id">I-8</span></h3>
+    <p class="kv"><b>Where:</b> only <code>app_package</code> NDJSON parsing + a thin CLI contract test are covered.</p>
+    <p>
+      The scoring, classification, ranking, and triage functions — the actual judgment the tool encodes — are
+      pure and untested: <code>latency_score</code>, <code>stability_label</code>, <code>infer_limiting_resource</code>,
+      <code>family_priority</code>, <code>over_threshold</code>, <code>throughput_mb_s</code>, <code>classify_path</code>,
+      <code>rust_test_line_mask</code>. A refactor (especially the typed-struct migration in I-1) has no safety net.
+    </p>
+    <p class="kv"><b>Recommendation:</b> Add focused unit tests for these kernels <em>before</em> refactoring. They double as executable documentation of the scoring policy.</p>
+  </div>
+
+  <div class="finding med">
+    <h3><span class="tag sev-med">MEDIUM</span> Rendering is coupled to producers and re-parses its own output <span class="id">I-9</span></h3>
+    <p class="kv"><b>Where:</b> the nine <code>render_*</code> functions in <code>producers.rs</code>.</p>
+    <p>Each producer builds a <code>Value</code>, then a <code>render_*</code> function reads that same <code>Value</code> back by string key to print a CLI summary — a second, parallel place that hard-codes the schema. With typed artifacts (I-1) this collapses into an <code>impl Display</code> (or a small <code>Render</code> trait) on the struct, eliminating the re-parse and the duplicate key knowledge.</p>
+  </div>
+
+  <div class="finding"><h3><span class="tag sev-low">LOW</span> Smaller items <span class="id">I-10</span></h3>
+    <ul>
+      <li><b>Two byte-identical binaries.</b> <code>splens.rs</code> and <code>scratchpad-performance-lens.rs</code> are the same 3 lines. Harmless (Cargo needs separate files for separate bin names), but a comment noting they are intentional aliases would prevent "fix the duplicate" churn.</li>
+      <li><b><code>absolutize_from</code> swallows canonicalize errors</b> via <code>.unwrap_or(joined)</code> — a non-existent <code>project_root</code> silently proceeds with an un-normalized path. A clear error would be friendlier.</li>
+      <li><b>Inconsistent failure policy across producers.</b> Some <code>bail!</code> (frame-metrics), some fall back to synthetic data (capacity/resources), some skip silently. Documenting the intended contract per producer would help consumers reason about partial runs.</li>
+      <li><b><code>load_ndjson_file</code> has a dead tail branch</b> (<code>if !parsed_any &amp;&amp; line.trim().is_empty()</code> after an early <code>continue</code> on empty lines) — minor, worth pruning during the split.</li>
+    </ul>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="reuse">6 · Path to reusable components</h2>
+  <p>
+    The repo already lives in an ecosystem: it explicitly defines itself against a sibling
+    <code>rust-quality-lens</code> and is consumed by <code>project-management-board</code>. The natural next
+    step is a shared <b><code>lens-core</code></b> crate that both lenses depend on. The dividing principle is clean:
+  </p>
+  <div class="quote">Extract the <b>engine</b> (how to measure, ingest, score, and write artifacts). Keep the <b>policy</b> (which Scratchpad scenarios exist, what their budgets are, the seven promises) here.</div>
+  <p>Going component by component, here is what is ready to graduate and what should stay:</p>
+
+  <div class="card">
+    <table>
+      <thead><tr><th>Component (current location)</th><th>Verdict</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>6A · Lens skeleton</b><br><code>LensConfig</code>, <code>write_visibility</code>, <code>read_json</code>, <code>catalog</code>, <code>measure</code> dispatch, <code>run_command</code></td>
+          <td><span class="tag badge-reuse">EXTRACT</span></td>
+          <td>Nothing here is Scratchpad-specific. It is a generic "run producers against a project root, write JSON to output_dir, emit a catalog" framework — exactly what every lens needs.</td>
+        </tr>
+        <tr>
+          <td><b>6B · Criterion ingestion</b><br><code>criterion_estimate_paths</code>, <code>benchmark_name_from_estimate_path</code>, <code>benchmark_key</code>, estimate readers</td>
+          <td><span class="tag badge-reuse">EXTRACT</span></td>
+          <td>Pure Criterion plumbing. Works for any Rust project with Criterion benches; zero domain knowledge.</td>
+        </tr>
+        <tr>
+          <td><b>6C · Stat / format primitives</b><br><code>variance_ratio</code>, <code>stability_label</code>, <code>latency_score</code>, <code>throughput_mb_s</code>, <code>ns_per_kb</code>, <code>human_bytes</code>, <code>safe_delta</code></td>
+          <td><span class="tag badge-reuse">EXTRACT</span></td>
+          <td>Generic performance math and formatting. The <em>thresholds</em> become parameters (see I-6); the formulas are universal.</td>
+        </tr>
+        <tr>
+          <td><b>6D · Probe runner</b><br><code>run_probe_object</code>, <code>run_probe_events</code> (build a release bin, run it, parse JSON / NDJSON)</td>
+          <td><span class="tag badge-reuse">EXTRACT</span></td>
+          <td>A reusable "build-and-run a probe binary, collect JSON events" harness. Only the probe names are project-specific.</td>
+        </tr>
+        <tr>
+          <td><b>6E · Git code metrics</b><br>entire <code>project-code</code> producer: first-parent history, LOC counting, <code>classify_path</code>, <code>rust_test_line_mask</code></td>
+          <td><span class="tag badge-reuse">EXTRACT</span></td>
+          <td>Completely project-agnostic — runs on any git + Rust repo. Almost certainly overlaps logic <code>rust-quality-lens</code> wants too; a prime candidate for the shared crate (fix I-5 in the process).</td>
+        </tr>
+        <tr>
+          <td><b>6F · Flamegraph engine</b><br>the <code>cargo flamegraph</code> driver + SVG indexing in <code>flamegraphs()</code></td>
+          <td><span class="tag badge-reuse">SPLIT</span></td>
+          <td>The driving/indexing engine is generic; only <code>FLAMEGRAPH_CONFIGS</code> (the table) is Scratchpad policy. Separate engine from config.</td>
+        </tr>
+        <tr>
+          <td><b>6G · JSON/NDJSON loaders</b><br><code>load_json_file</code>, <code>load_ndjson_file</code> (with warning accumulation)</td>
+          <td><span class="tag badge-reuse">EXTRACT</span></td>
+          <td>Generic robust loaders; the two existing tests move with them.</td>
+        </tr>
+        <tr>
+          <td><b>Benchmark metadata, flamegraph configs, capacity config, review scenarios, fallbacks</b></td>
+          <td><span class="tag badge-keep">KEEP</span></td>
+          <td>This <em>is</em> the Scratchpad lens — the taxonomy, budgets, and seven promises. It stays here as the project's configuration of the shared engine.</td>
+        </tr>
+        <tr>
+          <td><b><code>app_package</code> telemetry</b></td>
+          <td><span class="tag badge-keep">KEEP</span></td>
+          <td>Parses Scratchpad's specific session manifest / temp-buffer layout. Domain-specific — stays. (Though the loaders inside it, 6G, are extractable.)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    <b>The enabling prerequisite is I-1 (typed artifacts).</b> A shared engine cannot operate on ad-hoc
+    <code>Value</code> shapes; it needs a small contract such as:
+  </p>
+<pre>// in lens-core
+pub trait Producer {
+    fn id(&amp;self) -&gt; &amp;str;
+    fn artifact_name(&amp;self) -&gt; &amp;str;
+    fn run(&amp;self, ctx: &amp;LensContext) -&gt; anyhow::Result&lt;Artifact&gt;;
+}
+
+pub trait Render { fn render_cli(&amp;self) -&gt; String; }
+
+// engine owns: config, catalog, dispatch, criterion ingestion,
+// probe runner, flamegraph driver, git metrics, artifact IO.
+
+// scratchpad-performance-lens owns: the Scenario registry, budgets,
+// the seven-promise review model, app_package, and `impl Producer`
+// for each Scratchpad producer.</pre>
+
+  <!-- ============================================================ -->
+  <h2 id="target">7 · Proposed target architecture</h2>
+  <div class="card">
+<pre>┌─────────────────────────────┐
+│        lens-core            │  reusable across all lenses
+│  • LensConfig + catalog      │
+│  • Producer / Render traits  │
+│  • Criterion ingestion (6B)  │
+│  • stat + format prims (6C)  │
+│  • probe runner (6D)         │
+│  • git code metrics (6E)     │
+│  • flamegraph engine (6F)    │
+│  • json/ndjson loaders (6G)  │
+│  • artifact IO (write_*)     │
+└──────────────┬──────────────┘
+               │ depends on
+   ┌───────────┴───────────────────────────┐
+   │                                        │
+┌──┴───────────────────────┐   ┌────────────┴───────────────┐
+│ scratchpad-performance-  │   │     rust-quality-lens       │
+│ lens (this repo)          │   │  (sibling, same pattern)    │
+│  • Scenario registry      │   │  • its own taxonomy         │
+│  • budgets / 7 promises    │   │                             │
+│  • flamegraph config table │   │                             │
+│  • app_package telemetry   │   │                             │
+│  • impl Producer × 9       │   │                             │
+└────────────────────────────┘   └─────────────────────────────┘
+               │ JSON artifacts (typed, schema-exported)
+               ▼
+        project-management-board (dashboard)</pre>
+    <p class="kv">Each downstream lens shrinks to a registry of scenarios plus thin <code>impl Producer</code> blocks. The dashboard consumes a generated JSON Schema instead of an informally-transcribed one.</p>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="roadmap">8 · Sequenced roadmap</h2>
+  <p>Ordered so each step de-risks the next. Steps 1–3 are valuable on their own even if the extraction in 4–6 is deferred.</p>
+  <div class="card">
+    <table>
+      <thead><tr><th>#</th><th>Step</th><th>Addresses</th><th>Effort</th><th>Payoff</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td>Add unit tests for the pure scoring / classification / git-metric kernels</td><td>I-8, I-5</td><td>S</td><td>Safety net for everything below</td></tr>
+        <tr><td class="num">2</td><td>Split <code>producers.rs</code> into a <code>producers/</code> module (one file per producer + <code>render</code> + <code>fallback</code>)</td><td>I-2</td><td>S–M</td><td>Navigability; reveals the extraction seams</td></tr>
+        <tr><td class="num">3</td><td>Introduce a single typed <code>Scenario</code> registry; route producers + fallbacks through it; name the policy constants</td><td>I-3, I-4, I-6, I-7</td><td>M</td><td>Kills the drift traps</td></tr>
+        <tr><td class="num">4</td><td>Replace <code>json!</code>/<code>Value</code> with <code>#[derive(Serialize)]</code> artifact structs; renderers become <code>impl Render</code></td><td>I-1, I-9</td><td>M–L</td><td>Type-safe contract; unblocks reuse</td></tr>
+        <tr><td class="num">5</td><td>Carve out <code>lens-core</code> (6A–6G) with <code>Producer</code>/<code>Render</code> traits; this repo depends on it</td><td>§6</td><td>L</td><td>Reuse across lenses</td></tr>
+        <tr><td class="num">6</td><td>Export JSON Schema (schemars) from the typed artifacts for the dashboard</td><td>I-1</td><td>S</td><td>Generated, versioned cross-language contract</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="kv"><b>If you only do one thing:</b> steps 1 → 2 are nearly free and immediately make the code workable. <b>If you want the reuse win:</b> 3 → 4 → 5 is the spine, and step 4 (typing) is the pivot the rest hinges on.</p>
+
+  <!-- ============================================================ -->
+  <h2 id="appendix">9 · Appendix — file-by-file notes</h2>
+  <div class="card">
+    <h3><code>src/producers.rs</code> — 2,648 lines</h3>
+    <p>The center of gravity. Holds all nine producers, their CLI renderers, the git LOC engine, the synthetic fallbacks, and the review-scenario model. Split target (I-2). Strong internal logic, but undertested (I-8) and built entirely on <code>Value</code> (I-1).</p>
+    <h3><code>src/shared.rs</code> — 778 lines</h3>
+    <p>Mixes truly-generic engine helpers (Criterion ingestion, IO, stats — extractable, §6B/6C/6G) with ~470 lines of Scratchpad-specific static tables (<code>BUILTIN_METADATA</code>, <code>FLAMEGRAPH_CONFIGS</code> — keep, but see I-7). The clearest example of engine and policy entangled in one file.</p>
+    <h3><code>src/app_package.rs</code> — 322 lines</h3>
+    <p>Telemetry for the live session directory. Domain-specific (stays), but its JSON/NDJSON loaders (6G) and the two tests are the extractable, reusable part. Well-defended against malformed input.</p>
+    <h3><code>src/cli.rs</code> — 213 lines</h3>
+    <p>Clean clap definitions and dispatch. The <code>catalog</code> + <code>measure</code> scaffolding is generic engine (6A); the producer enum + run order is policy. Note the <code>MEASURE_TOOLS</code> / <code>STANDARD_RUN_ORDER</code> / <code>MeasureSelection</code> / <code>MeasureTool</code> set is a fourth place producers are enumerated — fold into the registry during step 3.</p>
+    <h3><code>src/config.rs</code> — 64 lines</h3>
+    <p>Minimal and mostly solid. Only nit: silent canonicalize fallback (I-10). Generic — moves to <code>lens-core</code> (6A).</p>
+    <h3><code>src/bin/*.rs</code> &amp; <code>tests/cli.rs</code></h3>
+    <p>Two identical entrypoints (intentional aliases, I-10). The CLI test verifies the catalog/telemetry contract and is appropriately tolerant when the Scratchpad checkout is absent — a good integration guard to keep as the engine moves.</p>
+  </div>
+
+  <p class="footnote">
+    Review of <code>scratchpad-performance-lens</code> @ <code>master</code> · 2026-06-03 · static read of source only; no code modified and no producers were executed. Severity reflects impact on maintainability and reuse, not runtime correctness of current artifacts. Line counts are from the reviewed working tree.
+  </p>
+</div>
+</body>
+</html>
