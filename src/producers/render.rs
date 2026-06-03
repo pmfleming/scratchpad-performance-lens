@@ -59,11 +59,15 @@ pub(super) fn render_frame_metrics(payload: &Value) -> String {
     let mut lines = vec!["Frame Metrics".to_string()];
     for scenario in scenarios_array(payload) {
         lines.push(format!(
-            "- {}: p95={:.2} ms, p99={:.2} ms, budget={:.2} ms",
+            "- {}: scope={} | p95={:.2} ms, p99={:.2} ms, budget={:.2} ms{}",
             scenario
                 .get("scenario_label")
                 .and_then(Value::as_str)
                 .unwrap_or("-"),
+            scenario
+                .get("measurement_scope")
+                .and_then(Value::as_str)
+                .unwrap_or("measured_frame_path_cpu"),
             scenario
                 .get("p95_ms")
                 .and_then(Value::as_f64)
@@ -76,6 +80,12 @@ pub(super) fn render_frame_metrics(payload: &Value) -> String {
                 .get("budget_ms")
                 .and_then(Value::as_f64)
                 .unwrap_or(0.0),
+            scenario
+                .get("theoretical_fps_p99")
+                .and_then(Value::as_f64)
+                .map_or(String::new(), |fps| format!(
+                    " | theoretical_p99_fps={fps:.0}"
+                )),
         ));
     }
     if scenarios_array(payload).is_empty() {

@@ -96,6 +96,22 @@ from Scratchpad-owned benchmark metadata JSON. Built-in metadata can still
 classify older or missing benchmark rows, but built-in thresholds are marked
 `stale_budget_risk: true` and do not drive budget pass/fail judgment.
 
+`frame_metrics.json` separates two frame concepts:
+
+- Existing `frame_metrics` rows are annotated as `measurement_scope:
+  measured_frame_path_cpu` and `metric_role:
+  theoretical_frame_production_capacity`. Their `theoretical_fps_p99` value is
+  `1000 / p99_ms`, useful for saying how much isolated frame-path work fits in
+  a frame budget.
+- If Scratchpad defines a `realistic_frame_metrics` binary target, `splens
+  measure frame-metrics` also runs it and appends rows with
+  `measurement_scope: end_to_end_render_submission` and `metric_role:
+  user_visible_frame_realism`. That probe should time from the interaction or
+  update boundary through app state update, layout/viewport work, text/glyph
+  cache work when exercised, paint-command generation, and GPU upload/render
+  submission where available. It should set `present_included: true` only when
+  the stop point is an actual present/frame callback.
+
 ## Boundary
 
 Included here:

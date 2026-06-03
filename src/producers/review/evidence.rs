@@ -77,6 +77,7 @@ pub(super) fn payload_synthetic(payload: &Value) -> bool {
 pub(super) fn source_status(config: &LensConfig) -> Vec<SourceArtifactStatus> {
     [
         ("slowspots", "slowspots.json"),
+        ("frame_metrics", "frame_metrics.json"),
         ("search_speed", "search_speed.json"),
         ("capacity", "capacity_report.json"),
         ("resources", "resource_profiles.json"),
