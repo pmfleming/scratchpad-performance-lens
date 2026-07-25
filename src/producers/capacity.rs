@@ -1,10 +1,10 @@
-use super::common::{probe_path, run_probe_events};
+use super::common::{probe_path, run_probe_events, write_probe_artifact};
 use super::render::render_capacity;
 use crate::artifacts::capacity_report::CapacityReportArtifact;
 use crate::cli::MeasureOptions;
 use crate::config::LensConfig;
 use crate::shared;
-use anyhow::{bail, Result};
+use anyhow::Result;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
@@ -174,22 +174,19 @@ pub fn capacity_report(config: &LensConfig, _options: MeasureOptions) -> Result<
         Err(error) => {
             let error = error.to_string();
             (
-                summarize_capacity(fallback_capacity_events(), "failed", Some(error.clone())),
+                summarize_capacity(fallback_capacity_events(), "failed", Some(&error)),
                 Some(error),
             )
         }
     };
     let payload = serde_json::to_value(serde_json::from_value::<CapacityReportArtifact>(payload)?)?;
-    shared::write_visibility(
+    write_probe_artifact(
         &config.output_dir.join("capacity_report.json"),
         &payload,
         "capacity report",
         render_capacity(&payload),
-    )?;
-    if let Some(error) = failure {
-        bail!("capacity probe failed: {error}");
-    }
-    Ok(())
+        failure.map(|error| format!("capacity probe failed: {error}")),
+    )
 }
 
 fn capacity_config(scenario: &str) -> (f64, &'static str, Option<&'static str>) {
@@ -241,8 +238,37 @@ fn empty_capacity(reason: &str) -> Value {
     })
 }
 
-fn summarize_capacity(events: Vec<Value>, status: &str, fallback_reason: Option<String>) -> Value {
+fn summarize_capacity(events: Vec<Value>, status: &str, fallback_reason: Option<&str>) -> Value {
     let synthetic = fallback_reason.is_some();
+    let scenarios: Vec<_> = group_capacity_events(events)
+        .into_iter()
+        .map(|(scenario, events)| capacity_scenario_summary(scenario, events, synthetic))
+        .collect();
+    let ceilings = scenarios
+        .iter()
+        .filter(|row| bool_field(row, "ceiling_reached"))
+        .count();
+    let memory = scenarios
+        .iter()
+        .filter(|row| {
+            row.get("suspected_limiting_resource")
+                .and_then(Value::as_str)
+                == Some("memory")
+        })
+        .count();
+    let mut payload = json!({
+        "meta": {"generated_from": "rust:capacity_report", "probe_command": probe_path("capacity_probe").to_string_lossy(), "scenario_count": scenarios.len(), "probe_status": status, "synthetic": synthetic},
+        "summary": {"scenario_count": scenarios.len(), "ceilings_reached": ceilings, "memory_bound_scenarios": memory, "cpu_bound_scenarios": scenarios.len() - memory, "probe_status": status, "synthetic": synthetic},
+        "scenarios": scenarios,
+    });
+    if let Some(reason) = fallback_reason {
+        payload["meta"]["fallback_reason"] = json!(reason);
+        payload["summary"]["fallback_reason"] = json!(reason);
+    }
+    payload
+}
+
+fn group_capacity_events(events: Vec<Value>) -> BTreeMap<String, Vec<Value>> {
     let mut grouped: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     for mut event in events {
         if event.get("scenario").and_then(Value::as_str) == Some("layout_bytes_ceiling") {
@@ -254,97 +280,83 @@ fn summarize_capacity(events: Vec<Value>, status: &str, fallback_reason: Option<
             grouped.entry(scenario.to_string()).or_default().push(event);
         }
     }
-    let mut scenarios = Vec::new();
-    for (scenario, events) in grouped {
-        let mut events = aggregate_capacity_repetitions(events);
-        events.sort_by_key(|event| event.get("step_index").and_then(Value::as_i64).unwrap_or(0));
-        let (threshold_ms, family, profile_id) = capacity_config(&scenario);
-        let mut first_failure = None;
-        let mut last_success = None;
-        for event in &events {
-            let elapsed_ms = event
-                .get("elapsed_ns")
-                .and_then(Value::as_f64)
-                .unwrap_or(0.0)
-                / 1_000_000.0;
-            if event.get("status").and_then(Value::as_str) != Some("ok")
-                || elapsed_ms > threshold_ms
-            {
-                first_failure = Some(event.clone());
-                break;
-            }
-            last_success = Some(event.clone());
-        }
-        let first = events.first().cloned().unwrap_or_else(|| json!({}));
-        let last = events.last().cloned().unwrap_or_else(|| json!({}));
-        let limiting = infer_limiting_resource(&events);
-        let matching = profile_id.map_or_else(
-            || shared::matching_flamegraph_ids(&scenario),
-            |id| vec![id.to_string()],
-        );
-        let peak = events
-            .iter()
-            .filter_map(|event| {
-                event
-                    .get("peak_working_set_bytes")
-                    .or_else(|| event.get("working_set_bytes"))
-                    .and_then(Value::as_i64)
-            })
-            .max();
-        scenarios.push(json!({
-            "scenario": scenario,
-            "probe_class": "ceiling_health",
-            "measurement_role": "promise_health",
-            "measurement_question": "Does this promise still pass as workload size increases?",
-            "scenario_label": first.get("scenario_label").and_then(Value::as_str).unwrap_or(&scenario),
-            "workload_family": first.get("workload_family").and_then(Value::as_str).unwrap_or(family),
-            "threshold_ms": threshold_ms,
-            "failure_mode": if synthetic { "unmeasured" } else if first_failure.is_some() { "unusable_latency" } else { "not_reached" },
-            "ceiling_reached": if synthetic { None } else { Some(first_failure.is_some()) },
-            "last_successful_workload": last_success.as_ref().and_then(|row| row.get("workload_value")).cloned(),
-            "last_successful_label": last_success.as_ref().and_then(|row| row.get("workload_label")).cloned(),
-            "first_failure_workload": first_failure.as_ref().and_then(|row| row.get("workload_value")).cloned(),
-            "first_failure_label": first_failure.as_ref().and_then(|row| row.get("workload_label")).cloned(),
-            "peak_working_set_bytes": peak,
-            "working_set_growth_bytes": shared::safe_delta(last.get("working_set_bytes").and_then(Value::as_i64), first.get("working_set_bytes").and_then(Value::as_i64)),
-            "page_fault_growth": shared::safe_delta(last.get("page_fault_count").and_then(Value::as_i64), first.get("page_fault_count").and_then(Value::as_i64)),
-            "handle_growth": shared::safe_delta(last.get("handle_count").and_then(Value::as_i64), first.get("handle_count").and_then(Value::as_i64)),
-            "first_saturated_resource": limiting,
-            "suspected_limiting_resource": limiting,
-            "matching_flamegraphs": matching,
-            "diagnosis_guidance": diagnosis_guidance(&limiting, &matching),
-            "resource_checklist": resource_checklist(&limiting, &events),
-            "samples": events.iter().map(capacity_sample).collect::<Vec<_>>(),
-        }));
-    }
-    let ceilings = scenarios
+    grouped
+}
+
+fn capacity_scenario_summary(scenario: String, events: Vec<Value>, synthetic: bool) -> Value {
+    let mut events = aggregate_capacity_repetitions(events);
+    events.sort_by_key(|event| event.get("step_index").and_then(Value::as_i64).unwrap_or(0));
+    let (threshold_ms, family, profile_id) = capacity_config(&scenario);
+    let failure_index = events
         .iter()
-        .filter(|row| {
-            row.get("ceiling_reached")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-        })
-        .count();
-    let memory = scenarios
+        .position(|event| capacity_step_failed(event, threshold_ms));
+    let first_failure = failure_index.and_then(|index| events.get(index));
+    let last_success = failure_index
+        .and_then(|index| index.checked_sub(1).and_then(|index| events.get(index)))
+        .or_else(|| failure_index.is_none().then(|| events.last()).flatten());
+    let first = events.first().unwrap_or(&Value::Null);
+    let last = events.last().unwrap_or(&Value::Null);
+    let limiting = infer_limiting_resource(&events);
+    let matching = profile_id.map_or_else(
+        || shared::matching_flamegraph_ids(&scenario),
+        |id| vec![id.to_string()],
+    );
+    let peak = events
         .iter()
-        .filter(|row| {
-            row.get("suspected_limiting_resource")
-                .and_then(Value::as_str)
-                == Some("memory")
+        .filter_map(|event| {
+            event
+                .get("peak_working_set_bytes")
+                .or_else(|| event.get("working_set_bytes"))
+                .and_then(Value::as_i64)
         })
-        .count();
-    let mut payload = json!({
-        "meta": {"generated_from": "rust:capacity_report", "probe_command": probe_path("capacity_probe").to_string_lossy(), "scenario_count": scenarios.len(), "probe_status": status, "synthetic": false},
-        "summary": {"scenario_count": scenarios.len(), "ceilings_reached": ceilings, "memory_bound_scenarios": memory, "cpu_bound_scenarios": scenarios.len() - memory, "probe_status": status, "synthetic": false},
-        "scenarios": scenarios,
-    });
-    if let Some(reason) = fallback_reason {
-        payload["meta"]["fallback_reason"] = json!(reason);
-        payload["meta"]["synthetic"] = json!(true);
-        payload["summary"]["fallback_reason"] = payload["meta"]["fallback_reason"].clone();
-        payload["summary"]["synthetic"] = json!(true);
-    }
-    payload
+        .max();
+    let scenario_label = first
+        .get("scenario_label")
+        .and_then(Value::as_str)
+        .unwrap_or(&scenario);
+    let workload_family = first
+        .get("workload_family")
+        .and_then(Value::as_str)
+        .unwrap_or(family);
+    json!({
+        "scenario": scenario,
+        "probe_class": "ceiling_health",
+        "measurement_role": "promise_health",
+        "measurement_question": "Does this promise still pass as workload size increases?",
+        "scenario_label": scenario_label,
+        "workload_family": workload_family,
+        "threshold_ms": threshold_ms,
+        "failure_mode": if synthetic { "unmeasured" } else if first_failure.is_some() { "unusable_latency" } else { "not_reached" },
+        "ceiling_reached": (!synthetic).then_some(first_failure.is_some()),
+        "last_successful_workload": last_success.and_then(|row| row.get("workload_value")),
+        "last_successful_label": last_success.and_then(|row| row.get("workload_label")),
+        "first_failure_workload": first_failure.and_then(|row| row.get("workload_value")),
+        "first_failure_label": first_failure.and_then(|row| row.get("workload_label")),
+        "peak_working_set_bytes": peak,
+        "working_set_growth_bytes": shared::safe_delta(last.get("working_set_bytes").and_then(Value::as_i64), first.get("working_set_bytes").and_then(Value::as_i64)),
+        "page_fault_growth": shared::safe_delta(last.get("page_fault_count").and_then(Value::as_i64), first.get("page_fault_count").and_then(Value::as_i64)),
+        "handle_growth": shared::safe_delta(last.get("handle_count").and_then(Value::as_i64), first.get("handle_count").and_then(Value::as_i64)),
+        "first_saturated_resource": limiting,
+        "suspected_limiting_resource": limiting,
+        "matching_flamegraphs": matching,
+        "diagnosis_guidance": diagnosis_guidance(&limiting, &matching),
+        "resource_checklist": resource_checklist(&limiting, &events),
+        "samples": events.iter().map(capacity_sample).collect::<Vec<_>>(),
+    })
+}
+
+fn capacity_step_failed(event: &Value, threshold_ms: f64) -> bool {
+    event.get("status").and_then(Value::as_str) != Some("ok")
+        || event
+            .get("elapsed_ns")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
+            / 1_000_000.0
+            > threshold_ms
+}
+
+fn bool_field(value: &Value, key: &str) -> bool {
+    value.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
 fn aggregate_capacity_repetitions(events: Vec<Value>) -> Vec<Value> {
@@ -525,7 +537,7 @@ mod tests {
         let payload = summarize_capacity(
             fallback_capacity_events(),
             "fallback_completed",
-            Some("probe failed".to_string()),
+            Some("probe failed"),
         );
         assert_eq!(payload["meta"]["synthetic"], json!(true));
         assert_eq!(payload["summary"]["synthetic"], json!(true));

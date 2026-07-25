@@ -1,12 +1,24 @@
-use regex::Regex;
+use std::path::Path;
 
 pub(super) fn classify_path(path: &str) -> &'static str {
     let normalized = path.replace('\\', "/");
-    let test_re = Regex::new(
-        r"(^|/)(tests?|benches|testdata|fixtures)(/|$)|(^|/)tests\.rs$|(_test|_tests|test_).*\.rs$",
-    )
-    .unwrap();
-    if test_re.is_match(&normalized) {
+    let path = Path::new(&normalized);
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    let test_directory = path.components().any(|component| {
+        matches!(
+            component.as_os_str().to_str(),
+            Some("test" | "tests" | "benches" | "testdata" | "fixtures")
+        )
+    });
+    let test_file = file_name == "tests.rs"
+        || file_name
+            .strip_suffix(".rs")
+            .is_some_and(|stem| stem.contains("_test") || stem.contains("test_"));
+
+    if test_directory || test_file {
         "test"
     } else if normalized.starts_with("src/") || normalized == "build.rs" {
         "application"
@@ -53,84 +65,65 @@ struct BraceLexer {
 impl BraceLexer {
     fn count_braces(&mut self, line: &str) -> (usize, usize) {
         let chars: Vec<char> = line.chars().collect();
-        let mut opens = 0;
-        let mut closes = 0;
+        let mut counts = (0, 0);
         let mut index = 0;
-        let mut in_string = false;
-        let mut in_char = false;
-        let mut escaped = false;
 
         while index < chars.len() {
-            let current = chars[index];
-            let next = chars.get(index + 1).copied();
-
-            if self.block_comment_depth > 0 {
-                match (current, next) {
-                    ('/', Some('*')) => {
-                        self.block_comment_depth += 1;
-                        index += 2;
-                    }
-                    ('*', Some('/')) => {
-                        self.block_comment_depth -= 1;
-                        index += 2;
-                    }
-                    _ => index += 1,
-                }
+            if self.skip_block_comment(&chars, &mut index) {
                 continue;
             }
-
-            if in_string {
-                if escaped {
-                    escaped = false;
-                } else if current == '\\' {
-                    escaped = true;
-                } else if current == '"' {
-                    in_string = false;
-                }
-                index += 1;
-                continue;
-            }
-
-            if in_char {
-                if escaped {
-                    escaped = false;
-                } else if current == '\\' {
-                    escaped = true;
-                } else if current == '\'' {
-                    in_char = false;
-                }
-                index += 1;
-                continue;
-            }
-
-            match (current, next) {
+            match (chars[index], chars.get(index + 1)) {
                 ('/', Some('/')) => break,
-                ('/', Some('*')) => {
-                    self.block_comment_depth += 1;
-                    index += 2;
-                }
-                ('r', Some('"')) | ('r', Some('#')) if skip_raw_string(&chars, &mut index) => {}
-                ('"', _) => {
-                    in_string = true;
-                    index += 1;
-                }
-                ('\'', _) => {
-                    in_char = true;
-                    index += 1;
-                }
+                ('/', Some('*')) => self.start_block_comment(&mut index),
+                ('r', Some('"' | '#')) if skip_raw_string(&chars, &mut index) => {}
+                ('"', _) => skip_quoted(&chars, &mut index, '"'),
+                ('\'', _) => skip_quoted(&chars, &mut index, '\''),
                 ('{', _) => {
-                    opens += 1;
+                    counts.0 += 1;
                     index += 1;
                 }
                 ('}', _) => {
-                    closes += 1;
+                    counts.1 += 1;
                     index += 1;
                 }
                 _ => index += 1,
             }
         }
+        counts
+    }
 
-        (opens, closes)
+    fn skip_block_comment(&mut self, chars: &[char], index: &mut usize) -> bool {
+        if self.block_comment_depth == 0 {
+            return false;
+        }
+        match (chars[*index], chars.get(*index + 1)) {
+            ('/', Some('*')) => self.start_block_comment(index),
+            ('*', Some('/')) => {
+                self.block_comment_depth -= 1;
+                *index += 2;
+            }
+            _ => *index += 1,
+        }
+        true
+    }
+
+    fn start_block_comment(&mut self, index: &mut usize) {
+        self.block_comment_depth += 1;
+        *index += 2;
+    }
+}
+
+fn skip_quoted(chars: &[char], index: &mut usize, quote: char) {
+    *index += 1;
+    while *index < chars.len() {
+        match chars[*index] {
+            '\\' => *index += 2,
+            current if current == quote => {
+                *index += 1;
+                break;
+            }
+            _ => *index += 1,
+        }
     }
 }
 

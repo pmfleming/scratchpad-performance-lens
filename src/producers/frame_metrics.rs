@@ -1,9 +1,8 @@
-use super::common::{probe_path, run_probe_object};
+use super::common::{probe_path, run_probe_object, write_probe_artifact};
 use super::render::render_frame_metrics;
 use crate::cli::MeasureOptions;
 use crate::config::LensConfig;
-use crate::shared;
-use anyhow::{bail, Result};
+use anyhow::Result;
 use serde_json::{json, Value};
 
 const REALISTIC_FRAME_PROBE: &str = "realistic_frame_metrics";
@@ -39,21 +38,15 @@ pub fn frame_metrics(config: &LensConfig, _options: MeasureOptions) -> Result<()
         payload["meta"]["error"] = payload["meta"]["realistic_probe"]["error"].clone();
     }
 
-    let failed = payload
-        .get("meta")
-        .and_then(|meta| meta.get("probe_status"))
-        .and_then(Value::as_str)
-        == Some("failed");
-    shared::write_visibility(
+    let failure = (payload["meta"]["probe_status"].as_str() == Some("failed"))
+        .then(|| "frame metrics probe failed".to_string());
+    write_probe_artifact(
         &config.output_dir.join("frame_metrics.json"),
         &payload,
         "frame metrics",
         render_frame_metrics(&payload),
-    )?;
-    if failed {
-        bail!("frame metrics probe failed");
-    }
-    Ok(())
+        failure,
+    )
 }
 
 fn add_realistic_frame_metrics(payload: &mut Value, config: &LensConfig) {
@@ -114,75 +107,78 @@ fn annotate_frame_scenarios(payload: &mut Value) {
     let Some(scenarios) = payload.get_mut("scenarios").and_then(Value::as_array_mut) else {
         return;
     };
-    for scenario in scenarios {
-        let realistic = scenario.get("probe_binary").and_then(Value::as_str)
-            == Some(REALISTIC_FRAME_PROBE)
-            || scenario
-                .get("measurement_scope")
-                .and_then(Value::as_str)
-                .is_some_and(|scope| scope.starts_with("end_to_end"));
+    scenarios.iter_mut().for_each(annotate_frame_scenario);
+}
 
-        if scenario.get("measurement_scope").is_none() {
-            scenario["measurement_scope"] = json!(if realistic {
-                "end_to_end_render_submission"
-            } else {
-                "measured_frame_path_cpu"
-            });
-        }
-        if scenario.get("metric_role").is_none() {
-            scenario["metric_role"] = json!(if realistic {
-                "user_visible_frame_realism"
-            } else {
-                "theoretical_frame_production_capacity"
-            });
-        }
-        if scenario.get("present_included").is_none() {
-            scenario["present_included"] = json!(false);
-        }
-        if scenario.get("vsync").is_none() {
-            scenario["vsync"] = json!(false);
-        }
-        if scenario.get("included_work").is_none() {
-            scenario["included_work"] = json!(if realistic {
-                vec![
-                    "event/update boundary",
-                    "app state update",
-                    "layout/viewport computation",
-                    "text shaping or glyph/cache lookup when the probe exercises it",
-                    "paint command generation",
-                    "GPU upload/render submission when available",
-                ]
-            } else {
-                vec!["timed frame-path work reported by the frame_metrics probe"]
-            });
-        }
-        if scenario.get("omitted_work").is_none() {
-            scenario["omitted_work"] = json!(if realistic {
-                vec![
-                    "present callback unless present_included is true",
-                    "vsync pacing unless vsync is true",
-                ]
-            } else {
-                vec![
-                    "full real-window event loop",
-                    "GPU upload/render submission unless listed in phases",
-                    "OS compositor/present callback",
-                    "vsync pacing",
-                ]
-            });
-        }
+fn annotate_frame_scenario(scenario: &mut Value) {
+    let realistic = scenario.get("probe_binary").and_then(Value::as_str)
+        == Some(REALISTIC_FRAME_PROBE)
+        || scenario
+            .get("measurement_scope")
+            .and_then(Value::as_str)
+            .is_some_and(|scope| scope.starts_with("end_to_end"));
+    let p99_ms = scenario
+        .get("p99_ms")
+        .and_then(Value::as_f64)
+        .filter(|value| *value > 0.0);
+    let Some(fields) = scenario.as_object_mut() else {
+        return;
+    };
+    let (scope, role, included, omitted) = frame_defaults(realistic);
+    for (key, value) in [
+        ("measurement_scope", json!(scope)),
+        ("metric_role", json!(role)),
+        ("present_included", json!(false)),
+        ("vsync", json!(false)),
+        ("included_work", included),
+        ("omitted_work", omitted),
+    ] {
+        fields.entry(key.to_string()).or_insert(value);
+    }
+    if let Some(p99_ms) = p99_ms {
+        fields.insert("theoretical_fps_p99".to_string(), json!(1000.0 / p99_ms));
+        fields.insert(
+            "refresh_budget_utilization".to_string(),
+            json!({
+                "60_hz": p99_ms / (1000.0 / 60.0),
+                "120_hz": p99_ms / (1000.0 / 120.0),
+                "144_hz": p99_ms / (1000.0 / 144.0),
+                "240_hz": p99_ms / (1000.0 / 240.0),
+            }),
+        );
+    }
+}
 
-        if let Some(p99_ms) = scenario.get("p99_ms").and_then(Value::as_f64) {
-            if p99_ms > 0.0 {
-                scenario["theoretical_fps_p99"] = json!(1000.0 / p99_ms);
-                scenario["refresh_budget_utilization"] = json!({
-                    "60_hz": p99_ms / (1000.0 / 60.0),
-                    "120_hz": p99_ms / (1000.0 / 120.0),
-                    "144_hz": p99_ms / (1000.0 / 144.0),
-                    "240_hz": p99_ms / (1000.0 / 240.0),
-                });
-            }
-        }
+fn frame_defaults(realistic: bool) -> (&'static str, &'static str, Value, Value) {
+    if realistic {
+        (
+            "end_to_end_render_submission",
+            "user_visible_frame_realism",
+            json!([
+                "event/update boundary",
+                "app state update",
+                "layout/viewport computation",
+                "text shaping or glyph/cache lookup when the probe exercises it",
+                "paint command generation",
+                "GPU upload/render submission when available",
+            ]),
+            json!([
+                "present callback unless present_included is true",
+                "vsync pacing unless vsync is true",
+            ]),
+        )
+    } else {
+        (
+            "measured_frame_path_cpu",
+            "theoretical_frame_production_capacity",
+            json!(["timed frame-path work reported by the frame_metrics probe"]),
+            json!([
+                "full real-window event loop",
+                "GPU upload/render submission unless listed in phases",
+                "OS compositor/present callback",
+                "vsync pacing",
+            ]),
+        )
     }
 }
 

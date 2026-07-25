@@ -1,6 +1,6 @@
 use super::common::{
     approx_p05_ns, approx_p95_ns, criterion_dir, estimate_optional, latency_score, over_threshold,
-    score_of, slowspot_signals, stability_label,
+    run_benchmarks, score_of, slowspot_signals, stability_label,
 };
 use super::render::render_slowspots;
 use crate::cli::MeasureOptions;
@@ -9,30 +9,23 @@ use crate::shared;
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
 pub fn slowspots(config: &LensConfig, options: MeasureOptions) -> Result<()> {
-    let mut probe_failure = (!config.project_root.is_dir()).then(|| {
-        format!(
-            "project root does not exist: {}",
-            config.project_root.display()
-        )
-    });
-    if !options.skip_bench && probe_failure.is_none() {
-        if let Err(error) = shared::run_progress_command(
-            &config.project_root,
-            &[
-                "cargo",
-                "bench",
-                "--bench",
-                "search_speed",
-                "--bench",
-                "frame_budget",
-                "--bench",
-                "promise_latency",
-            ],
-            "Running benchmarks via cargo bench...",
-        ) {
-            eprintln!("Benchmarking failed: {error}");
-            probe_failure = Some(error.to_string());
-        }
+    let probe_failure = run_benchmarks(
+        &config.project_root,
+        options.skip_bench,
+        &[
+            "cargo",
+            "bench",
+            "--bench",
+            "search_speed",
+            "--bench",
+            "frame_budget",
+            "--bench",
+            "promise_latency",
+        ],
+        "Running benchmarks via cargo bench...",
+    );
+    if let Some(error) = &probe_failure {
+        eprintln!("Benchmarking failed: {error}");
     }
 
     let metadata = shared::load_benchmark_metadata(&config.project_root);

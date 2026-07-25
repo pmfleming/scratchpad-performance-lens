@@ -1,9 +1,9 @@
-use super::common::{probe_path, run_probe_events};
+use super::common::{probe_path, run_probe_events, write_probe_artifact};
 use super::render::render_resources;
 use crate::cli::MeasureOptions;
 use crate::config::LensConfig;
 use crate::shared;
-use anyhow::{bail, Result};
+use anyhow::Result;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 pub fn resource_profiles(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
@@ -29,21 +29,18 @@ pub fn resource_profiles(config: &LensConfig, _options: MeasureOptions) -> Resul
         Err(error) => {
             let error = error.to_string();
             (
-                summarize_resources(fallback_resource_events(), "failed", Some(error.clone())),
+                summarize_resources(fallback_resource_events(), "failed", Some(&error)),
                 Some(error),
             )
         }
     };
-    shared::write_visibility(
+    write_probe_artifact(
         &config.output_dir.join("resource_profiles.json"),
         &payload,
         "resource profiles",
         render_resources(&payload),
-    )?;
-    if let Some(error) = failure {
-        bail!("resource probe failed: {error}");
-    }
-    Ok(())
+        failure.map(|error| format!("resource probe failed: {error}")),
+    )
 }
 
 fn fallback_resource_events() -> Vec<Value> {
@@ -267,7 +264,7 @@ fn empty_resources(reason: &str) -> Value {
     })
 }
 
-fn summarize_resources(events: Vec<Value>, status: &str, fallback_reason: Option<String>) -> Value {
+fn summarize_resources(events: Vec<Value>, status: &str, fallback_reason: Option<&str>) -> Value {
     let mut grouped: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     for event in events {
         if let Some(scenario) = event.get("scenario").and_then(Value::as_str) {
@@ -317,7 +314,7 @@ fn summarize_resources(events: Vec<Value>, status: &str, fallback_reason: Option
     if let Some(reason) = fallback_reason {
         payload["meta"]["fallback_reason"] = json!(reason);
         payload["meta"]["synthetic"] = json!(true);
-        payload["summary"]["fallback_reason"] = payload["meta"]["fallback_reason"].clone();
+        payload["summary"]["fallback_reason"] = json!(reason);
         payload["summary"]["synthetic"] = json!(true);
     }
     payload
@@ -377,7 +374,7 @@ mod tests {
         let payload = summarize_resources(
             fallback_resource_events(),
             "fallback_completed",
-            Some("probe failed".to_string()),
+            Some("probe failed"),
         );
         assert_eq!(payload["meta"]["synthetic"], json!(true));
         assert_eq!(payload["summary"]["synthetic"], json!(true));

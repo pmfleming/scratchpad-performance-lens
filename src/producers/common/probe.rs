@@ -58,6 +58,20 @@ pub(in crate::producers) fn run_probe_events(
         .collect())
 }
 
+pub(in crate::producers) fn write_probe_artifact(
+    output_path: &Path,
+    payload: &Value,
+    label: &str,
+    cli_text: String,
+    failure: Option<String>,
+) -> Result<()> {
+    shared::write_visibility(output_path, payload, label, cli_text)?;
+    if let Some(error) = failure {
+        bail!("{error}");
+    }
+    Ok(())
+}
+
 pub(in crate::producers) fn output_text(output: &std::process::Output) -> String {
     format!(
         "{}{}",

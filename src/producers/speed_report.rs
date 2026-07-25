@@ -68,13 +68,12 @@ pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) ->
         .iter()
         .map(normalize_capacity_row)
         .collect();
-    let latency_rows = [
-        search_dispatch.clone(),
-        search_rows.clone(),
-        editor_rows.clone(),
-        tabs_rows.clone(),
-    ]
-    .concat();
+    let latency_rows: Vec<&Value> = search_dispatch
+        .iter()
+        .chain(&search_rows)
+        .chain(&editor_rows)
+        .chain(&tabs_rows)
+        .collect();
     let flamegraph_rows = flamegraph_coverage_rows(array_value(&flamegraphs), &latency_rows);
     let triage = build_triage(&latency_rows, &capacity_rows);
     let resource_rows = scenarios_array(&resources).to_vec();
@@ -228,7 +227,7 @@ fn normalize_frame_row(row: &Value) -> Value {
     })
 }
 
-fn flamegraph_coverage_rows(flamegraphs: Vec<Value>, latency_rows: &[Value]) -> Vec<Value> {
+fn flamegraph_coverage_rows(flamegraphs: Vec<Value>, latency_rows: &[&Value]) -> Vec<Value> {
     let covered_keys: HashSet<String> = latency_rows
         .iter()
         .filter_map(|row| row.get("scenario_id").and_then(Value::as_str))
@@ -259,7 +258,7 @@ fn flamegraph_coverage_rows(flamegraphs: Vec<Value>, latency_rows: &[Value]) -> 
         .collect()
 }
 
-fn build_triage(latency_rows: &[Value], capacity_rows: &[Value]) -> Vec<Value> {
+fn build_triage(latency_rows: &[&Value], capacity_rows: &[Value]) -> Vec<Value> {
     let mut rows = Vec::new();
     for row in latency_rows {
         let over_budget = row
@@ -391,7 +390,7 @@ fn family_priority(family: &str) -> f64 {
     }
 }
 
-fn triage_summary(latency_rows: &[Value], capacity_rows: &[Value]) -> Value {
+fn triage_summary(latency_rows: &[&Value], capacity_rows: &[Value]) -> Value {
     let critical = latency_rows
         .iter()
         .filter(|row| {

@@ -2,6 +2,24 @@ use crate::shared;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+pub(in crate::producers) fn run_benchmarks(
+    project_root: &Path,
+    skip: bool,
+    cargo_args: &[&str],
+    label: &str,
+) -> Option<String> {
+    if !project_root.is_dir() {
+        let root = project_root.display();
+        return Some(format!("project root does not exist: {root}"));
+    }
+    if skip {
+        return None;
+    }
+    shared::run_progress_command(project_root, cargo_args, label)
+        .err()
+        .map(|error| error.to_string())
+}
+
 pub(in crate::producers) fn criterion_dir(project_root: &Path) -> PathBuf {
     std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
