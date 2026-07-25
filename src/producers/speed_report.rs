@@ -130,7 +130,7 @@ fn normalize_latency_row(row: Value, capacity_lookup: &HashMap<String, Value>) -
         .unwrap_or("unmapped");
     let ceiling = match family {
         "file-load" | "scroll" | "viewport" | "snapshot" => {
-            capacity_lookup.get("file_size_ceiling")
+            capacity_lookup.get("large_file_background_index_ceiling")
         }
         "edit-paste" | "anchor-maintenance" => capacity_lookup.get("paste_size_ceiling"),
         "tab-management" => capacity_lookup.get("tab_count_ceiling"),

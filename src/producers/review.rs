@@ -372,7 +372,7 @@ mod tests {
                 "budget_probe_ns": 125_000_000.0,
             })],
             &[capacity(json!({
-                "scenario": "file_size_ceiling",
+                "scenario": "large_file_background_index_ceiling",
                 "ceiling_reached": false,
                 "samples": [{"workload_value": shared::GB}],
             }))],
