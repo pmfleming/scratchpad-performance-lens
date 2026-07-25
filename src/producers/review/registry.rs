@@ -46,6 +46,7 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
             resource_scenarios: &[
                 "large_utf8_load_peak_memory",
                 "large_file_first_visible_paint",
+                "file_backed_chunk_cache_tracking",
             ],
             profile_ids: &[
                 "scroll_stress_profile",
@@ -64,6 +65,7 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
                 resource_scenarios: &[
                     "large_utf8_load_peak_memory",
                     "large_file_first_visible_paint",
+                    "file_backed_chunk_cache_tracking",
                 ],
             }],
         },

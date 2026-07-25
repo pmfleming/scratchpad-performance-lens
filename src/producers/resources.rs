@@ -73,6 +73,14 @@ fn fallback_resource_events() -> Vec<Value> {
             "bytes",
         ),
         (
+            "file_backed_chunk_cache_tracking",
+            "File-backed full traversal bounded chunk cache",
+            "file-load",
+            "bounded-cache",
+            vec![64 * shared::MB, 256 * shared::MB, shared::GB],
+            "bytes",
+        ),
+        (
             "many_file_resource_tracking",
             "Many-file allocation and workspace tracking",
             "many-files",
@@ -237,6 +245,7 @@ fn fallback_resource_events() -> Vec<Value> {
                 "workload_value": value,
                 "workload_unit": unit,
                 "workload_label": shared::workload_label(value, unit),
+                "setup_elapsed_ns": 0,
                 "elapsed_ns": value.min(50_000) * 1_000,
                 "allocated_bytes": allocated,
                 "deallocated_bytes": allocated / 3,
@@ -249,6 +258,8 @@ fn fallback_resource_events() -> Vec<Value> {
                 "result_value": value,
                 "result_label": shared::workload_label(value, unit),
                 "manifest_size_bytes": if scenario.contains("session") || scenario == "startup_visible_restore_cost" { Some(value * 720) } else { None },
+                "retained_file_chunks": if scenario == "file_backed_chunk_cache_tracking" { Some(32) } else { None },
+                "file_chunk_cache_limit": if scenario == "file_backed_chunk_cache_tracking" { Some(32) } else { None },
                 "status": "ok",
                 "note": "measurement-layer fallback workload",
             })
@@ -288,11 +299,17 @@ fn summarize_resources(events: Vec<Value>, status: &str, fallback_reason: Option
             "measurement_gap": gap_map.get(scenario.as_str()).copied(),
             "closes_measurement_gap": gap_map.contains_key(scenario.as_str()),
             "sample_count": events.len(),
+            "max_setup_elapsed_ms": max_i64(&events, "setup_elapsed_ns").map(|value| value as f64 / 1_000_000.0),
             "max_elapsed_ms": events.iter().map(|event| event.get("elapsed_ns").and_then(Value::as_f64).unwrap_or(0.0) / 1_000_000.0).fold(0.0, f64::max),
             "max_allocated_bytes": max_i64(&events, "allocated_bytes"),
             "max_peak_live_bytes": max_i64(&events, "peak_live_bytes"),
             "max_working_set_bytes": max_i64(&events, "working_set_bytes"),
             "max_manifest_size_bytes": max_i64(&events, "manifest_size_bytes"),
+            "max_retained_file_chunks": max_i64(&events, "retained_file_chunks"),
+            "file_chunk_cache_limit": max_i64(&events, "file_chunk_cache_limit"),
+            "cache_bound_violations": events.iter().filter(|event| cache_bound_violated(event)).count(),
+            "cache_bound_held": events.iter().any(|event| event.get("file_chunk_cache_limit").and_then(Value::as_i64).is_some())
+                .then(|| events.iter().all(|event| !cache_bound_violated(event))),
             "page_fault_growth": shared::safe_delta(last.get("page_fault_count").and_then(Value::as_i64), first.get("page_fault_count").and_then(Value::as_i64)),
             "handle_growth": shared::safe_delta(last.get("handle_count").and_then(Value::as_i64), first.get("handle_count").and_then(Value::as_i64)),
             "samples": events.iter().map(resource_sample).collect::<Vec<_>>(),
@@ -324,6 +341,7 @@ fn resource_sample(event: &Value) -> Value {
     json!({
         "workload_value": event.get("workload_value").cloned(),
         "workload_label": event.get("workload_label").cloned(),
+        "setup_elapsed_ms": event.get("setup_elapsed_ns").and_then(Value::as_f64).map(|value| value / 1_000_000.0),
         "elapsed_ms": event.get("elapsed_ns").and_then(Value::as_f64).unwrap_or(0.0) / 1_000_000.0,
         "allocated_bytes": event.get("allocated_bytes").cloned(),
         "deallocated_bytes": event.get("deallocated_bytes").cloned(),
@@ -336,6 +354,15 @@ fn resource_sample(event: &Value) -> Value {
         "result_value": event.get("result_value").cloned(),
         "result_label": event.get("result_label").cloned(),
         "manifest_size_bytes": event.get("manifest_size_bytes").cloned(),
+        "retained_file_chunks": event.get("retained_file_chunks").cloned(),
+        "file_chunk_cache_limit": event.get("file_chunk_cache_limit").cloned(),
+        "cache_bound_held": match (
+            event.get("retained_file_chunks").and_then(Value::as_i64),
+            event.get("file_chunk_cache_limit").and_then(Value::as_i64),
+        ) {
+            (Some(retained), Some(limit)) => Some(retained <= limit),
+            _ => None,
+        },
         "status": event.get("status").and_then(Value::as_str).unwrap_or("ok"),
         "note": event.get("note").cloned(),
     })
@@ -344,6 +371,7 @@ fn resource_sample(event: &Value) -> Value {
 fn measurement_gap_scenarios() -> HashMap<&'static str, &'static str> {
     HashMap::from([
         ("large_utf8_load_peak_memory", "peak RSS / allocator high-water mark during very large UTF-8 load"),
+        ("file_backed_chunk_cache_tracking", "bounded retained-memory behavior after traversing every chunk of a large file"),
         ("edited_buffer_search_preview_rendering", "edited-buffer search preview rendering with many matches and many pieces"),
         ("provenance_retained_memory", "provenance-store retained memory after hundreds of thousands of edits and history-budget eviction"),
         ("anchor_heavy_view_editing", "anchor-heavy editing with many views, selections, search results, and scroll anchors"),
@@ -355,6 +383,16 @@ fn measurement_gap_scenarios() -> HashMap<&'static str, &'static str> {
         ("startup_visible_restore_cost", "session persistence broken down into snapshot cost, serialization cost, file I/O, and restore reconstruction"),
         ("tab_strip_frame_rendering", "render cost for horizontal and vertical tab-strip virtualization at many-tab scale"),
     ])
+}
+
+fn cache_bound_violated(event: &Value) -> bool {
+    match (
+        event.get("retained_file_chunks").and_then(Value::as_i64),
+        event.get("file_chunk_cache_limit").and_then(Value::as_i64),
+    ) {
+        (Some(retained), Some(limit)) => retained > limit,
+        _ => false,
+    }
 }
 
 fn max_i64(events: &[Value], key: &str) -> Option<i64> {
@@ -380,5 +418,26 @@ mod tests {
         assert_eq!(payload["summary"]["synthetic"], json!(true));
         assert_eq!(payload["meta"]["fallback_reason"], json!("probe failed"));
         assert!(payload["summary"]["scenario_count"].as_u64().unwrap_or(0) > 0);
+    }
+
+    #[test]
+    fn chunk_cache_measurement_reports_bound_compliance() {
+        let payload = summarize_resources(fallback_resource_events(), "completed", None);
+        let scenario = payload["scenarios"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["scenario"] == json!("file_backed_chunk_cache_tracking"))
+            .unwrap();
+
+        assert_eq!(scenario["max_retained_file_chunks"], json!(32));
+        assert_eq!(scenario["file_chunk_cache_limit"], json!(32));
+        assert_eq!(scenario["cache_bound_violations"], json!(0));
+        assert_eq!(scenario["cache_bound_held"], json!(true));
+        assert!(scenario["samples"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|sample| sample["cache_bound_held"] == json!(true)));
     }
 }

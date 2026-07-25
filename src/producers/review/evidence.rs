@@ -29,6 +29,25 @@ pub(super) fn over_budget_latency(row: &&Value) -> bool {
     matches!((budget_probe, threshold), (Some(value), Some(threshold)) if threshold > 0.0 && value > threshold)
 }
 
+pub(super) fn resource_contract_failed(row: &Value) -> bool {
+    row.get("cache_bound_held").and_then(Value::as_bool) == Some(false)
+        || row
+            .get("cache_bound_violations")
+            .and_then(Value::as_u64)
+            .is_some_and(|violations| violations > 0)
+        || row
+            .get("samples")
+            .and_then(Value::as_array)
+            .is_some_and(|samples| {
+                samples.iter().any(|sample| {
+                    sample
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .is_some_and(|status| status != "ok")
+                })
+            })
+}
+
 pub(super) fn mean_ms(row: &Value) -> Option<f64> {
     row.get("mean_ms").and_then(Value::as_f64).or_else(|| {
         row.get("mean_ns")
@@ -118,8 +137,25 @@ pub(super) fn source_status(config: &LensConfig) -> Vec<SourceArtifactStatus> {
 
 #[cfg(test)]
 mod tests {
-    use super::source_status;
+    use super::{resource_contract_failed, source_status};
     use crate::config::LensConfig;
+
+    #[test]
+    fn resource_contract_detects_cache_violations_and_failed_samples() {
+        assert!(resource_contract_failed(&serde_json::json!({
+            "cache_bound_held": false,
+            "cache_bound_violations": 1,
+            "samples": [{"status": "ok"}]
+        })));
+        assert!(resource_contract_failed(&serde_json::json!({
+            "samples": [{"status": "panic"}]
+        })));
+        assert!(!resource_contract_failed(&serde_json::json!({
+            "cache_bound_held": true,
+            "cache_bound_violations": 0,
+            "samples": [{"status": "ok"}]
+        })));
+    }
 
     #[test]
     fn source_status_distinguishes_loaded_missing_and_unparseable() {

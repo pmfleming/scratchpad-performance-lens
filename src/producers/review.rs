@@ -17,7 +17,8 @@ use crate::config::LensConfig;
 use crate::shared;
 use anyhow::Result;
 use evidence::{
-    mean_ms, over_budget_latency, payload_synthetic, review_row_matches, source_status, unique_rows,
+    mean_ms, over_budget_latency, payload_synthetic, resource_contract_failed, review_row_matches,
+    source_status, unique_rows,
 };
 use health::{coverage_axis, promise_health, scale_checks, scenario_gaps, scenario_opportunities};
 use registry::{probe_classes, promised_scale_payload, review_scenarios, ReviewScenario};
@@ -221,7 +222,11 @@ fn build_review_scenario(
         capacity_synthetic,
         resources_synthetic,
     );
-    let budget_misses = latency_rows.iter().filter(over_budget_latency).count();
+    let budget_misses = latency_rows.iter().filter(over_budget_latency).count()
+        + resource_rows
+            .iter()
+            .filter(|row| resource_contract_failed(row))
+            .count();
     let ceilings_reached = capacity_rows
         .iter()
         .filter(|row| row.ceiling_reached.unwrap_or(false))

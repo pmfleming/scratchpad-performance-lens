@@ -135,14 +135,31 @@ pub(super) fn render_resources(payload: &Value) -> String {
     let rows = scenarios_array(payload)
         .iter()
         .map(|item| {
-            format!(
+            let mut row = format!(
                 "- {}: max_elapsed={:.1} ms | peak_heap={} | total_alloc={} | max_ws={}",
                 text(item, "scenario_label", "-"),
                 shared::f64_field(item, &["max_elapsed_ms"]),
                 shared::human_bytes(item.get("max_peak_live_bytes").and_then(Value::as_i64)),
                 shared::human_bytes(item.get("max_allocated_bytes").and_then(Value::as_i64)),
                 shared::human_bytes(item.get("max_working_set_bytes").and_then(Value::as_i64)),
-            )
+            );
+            if let Some(setup_ms) = item.get("max_setup_elapsed_ms").and_then(Value::as_f64) {
+                if setup_ms > 0.0 {
+                    row.push_str(&format!(" | setup={setup_ms:.1} ms"));
+                }
+            }
+            if let (Some(retained), Some(limit)) = (
+                item.get("max_retained_file_chunks").and_then(Value::as_i64),
+                item.get("file_chunk_cache_limit").and_then(Value::as_i64),
+            ) {
+                row.push_str(&format!(
+                    " | retained_chunks={retained}/{limit} | cache_bound_held={}",
+                    item.get("cache_bound_held")
+                        .and_then(Value::as_bool)
+                        .map_or("-", |held| if held { "yes" } else { "no" })
+                ));
+            }
+            row
         })
         .collect();
     render_lines(

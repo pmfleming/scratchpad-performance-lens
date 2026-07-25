@@ -107,6 +107,14 @@ from Scratchpad-owned benchmark metadata JSON. Built-in metadata can still
 classify older or missing benchmark rows, but built-in thresholds are marked
 `stale_budget_risk: true` and do not drive budget pass/fail judgment.
 
+`resource_profiles.json` separates prepared setup from measured work where a
+scenario requires expensive fixture construction or indexing. Cache-oriented
+rows expose `retained_file_chunks`, `file_chunk_cache_limit`, and
+`cache_bound_held` per sample, plus scenario-level `cache_bound_violations`, so
+a low peak heap is not the only evidence that eviction is working. Explicit
+resource-contract violations and failed resource samples count as review budget
+misses instead of remaining passive diagnostics.
+
 `frame_metrics.json` separates two frame concepts:
 
 - Existing `frame_metrics` rows are annotated as `measurement_scope:
