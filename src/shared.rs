@@ -258,11 +258,31 @@ pub fn safe_delta(last: Option<i64>, first: Option<i64>) -> Option<i64> {
     Some(last? - first?)
 }
 
-pub fn read_json(path: &Path, default: Value) -> Value {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or(default)
+#[derive(Debug)]
+pub enum JsonRead {
+    Loaded(Value),
+    Missing,
+    Unparseable(String),
+}
+
+impl JsonRead {
+    pub fn into_value_or(self, default: Value) -> Value {
+        match self {
+            Self::Loaded(value) => value,
+            Self::Missing | Self::Unparseable(_) => default,
+        }
+    }
+}
+
+pub fn read_json(path: &Path) -> JsonRead {
+    match std::fs::read_to_string(path) {
+        Ok(text) => match serde_json::from_str(&text) {
+            Ok(value) => JsonRead::Loaded(value),
+            Err(error) => JsonRead::Unparseable(error.to_string()),
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => JsonRead::Missing,
+        Err(error) => JsonRead::Unparseable(error.to_string()),
+    }
 }
 
 pub fn write_visibility(

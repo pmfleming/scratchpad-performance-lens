@@ -7,7 +7,7 @@ pub(in crate::producers) fn read_analysis(
     file: &str,
     default: Value,
 ) -> Value {
-    shared::read_json(&config.output_dir.join(file), default)
+    shared::read_json(&config.output_dir.join(file)).into_value_or(default)
 }
 
 pub(in crate::producers) fn array_value(value: &Value) -> Vec<Value> {

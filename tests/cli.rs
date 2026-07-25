@@ -75,7 +75,7 @@ fn project_code_metrics_runs_against_scratchpad_when_available() {
 }
 
 #[test]
-fn schema_export_writes_performance_review_contract() {
+fn schema_export_writes_typed_artifact_contracts() {
     let dir = tempfile::tempdir().unwrap();
     let output = Command::new(bin())
         .args(["schema", "export", "--output"])
@@ -91,13 +91,61 @@ fn schema_export_writes_performance_review_contract() {
 
     let index_path = dir.path().join("index.json");
     let schema_path = dir.path().join("performance_review.schema.json");
+    let capacity_schema_path = dir.path().join("capacity_report.schema.json");
     assert!(index_path.exists());
     assert!(schema_path.exists());
+    assert!(capacity_schema_path.exists());
 
     let index: Value = serde_json::from_str(&std::fs::read_to_string(index_path).unwrap()).unwrap();
     assert_eq!(index["schemas"][0]["id"], "performance_review");
+    assert!(index["schemas"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|schema| schema["id"] == "capacity_report"));
 
     let schema_text = std::fs::read_to_string(schema_path).unwrap();
     assert!(schema_text.contains("promise_health"));
     assert!(schema_text.contains("failed_before_promise"));
+    let capacity_schema_text = std::fs::read_to_string(capacity_schema_path).unwrap();
+    assert!(capacity_schema_text.contains("first_failure_workload"));
+    assert!(capacity_schema_text.contains("workload_value"));
+}
+
+#[test]
+fn all_continues_after_probe_failures_and_writes_review() {
+    let dir = tempfile::tempdir().unwrap();
+    let project_root = dir.path().join("empty-project");
+    let output_dir = dir.path().join("analysis");
+    std::fs::create_dir(&project_root).unwrap();
+    let config_path = dir.path().join("splens.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            "project_name = \"fixture\"\nproject_root = {}\noutput_dir = {}\n",
+            serde_json::to_string(&project_root.to_string_lossy()).unwrap(),
+            serde_json::to_string(&output_dir.to_string_lossy()).unwrap(),
+        ),
+    )
+    .unwrap();
+
+    let output = Command::new(bin())
+        .args(["measure", "all", "--skip-bench", "--config"])
+        .arg(&config_path)
+        .current_dir(repo_root())
+        .output()
+        .expect("splens measure all should run");
+
+    assert!(!output.status.success());
+    assert!(output_dir.join("performance_review.json").exists());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("measure producer(s) failed"), "{stderr}");
+    assert!(stderr.contains("frame-metrics"), "{stderr}");
+}
+
+#[test]
+fn rejects_flags_when_selected_tool_cannot_use_them() {
+    let output = run_lens(&["measure", "capacity", "--fail-on-slow"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("only applies"));
 }

@@ -1,44 +1,94 @@
 use crate::app_package;
+use crate::artifacts::capacity_report::{
+    CapacityReportArtifact, SCHEMA_FILE as CAPACITY_REPORT_SCHEMA_FILE,
+    SCHEMA_ID as CAPACITY_REPORT_SCHEMA_ID,
+};
 use crate::artifacts::performance_review::{
     PerformanceReviewArtifact, SCHEMA_FILE as PERFORMANCE_REVIEW_SCHEMA_FILE,
     SCHEMA_ID as PERFORMANCE_REVIEW_SCHEMA_ID,
 };
 use crate::config::LensConfig;
 use crate::producers;
-use anyhow::Result;
-use clap::{Parser, Subcommand, ValueEnum};
+use anyhow::{bail, Result};
+use clap::{builder::PossibleValuesParser, Parser, Subcommand};
 use serde_json::json;
+use std::collections::HashSet;
 use std::path::PathBuf;
 
+type ProducerRun = fn(&LensConfig, MeasureOptions) -> Result<()>;
+
 const PRODUCERS: &[ProducerSpec] = &[
-    ProducerSpec::standard("slowspots", "slowspots.json", MeasureTool::Slowspots),
+    ProducerSpec::standard(
+        "slowspots",
+        "slowspots.json",
+        producers::slowspots,
+        &["search_speed", "frame_budget", "promise_latency"],
+        true,
+        false,
+    ),
     ProducerSpec::standard(
         "frame-metrics",
         "frame_metrics.json",
-        MeasureTool::FrameMetrics,
+        producers::frame_metrics,
+        &[],
+        false,
+        false,
     ),
-    ProducerSpec::standard("search", "search_speed.json", MeasureTool::Search),
-    ProducerSpec::standard("capacity", "capacity_report.json", MeasureTool::Capacity),
+    ProducerSpec::standard(
+        "search",
+        "search_speed.json",
+        producers::search_speed,
+        &["search_speed"],
+        true,
+        false,
+    ),
+    ProducerSpec::standard(
+        "capacity",
+        "capacity_report.json",
+        producers::capacity_report,
+        &[],
+        false,
+        false,
+    ),
     ProducerSpec::standard(
         "resources",
         "resource_profiles.json",
-        MeasureTool::Resources,
+        producers::resource_profiles,
+        &[],
+        false,
+        false,
     ),
-    ProducerSpec::extra("flamegraphs", "flamegraphs.json", MeasureTool::Flamegraphs),
+    ProducerSpec::extra(
+        "flamegraphs",
+        "flamegraphs.json",
+        producers::flamegraphs,
+        &[],
+        false,
+        true,
+    ),
     ProducerSpec::standard(
         "speed-report",
         "speed_efficiency_report.json",
-        MeasureTool::SpeedReport,
+        producers::speed_efficiency_report,
+        &[],
+        false,
+        false,
     ),
     ProducerSpec::standard(
         "performance-review",
         "performance_review.json",
-        MeasureTool::PerformanceReview,
+        producers::performance_review,
+        &[],
+        false,
+        false,
     ),
     ProducerSpec::standard(
         "project-code",
         "project_code_metrics.json",
-        MeasureTool::ProjectCode,
+        producers::project_code_metrics,
+        &[],
+        false,
+        false,
     ),
 ];
 
@@ -46,30 +96,49 @@ const PRODUCERS: &[ProducerSpec] = &[
 struct ProducerSpec {
     tool: &'static str,
     artifact: &'static str,
-    measure_tool: MeasureTool,
+    run: ProducerRun,
+    benchmarks: &'static [&'static str],
     standard_run: bool,
+    supports_fail_on_slow: bool,
+    supports_index_only: bool,
 }
 
 impl ProducerSpec {
     const fn standard(
         tool: &'static str,
         artifact: &'static str,
-        measure_tool: MeasureTool,
+        run: ProducerRun,
+        benchmarks: &'static [&'static str],
+        supports_fail_on_slow: bool,
+        supports_index_only: bool,
     ) -> Self {
         Self {
             tool,
             artifact,
-            measure_tool,
+            run,
+            benchmarks,
             standard_run: true,
+            supports_fail_on_slow,
+            supports_index_only,
         }
     }
 
-    const fn extra(tool: &'static str, artifact: &'static str, measure_tool: MeasureTool) -> Self {
+    const fn extra(
+        tool: &'static str,
+        artifact: &'static str,
+        run: ProducerRun,
+        benchmarks: &'static [&'static str],
+        supports_fail_on_slow: bool,
+        supports_index_only: bool,
+    ) -> Self {
         Self {
             tool,
             artifact,
-            measure_tool,
+            run,
+            benchmarks,
             standard_run: false,
+            supports_fail_on_slow,
+            supports_index_only,
         }
     }
 }
@@ -97,16 +166,27 @@ struct ConfigArgs {
 
 #[derive(Debug, Parser)]
 struct MeasureArgs {
-    #[arg(default_value = "all")]
-    tool: MeasureSelection,
+    #[arg(default_value = "all", value_parser = measure_selection_values())]
+    tool: String,
     #[arg(long)]
     config: Option<PathBuf>,
-    #[arg(long)]
+    #[arg(long, help = "Skip Criterion runs (slowspots and search only)")]
     skip_bench: bool,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Fail on threshold violations (slowspots and search only)"
+    )]
     fail_on_slow: bool,
-    #[arg(long)]
+    #[arg(long, help = "Only index existing SVGs (flamegraphs only)")]
     index_only: bool,
+}
+
+fn measure_selection_values() -> PossibleValuesParser {
+    PossibleValuesParser::new(
+        ["all", "all-with-flamegraphs"]
+            .into_iter()
+            .chain(PRODUCERS.iter().map(|producer| producer.tool)),
+    )
 }
 
 #[derive(Debug, Parser)]
@@ -124,25 +204,6 @@ enum SchemaCommand {
 struct SchemaExportArgs {
     #[arg(long, default_value = "schemas")]
     output: PathBuf,
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-enum MeasureSelection {
-    All,
-    AllWithFlamegraphs,
-    Slowspots,
-    #[value(name = "frame-metrics")]
-    FrameMetrics,
-    Search,
-    Capacity,
-    Resources,
-    Flamegraphs,
-    #[value(name = "speed-report")]
-    SpeedReport,
-    #[value(name = "performance-review")]
-    PerformanceReview,
-    #[value(name = "project-code")]
-    ProjectCode,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -209,22 +270,33 @@ fn schema(args: SchemaArgs) -> Result<()> {
 
 fn export_schemas(args: SchemaExportArgs) -> Result<()> {
     std::fs::create_dir_all(&args.output)?;
-    let performance_review_schema = schemars::schema_for!(PerformanceReviewArtifact);
-    let performance_review_path = args.output.join(PERFORMANCE_REVIEW_SCHEMA_FILE);
-    std::fs::write(
-        &performance_review_path,
-        format!(
-            "{}\n",
-            serde_json::to_string_pretty(&performance_review_schema)?
+    let schemas = [
+        (
+            PERFORMANCE_REVIEW_SCHEMA_ID,
+            PERFORMANCE_REVIEW_SCHEMA_FILE,
+            "performance_review.json",
+            serde_json::to_value(schemars::schema_for!(PerformanceReviewArtifact))?,
         ),
-    )?;
+        (
+            CAPACITY_REPORT_SCHEMA_ID,
+            CAPACITY_REPORT_SCHEMA_FILE,
+            "capacity_report.json",
+            serde_json::to_value(schemars::schema_for!(CapacityReportArtifact))?,
+        ),
+    ];
+    for (_, file, _, schema) in &schemas {
+        std::fs::write(
+            args.output.join(file),
+            format!("{}\n", serde_json::to_string_pretty(schema)?),
+        )?;
+    }
     let index = json!({
         "version": 1,
-        "schemas": [{
-            "id": PERFORMANCE_REVIEW_SCHEMA_ID,
-            "file": PERFORMANCE_REVIEW_SCHEMA_FILE,
-            "artifact": "performance_review.json",
-        }],
+        "schemas": schemas.iter().map(|(id, file, artifact, _)| json!({
+            "id": id,
+            "file": file,
+            "artifact": artifact,
+        })).collect::<Vec<_>>(),
     });
     std::fs::write(
         args.output.join("index.json"),
@@ -242,65 +314,70 @@ fn measure(args: MeasureArgs) -> Result<()> {
         fail_on_slow: args.fail_on_slow,
         index_only: args.index_only,
     };
-    for tool in selected_tools(args.tool) {
-        run_measure_tool(tool, &config, options)?;
+    let selected = selected_producers(&args.tool);
+    validate_measure_options(&selected, options)?;
+
+    let mut failures = Vec::new();
+    let mut completed_benchmarks = HashSet::new();
+    for producer in selected {
+        let mut producer_options = options;
+        if !producer.benchmarks.is_empty()
+            && producer
+                .benchmarks
+                .iter()
+                .all(|benchmark| completed_benchmarks.contains(benchmark))
+        {
+            producer_options.skip_bench = true;
+        }
+        match (producer.run)(&config, producer_options) {
+            Ok(()) => {
+                if !options.skip_bench {
+                    completed_benchmarks.extend(producer.benchmarks.iter().copied());
+                }
+            }
+            Err(error) => {
+                eprintln!("{} failed: {error:#}", producer.tool);
+                failures.push(format!("{}: {error:#}", producer.tool));
+            }
+        }
+    }
+    if !failures.is_empty() {
+        bail!(
+            "{} measure producer(s) failed:\n- {}",
+            failures.len(),
+            failures.join("\n- ")
+        );
     }
     Ok(())
 }
 
-fn selected_tools(selection: MeasureSelection) -> Vec<MeasureTool> {
+fn selected_producers(selection: &str) -> Vec<&'static ProducerSpec> {
     match selection {
-        MeasureSelection::All => standard_run_order(),
-        MeasureSelection::AllWithFlamegraphs => {
-            let mut tools = standard_run_order();
-            tools.push(MeasureTool::Flamegraphs);
-            tools
-        }
-        MeasureSelection::Slowspots => vec![MeasureTool::Slowspots],
-        MeasureSelection::FrameMetrics => vec![MeasureTool::FrameMetrics],
-        MeasureSelection::Search => vec![MeasureTool::Search],
-        MeasureSelection::Capacity => vec![MeasureTool::Capacity],
-        MeasureSelection::Resources => vec![MeasureTool::Resources],
-        MeasureSelection::Flamegraphs => vec![MeasureTool::Flamegraphs],
-        MeasureSelection::SpeedReport => vec![MeasureTool::SpeedReport],
-        MeasureSelection::PerformanceReview => vec![MeasureTool::PerformanceReview],
-        MeasureSelection::ProjectCode => vec![MeasureTool::ProjectCode],
+        "all" => PRODUCERS
+            .iter()
+            .filter(|producer| producer.standard_run)
+            .collect(),
+        "all-with-flamegraphs" => PRODUCERS.iter().collect(),
+        tool => PRODUCERS
+            .iter()
+            .find(|producer| producer.tool == tool)
+            .into_iter()
+            .collect(),
     }
 }
 
-fn standard_run_order() -> Vec<MeasureTool> {
-    PRODUCERS
-        .iter()
-        .filter(|producer| producer.standard_run)
-        .map(|producer| producer.measure_tool)
-        .collect()
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum MeasureTool {
-    Slowspots,
-    FrameMetrics,
-    Search,
-    Capacity,
-    Resources,
-    Flamegraphs,
-    SpeedReport,
-    PerformanceReview,
-    ProjectCode,
-}
-
-fn run_measure_tool(tool: MeasureTool, config: &LensConfig, options: MeasureOptions) -> Result<()> {
-    match tool {
-        MeasureTool::Slowspots => producers::slowspots(config, options),
-        MeasureTool::FrameMetrics => producers::frame_metrics(config),
-        MeasureTool::Search => producers::search_speed(config, options),
-        MeasureTool::Capacity => producers::capacity_report(config),
-        MeasureTool::Resources => producers::resource_profiles(config),
-        MeasureTool::Flamegraphs => producers::flamegraphs(config, options),
-        MeasureTool::SpeedReport => producers::speed_efficiency_report(config),
-        MeasureTool::PerformanceReview => producers::performance_review(config),
-        MeasureTool::ProjectCode => producers::project_code_metrics(config),
+fn validate_measure_options(selected: &[&ProducerSpec], options: MeasureOptions) -> Result<()> {
+    if options.fail_on_slow
+        && !selected
+            .iter()
+            .any(|producer| producer.supports_fail_on_slow)
+    {
+        bail!("--fail-on-slow only applies to slowspots and search");
     }
+    if options.index_only && !selected.iter().any(|producer| producer.supports_index_only) {
+        bail!("--index-only only applies to flamegraphs");
+    }
+    Ok(())
 }
 
 fn title_case(tool: &str) -> String {

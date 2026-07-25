@@ -1,11 +1,12 @@
 use super::common::{array_value, budget_probe_ms, read_analysis, scenarios_array};
 use super::render::render_speed_report;
+use crate::cli::MeasureOptions;
 use crate::config::LensConfig;
 use crate::shared;
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
-pub fn speed_efficiency_report(config: &LensConfig) -> Result<()> {
+pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
     let slowspots = read_analysis(config, "slowspots.json", json!([]));
     let search = read_analysis(config, "search_speed.json", json!([]));
     let flamegraphs = read_analysis(config, "flamegraphs.json", json!([]));

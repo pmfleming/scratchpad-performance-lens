@@ -9,7 +9,13 @@ use crate::shared;
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
 pub fn slowspots(config: &LensConfig, options: MeasureOptions) -> Result<()> {
-    if !options.skip_bench {
+    let mut probe_failure = (!config.project_root.is_dir()).then(|| {
+        format!(
+            "project root does not exist: {}",
+            config.project_root.display()
+        )
+    });
+    if !options.skip_bench && probe_failure.is_none() {
         if let Err(error) = shared::run_progress_command(
             &config.project_root,
             &[
@@ -19,10 +25,13 @@ pub fn slowspots(config: &LensConfig, options: MeasureOptions) -> Result<()> {
                 "search_speed",
                 "--bench",
                 "frame_budget",
+                "--bench",
+                "promise_latency",
             ],
             "Running benchmarks via cargo bench...",
         ) {
             eprintln!("Benchmarking failed: {error}");
+            probe_failure = Some(error.to_string());
         }
     }
 
@@ -38,7 +47,7 @@ pub fn slowspots(config: &LensConfig, options: MeasureOptions) -> Result<()> {
             eprintln!("Skipping stale or unmapped Criterion result: {name}");
             continue;
         };
-        let estimates = shared::read_json(&path, json!({}));
+        let estimates = shared::read_json(&path).into_value_or(json!({}));
         let mean_ns = shared::f64_field(&estimates, &["mean", "point_estimate"]);
         let std_dev_ns = shared::f64_field(&estimates, &["std_dev", "point_estimate"]);
         let approx_p95_ns = approx_p95_ns(mean_ns, std_dev_ns);
@@ -101,6 +110,9 @@ pub fn slowspots(config: &LensConfig, options: MeasureOptions) -> Result<()> {
         "slowspot",
         cli,
     )?;
+    if let Some(error) = probe_failure {
+        bail!("slowspots probe failed: {error}");
+    }
     if options.fail_on_slow
         && payload
             .as_array()

@@ -1,11 +1,12 @@
 use super::common::{probe_path, run_probe_events};
 use super::render::render_resources;
+use crate::cli::MeasureOptions;
 use crate::config::LensConfig;
 use crate::shared;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
-pub fn resource_profiles(config: &LensConfig) -> Result<()> {
+pub fn resource_profiles(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
     let events = run_probe_events(
         &config.project_root,
         &[
@@ -19,21 +20,30 @@ pub fn resource_profiles(config: &LensConfig) -> Result<()> {
         probe_path("resource_probe"),
         "resource probe",
     );
-    let payload = match events {
-        Ok(events) if !events.is_empty() => summarize_resources(events, "completed", None),
-        Ok(_) => empty_resources("No probe samples were recorded."),
-        Err(error) => summarize_resources(
-            fallback_resource_events(),
-            "fallback_completed",
-            Some(error.to_string()),
-        ),
+    let (payload, failure) = match events {
+        Ok(events) if !events.is_empty() => (summarize_resources(events, "completed", None), None),
+        Ok(_) => {
+            let error = "No probe samples were recorded.".to_string();
+            (empty_resources(&error), Some(error))
+        }
+        Err(error) => {
+            let error = error.to_string();
+            (
+                summarize_resources(fallback_resource_events(), "failed", Some(error.clone())),
+                Some(error),
+            )
+        }
     };
     shared::write_visibility(
         &config.output_dir.join("resource_profiles.json"),
         &payload,
         "resource profiles",
         render_resources(&payload),
-    )
+    )?;
+    if let Some(error) = failure {
+        bail!("resource probe failed: {error}");
+    }
+    Ok(())
 }
 
 fn fallback_resource_events() -> Vec<Value> {

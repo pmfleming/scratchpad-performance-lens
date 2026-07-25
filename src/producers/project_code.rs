@@ -2,6 +2,7 @@ mod classifier;
 
 use super::common::output_text;
 use super::render::render_project_code;
+use crate::cli::MeasureOptions;
 use crate::config::LensConfig;
 use crate::shared;
 use anyhow::{bail, Result};
@@ -10,7 +11,34 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
-pub fn project_code_metrics(config: &LensConfig) -> Result<()> {
+pub fn project_code_metrics(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
+    match project_code_payload(config) {
+        Ok(payload) => shared::write_visibility(
+            &config.output_dir.join("project_code_metrics.json"),
+            &payload,
+            "project code metrics",
+            render_project_code(&payload),
+        ),
+        Err(error) => {
+            let payload = json!({
+                "version": 1,
+                "source": "rust_git_first_parent_history",
+                "meta": {"probe_status": "failed", "error": error.to_string()},
+                "current": null,
+                "history": [],
+            });
+            shared::write_visibility(
+                &config.output_dir.join("project_code_metrics.json"),
+                &payload,
+                "project code metrics",
+                render_project_code(&payload),
+            )?;
+            bail!("project code probe failed: {error}");
+        }
+    }
+}
+
+fn project_code_payload(config: &LensConfig) -> Result<Value> {
     let ref_name = remote_ref(&config.project_root);
     let latest_sha = git(&config.project_root, &["rev-parse", &ref_name])?
         .trim()
@@ -42,12 +70,7 @@ pub fn project_code_metrics(config: &LensConfig) -> Result<()> {
         "current": current.to_json(),
         "history": history,
     });
-    shared::write_visibility(
-        &config.output_dir.join("project_code_metrics.json"),
-        &payload,
-        "project code metrics",
-        render_project_code(&payload),
-    )
+    Ok(payload)
 }
 
 #[derive(Clone, Copy, Default)]

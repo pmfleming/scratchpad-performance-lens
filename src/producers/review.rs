@@ -5,12 +5,14 @@ mod registry;
 use super::common::{array_value, read_analysis, scenarios_array};
 use super::flamegraphs::fallback_flamegraphs;
 use super::render::render_performance_review;
+use crate::artifacts::capacity_report::{CapacityReportArtifact, CapacityScenario};
 use crate::artifacts::performance_review::{
     CoverageAxes, CoverageStatus, MeasurementClassSummary, MeasurementSplit,
     PerformanceReviewArtifact, PerformanceReviewMeta, PerformanceReviewScenario,
     PerformanceReviewSummary, Presentation, PromiseHealth, PromiseHealthSummary,
     PromiseRegistryEntry, ScaleCheckStatus, ScenarioEvidence,
 };
+use crate::cli::MeasureOptions;
 use crate::config::LensConfig;
 use crate::shared;
 use anyhow::Result;
@@ -20,10 +22,15 @@ use evidence::{
 use health::{coverage_axis, promise_health, scale_checks, scenario_gaps, scenario_opportunities};
 use registry::{probe_classes, promised_scale_payload, review_scenarios, ReviewScenario};
 use serde_json::{json, Value};
-pub fn performance_review(config: &LensConfig) -> Result<()> {
+pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
     let slowspots = read_analysis(config, "slowspots.json", json!([]));
     let search = read_analysis(config, "search_speed.json", json!([]));
-    let capacity = read_analysis(config, "capacity_report.json", json!({"scenarios": []}));
+    let capacity = serde_json::from_value::<CapacityReportArtifact>(read_analysis(
+        config,
+        "capacity_report.json",
+        json!({"scenarios": []}),
+    ))
+    .unwrap_or_default();
     let resources = read_analysis(config, "resource_profiles.json", json!({"scenarios": []}));
     let flamegraphs = read_analysis(
         config,
@@ -33,9 +40,9 @@ pub fn performance_review(config: &LensConfig) -> Result<()> {
     let speed_report = read_analysis(config, "speed_efficiency_report.json", json!({}));
 
     let latency_rows = unique_rows([array_value(&slowspots), array_value(&search)].concat());
-    let capacity_rows = scenarios_array(&capacity).to_vec();
+    let capacity_rows = capacity.scenarios;
     let resource_rows = scenarios_array(&resources).to_vec();
-    let capacity_synthetic = payload_synthetic(&capacity);
+    let capacity_synthetic = capacity.meta.synthetic;
     let resources_synthetic = payload_synthetic(&resources);
     let scenarios = review_scenarios();
     let scenario_payload: Vec<_> = scenarios
@@ -154,7 +161,7 @@ pub fn performance_review(config: &LensConfig) -> Result<()> {
 fn build_review_scenario(
     scenario: &ReviewScenario,
     latency: &[Value],
-    capacity: &[Value],
+    capacity: &[CapacityScenario],
     resources: &[Value],
     flamegraphs: Vec<Value>,
     capacity_synthetic: bool,
@@ -167,11 +174,7 @@ fn build_review_scenario(
         .collect();
     let capacity_rows: Vec<_> = capacity
         .iter()
-        .filter(|row| {
-            row.get("scenario")
-                .and_then(Value::as_str)
-                .is_some_and(|id| scenario.capacity_scenarios.contains(&id))
-        })
+        .filter(|row| scenario.capacity_scenarios.contains(&row.scenario.as_str()))
         .cloned()
         .collect();
     let resource_rows: Vec<_> = resources
@@ -192,10 +195,10 @@ fn build_review_scenario(
         })
         .collect();
     let axes = CoverageAxes {
-        speed: coverage_axis(&latency_rows, !scenario.benchmark_keys.is_empty()),
-        capacity: coverage_axis(&capacity_rows, !scenario.capacity_scenarios.is_empty()),
-        resource: coverage_axis(&resource_rows, !scenario.resource_scenarios.is_empty()),
-        profiles: coverage_axis(&profile_rows, !scenario.profile_ids.is_empty()),
+        speed: coverage_axis(latency_rows.len(), !scenario.benchmark_keys.is_empty()),
+        capacity: coverage_axis(capacity_rows.len(), !scenario.capacity_scenarios.is_empty()),
+        resource: coverage_axis(resource_rows.len(), !scenario.resource_scenarios.is_empty()),
+        profiles: coverage_axis(profile_rows.len(), !scenario.profile_ids.is_empty()),
     };
     let axis_values = [&axes.speed, &axes.capacity, &axes.resource, &axes.profiles];
     let required = axis_values.iter().filter(|axis| axis.required).count();
@@ -221,11 +224,7 @@ fn build_review_scenario(
     let budget_misses = latency_rows.iter().filter(over_budget_latency).count();
     let ceilings_reached = capacity_rows
         .iter()
-        .filter(|row| {
-            row.get("ceiling_reached")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-        })
+        .filter(|row| row.ceiling_reached.unwrap_or(false))
         .count();
     let scale_failures = scale_checks
         .iter()
@@ -311,16 +310,19 @@ fn build_review_scenario(
             }),
         peak_working_set_bytes: capacity_rows
             .iter()
-            .chain(resource_rows.iter())
-            .filter_map(|row| {
+            .filter_map(|row| row.peak_working_set_bytes)
+            .chain(resource_rows.iter().filter_map(|row| {
                 row.get("peak_working_set_bytes")
                     .or_else(|| row.get("max_working_set_bytes"))
                     .and_then(Value::as_i64)
-            })
+            }))
             .max(),
         evidence: ScenarioEvidence {
             latency: latency_rows,
-            capacity: capacity_rows,
+            capacity: capacity_rows
+                .into_iter()
+                .filter_map(|row| serde_json::to_value(row).ok())
+                .collect(),
             resources: resource_rows,
             profiles: profile_rows,
         },
@@ -329,11 +331,32 @@ fn build_review_scenario(
 #[cfg(test)]
 mod tests {
     use super::{build_review_scenario, review_scenarios};
+    use crate::artifacts::capacity_report::{CapacitySample, CapacityScenario};
     use crate::artifacts::performance_review::{
         CeilingStatus, CoverageStatus, PromiseHealth, ScaleCheckStatus,
     };
     use crate::shared;
-    use serde_json::json;
+    use serde_json::{json, Value};
+
+    fn capacity(mut value: Value) -> CapacityScenario {
+        if let Some(samples) = value.get_mut("samples").and_then(Value::as_array_mut) {
+            for sample in samples {
+                let mut complete = serde_json::to_value(CapacitySample::default()).unwrap();
+                complete
+                    .as_object_mut()
+                    .unwrap()
+                    .extend(sample.as_object().unwrap().clone());
+                *sample = complete;
+            }
+        }
+        let mut complete = serde_json::to_value(CapacityScenario::default()).unwrap();
+        complete
+            .as_object_mut()
+            .unwrap()
+            .extend(value.as_object().unwrap().clone());
+        serde_json::from_value(complete).unwrap()
+    }
+
     #[test]
     fn promise_health_fails_even_when_coverage_is_complete() {
         let scenario = review_scenarios()
@@ -348,11 +371,11 @@ mod tests {
                 "threshold_ms": 100.0,
                 "budget_probe_ns": 125_000_000.0,
             })],
-            &[json!({
+            &[capacity(json!({
                 "scenario": "file_size_ceiling",
                 "ceiling_reached": false,
                 "samples": [{"workload_value": shared::GB}],
-            })],
+            }))],
             &[json!({
                 "scenario": "large_utf8_load_peak_memory",
                 "samples": [{"workload_value": shared::GB}],
@@ -375,11 +398,11 @@ mod tests {
         let row = build_review_scenario(
             &scenario,
             &[],
-            &[json!({
+            &[capacity(json!({
                 "scenario": "tab_count_ceiling",
                 "ceiling_reached": null,
                 "samples": [{"workload_value": 10_000}],
-            })],
+            }))],
             &[],
             vec![],
             true,
@@ -404,12 +427,12 @@ mod tests {
                 "threshold_ms": 100.0,
                 "budget_probe_ns": 80_000_000.0,
             })],
-            &[json!({
-                "scenario": "many_file_count_ceiling",
+            &[capacity(json!({
+                "scenario": "many_file_first_visible_ceiling",
                 "ceiling_reached": true,
                 "first_failure_workload": 50_000,
                 "last_successful_workload": 10_000,
-            })],
+            }))],
             &[json!({
                 "scenario": "many_file_resource_tracking",
                 "samples": [{"workload_value": 10_000}],
@@ -444,12 +467,20 @@ mod tests {
                 "threshold_ms": 100.0,
                 "budget_probe_ns": 80_000_000.0,
             })],
-            &[json!({
-                "scenario": "many_file_count_ceiling",
-                "ceiling_reached": true,
-                "first_failure_workload": 5_000,
-                "last_successful_workload": 1_000,
-            })],
+            &[
+                capacity(json!({
+                    "scenario": "many_file_first_visible_ceiling",
+                    "ceiling_reached": true,
+                    "first_failure_workload": 5_000,
+                    "last_successful_workload": 1_000,
+                })),
+                capacity(json!({
+                    "scenario": "search_target_count_ceiling",
+                    "ceiling_reached": false,
+                    "last_successful_workload": 10_000,
+                    "samples": [{"workload_value": 10_000}],
+                })),
+            ],
             &[json!({
                 "scenario": "many_file_resource_tracking",
                 "samples": [{"workload_value": 10_000}],
@@ -465,6 +496,10 @@ mod tests {
         assert_eq!(
             row.scale_checks[0].ceiling_status,
             CeilingStatus::FailedBeforePromise
+        );
+        assert_eq!(
+            row.scale_checks[0].failed_capacity_scenarios,
+            ["many_file_first_visible_ceiling"]
         );
     }
 }

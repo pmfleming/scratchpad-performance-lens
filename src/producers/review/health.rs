@@ -1,14 +1,15 @@
 use super::registry::ReviewScenario;
+use crate::artifacts::capacity_report::CapacityScenario;
 use crate::artifacts::performance_review::{
     CeilingStatus, CoverageAxes, CoverageAxis, CoverageStatus, PromiseHealth, ScaleCheck,
     ScaleCheckStatus,
 };
 use serde_json::Value;
-pub(super) fn coverage_axis(rows: &[Value], required: bool) -> CoverageAxis {
+pub(super) fn coverage_axis(count: usize, required: bool) -> CoverageAxis {
     CoverageAxis {
         required,
-        covered: !rows.is_empty(),
-        count: rows.len(),
+        covered: count > 0,
+        count,
     }
 }
 
@@ -27,7 +28,7 @@ pub(super) fn scenario_gaps(axes: &CoverageAxes) -> Vec<String> {
 
 pub(super) fn scale_checks(
     scenario: &ReviewScenario,
-    capacity_rows: &[Value],
+    capacity_rows: &[CapacityScenario],
     resource_rows: &[Value],
     capacity_synthetic: bool,
     resources_synthetic: bool,
@@ -38,7 +39,7 @@ pub(super) fn scale_checks(
         .map(|target| {
             let matching_capacity: Vec<_> = capacity_rows
                 .iter()
-                .filter(|row| row_scenario_matches(row, target.capacity_scenarios))
+                .filter(|row| target.capacity_scenarios.contains(&row.scenario.as_str()))
                 .collect();
             let matching_resources: Vec<_> = resource_rows
                 .iter()
@@ -46,33 +47,40 @@ pub(super) fn scale_checks(
                 .collect();
             let max_workload_value = matching_capacity
                 .iter()
-                .chain(matching_resources.iter())
-                .filter_map(|row| max_workload_value(row))
+                .filter_map(|row| row.max_workload_value())
+                .chain(
+                    matching_resources
+                        .iter()
+                        .filter_map(|row| max_resource_workload_value(row)),
+                )
                 .max();
             let first_failure_workload = matching_capacity
                 .iter()
-                .filter_map(|row| row.get("first_failure_workload").and_then(Value::as_i64))
+                .filter_map(|row| row.first_failure_workload)
                 .min();
             let last_successful_workload = matching_capacity
                 .iter()
-                .filter_map(|row| row.get("last_successful_workload").and_then(Value::as_i64))
+                .filter_map(|row| row.last_successful_workload)
                 .max();
             let synthetic = (capacity_synthetic && !matching_capacity.is_empty())
                 || (resources_synthetic && !matching_resources.is_empty());
-            let failed_before_promise = ceiling_failed_before_promise(
-                target.minimum,
-                first_failure_workload,
-                last_successful_workload,
-            );
+            let failed_capacity_scenarios = matching_capacity
+                .iter()
+                .filter(|row| {
+                    ceiling_failed_before_promise(
+                        target.minimum,
+                        row.first_failure_workload,
+                        row.last_successful_workload,
+                    )
+                })
+                .map(|row| row.scenario.clone())
+                .collect::<Vec<_>>();
+            let failed_before_promise = !failed_capacity_scenarios.is_empty();
             let met = !synthetic
                 && !failed_before_promise
                 && max_workload_value.is_some_and(|value| value >= target.minimum);
-            let ceiling_status = ceiling_status(
-                synthetic,
-                first_failure_workload,
-                last_successful_workload,
-                target.minimum,
-            );
+            let ceiling_status =
+                ceiling_status(synthetic, failed_before_promise, first_failure_workload);
             ScaleCheck {
                 id: target.id.to_string(),
                 label: target.label.to_string(),
@@ -87,6 +95,7 @@ pub(super) fn scale_checks(
                     last_successful_workload,
                 ),
                 evidence_count: matching_capacity.len() + matching_resources.len(),
+                failed_capacity_scenarios,
                 synthetic,
                 met,
                 ceiling_status,
@@ -118,17 +127,12 @@ fn ceiling_failed_before_promise(
 
 fn ceiling_status(
     synthetic: bool,
+    failed_before_promise: bool,
     first_failure_workload: Option<i64>,
-    last_successful_workload: Option<i64>,
-    minimum: i64,
 ) -> CeilingStatus {
     if synthetic {
         CeilingStatus::Unmeasured
-    } else if ceiling_failed_before_promise(
-        minimum,
-        first_failure_workload,
-        last_successful_workload,
-    ) {
+    } else if failed_before_promise {
         CeilingStatus::FailedBeforePromise
     } else if first_failure_workload.is_some() {
         CeilingStatus::FailedAfterPromise
@@ -154,7 +158,7 @@ fn row_scenario_matches(row: &Value, scenario_ids: &[&str]) -> bool {
         .is_some_and(|id| scenario_ids.contains(&id))
 }
 
-fn max_workload_value(row: &Value) -> Option<i64> {
+fn max_resource_workload_value(row: &Value) -> Option<i64> {
     let direct = [
         "last_successful_workload",
         "first_failure_workload",

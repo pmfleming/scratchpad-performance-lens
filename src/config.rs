@@ -55,12 +55,9 @@ impl LensConfig {
 }
 
 fn absolutize_from(path: PathBuf) -> Result<PathBuf> {
-    let joined = if path.is_absolute() {
-        path
+    if path.is_absolute() {
+        Ok(path)
     } else {
-        std::env::current_dir()?.join(path)
-    };
-    joined
-        .canonicalize()
-        .with_context(|| format!("could not resolve project root {}", joined.display()))
+        Ok(std::env::current_dir()?.join(path))
+    }
 }

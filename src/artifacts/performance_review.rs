@@ -33,6 +33,10 @@ pub struct SourceArtifactStatus {
     pub path: String,
     pub available: bool,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probe_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -155,6 +159,7 @@ pub struct ScaleCheck {
     pub last_successful_workload: Option<i64>,
     pub headroom_workload: Option<i64>,
     pub evidence_count: usize,
+    pub failed_capacity_scenarios: Vec<String>,
     pub synthetic: bool,
     pub met: bool,
     pub ceiling_status: CeilingStatus,

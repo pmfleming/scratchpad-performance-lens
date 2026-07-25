@@ -1,5 +1,7 @@
 use anyhow::Result;
 use serde_json::{json, Value};
+use std::collections::VecDeque;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -14,7 +16,8 @@ pub fn payload() -> Result<Value> {
     let error_log_path = root.join(SESSION_ERROR_LOG_NAME);
     let mut warnings = Vec::new();
     let manifest = load_json_file(&manifest_path, &mut warnings);
-    let diagnostics = load_ndjson_file(&error_log_path, &mut warnings);
+    let mut diagnostic_count = 0;
+    let diagnostics = load_ndjson_file(&error_log_path, &mut warnings, &mut diagnostic_count);
     let buffers = flatten_session_buffers(manifest.as_ref(), &root);
     let buffer_files = if root.exists() {
         std::fs::read_dir(&root)?
@@ -57,12 +60,12 @@ pub fn payload() -> Result<Value> {
             "dirty_buffer_count": buffers.iter().filter(|buffer| buffer.get("is_dirty").and_then(Value::as_bool).unwrap_or(false)).count(),
             "snapshot_file_count": buffer_files.len(),
             "missing_snapshot_count": buffers.iter().filter(|buffer| !buffer.get("snapshot").and_then(|snapshot| snapshot.get("exists")).and_then(Value::as_bool).unwrap_or(false)).count(),
-            "diagnostic_count": diagnostics.len(),
+            "diagnostic_count": diagnostic_count,
         },
         "buffers": buffers,
         "buffer_files": buffer_files,
         "topology": session_topology_summary(manifest.as_ref()),
-        "diagnostics": diagnostics.into_iter().rev().take(500).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>(),
+        "diagnostics": diagnostics,
         "warnings": warnings,
         "app_process_running": app_process_running(),
     }))
@@ -109,30 +112,45 @@ fn load_json_file(path: &Path, warnings: &mut Vec<String>) -> Option<Value> {
     }
 }
 
-fn load_ndjson_file(path: &Path, warnings: &mut Vec<String>) -> Vec<Value> {
+fn load_ndjson_file(
+    path: &Path,
+    warnings: &mut Vec<String>,
+    total_count: &mut usize,
+) -> Vec<Value> {
+    const MAX_DIAGNOSTICS: usize = 500;
+
     if !path.exists() {
         return Vec::new();
     }
-    let Ok(text) = std::fs::read_to_string(path) else {
+    let Ok(file) = std::fs::File::open(path) else {
         warnings.push(format!(
             "Could not read {}",
             path.file_name().unwrap_or_default().to_string_lossy()
         ));
         return Vec::new();
     };
-    let mut diagnostics = Vec::new();
-    for (index, line) in text.lines().enumerate() {
+    let mut diagnostics = VecDeque::with_capacity(MAX_DIAGNOSTICS);
+    for (index, line) in BufReader::new(file).lines().enumerate() {
+        let Ok(line) = line else {
+            warnings.push(format!(
+                "Could not read {} line {}",
+                path.file_name().unwrap_or_default().to_string_lossy(),
+                index + 1
+            ));
+            break;
+        };
         if line.trim().is_empty() {
             continue;
         }
-        let stream = serde_json::Deserializer::from_str(line).into_iter::<Value>();
-        let mut parsed_any = false;
-        for parsed in stream {
+        for parsed in serde_json::Deserializer::from_str(&line).into_iter::<Value>() {
             match parsed {
                 Ok(mut value) if value.is_object() => {
                     value["line"] = json!(index + 1);
-                    diagnostics.push(value);
-                    parsed_any = true;
+                    *total_count += 1;
+                    if diagnostics.len() == MAX_DIAGNOSTICS {
+                        diagnostics.pop_front();
+                    }
+                    diagnostics.push_back(value);
                 }
                 Ok(_) => warnings.push(format!(
                     "Skipped non-object {} line {}",
@@ -149,11 +167,8 @@ fn load_ndjson_file(path: &Path, warnings: &mut Vec<String>) -> Vec<Value> {
                 }
             }
         }
-        if !parsed_any && line.trim().is_empty() {
-            continue;
-        }
     }
-    diagnostics
+    diagnostics.into_iter().collect()
 }
 
 fn iter_session_tabs(manifest: Option<&Value>) -> Vec<(usize, Value)> {
@@ -295,10 +310,12 @@ mod tests {
         let path = dir.path().join("error.log");
         std::fs::write(&path, r#"{"kind":"first"}{"kind":"second"}"#).unwrap();
         let mut warnings = Vec::new();
+        let mut total_count = 0;
 
-        let diagnostics = load_ndjson_file(&path, &mut warnings);
+        let diagnostics = load_ndjson_file(&path, &mut warnings, &mut total_count);
 
         assert_eq!(warnings, Vec::<String>::new());
+        assert_eq!(total_count, 2);
         assert_eq!(diagnostics[0]["kind"], "first");
         assert_eq!(diagnostics[1]["kind"], "second");
         assert_eq!(diagnostics[0]["line"], 1);
@@ -311,10 +328,12 @@ mod tests {
         let path = dir.path().join("error.log");
         std::fs::write(&path, r#"{"kind":"valid"} trailing"#).unwrap();
         let mut warnings = Vec::new();
+        let mut total_count = 0;
 
-        let diagnostics = load_ndjson_file(&path, &mut warnings);
+        let diagnostics = load_ndjson_file(&path, &mut warnings, &mut total_count);
 
         assert_eq!(diagnostics[0]["kind"], "valid");
+        assert_eq!(total_count, 1);
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("Skipped malformed error.log line 1"));
     }

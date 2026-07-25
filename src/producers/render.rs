@@ -124,13 +124,14 @@ pub(super) fn render_resources(payload: &Value) -> String {
     let mut lines = vec!["Resource Profiles".to_string()];
     for item in scenarios_array(payload) {
         lines.push(format!(
-            "- {}: max_elapsed={:.1} ms | max_alloc={} | max_ws={}",
+            "- {}: max_elapsed={:.1} ms | peak_heap={} | total_alloc={} | max_ws={}",
             item.get("scenario_label")
                 .and_then(Value::as_str)
                 .unwrap_or("-"),
             item.get("max_elapsed_ms")
                 .and_then(Value::as_f64)
                 .unwrap_or(0.0),
+            shared::human_bytes(item.get("max_peak_live_bytes").and_then(Value::as_i64)),
             shared::human_bytes(item.get("max_allocated_bytes").and_then(Value::as_i64)),
             shared::human_bytes(item.get("max_working_set_bytes").and_then(Value::as_i64)),
         ));

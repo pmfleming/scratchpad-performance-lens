@@ -39,10 +39,14 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
                 "document_snapshot_creation_latency",
                 "viewport_extraction_latency",
             ],
-            capacity_scenarios: &["file_size_ceiling", "text_layout_ceiling"],
+            capacity_scenarios: &[
+                "large_file_first_visible_ceiling",
+                "file_size_ceiling",
+                "text_layout_ceiling",
+            ],
             resource_scenarios: &[
                 "large_utf8_load_peak_memory",
-                "file_backed_open_first_visible_paint",
+                "large_file_first_visible_paint",
                 "file_backed_open_allocation",
             ],
             profile_ids: &[
@@ -55,10 +59,10 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
                 label: "GB-class text file sweep",
                 minimum: shared::GB,
                 unit: "bytes",
-                capacity_scenarios: &["file_size_ceiling"],
+                capacity_scenarios: &["large_file_first_visible_ceiling", "file_size_ceiling"],
                 resource_scenarios: &[
                     "large_utf8_load_peak_memory",
-                    "file_backed_open_first_visible_paint",
+                    "large_file_first_visible_paint",
                     "file_backed_open_allocation",
                 ],
             }],
@@ -80,7 +84,11 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
                 "search_current_dispatch_aggregate_size",
                 "search_all_dispatch_aggregate_size",
             ],
-            capacity_scenarios: &["many_file_count_ceiling", "search_target_count_ceiling"],
+            capacity_scenarios: &[
+                "many_file_first_visible_ceiling",
+                "many_file_background_hydration_ceiling",
+                "search_target_count_ceiling",
+            ],
             resource_scenarios: &[
                 "many_file_resource_tracking",
                 "many_file_lazy_open_tracking",
@@ -94,7 +102,11 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
                 label: "10,000+ file workspace",
                 minimum: 10_000,
                 unit: "files",
-                capacity_scenarios: &["many_file_count_ceiling", "search_target_count_ceiling"],
+                capacity_scenarios: &[
+                    "many_file_first_visible_ceiling",
+                    "many_file_background_hydration_ceiling",
+                    "search_target_count_ceiling",
+                ],
                 resource_scenarios: &[
                     "many_file_resource_tracking",
                     "many_file_lazy_open_tracking",
@@ -251,7 +263,7 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
             title: "Session Persistence Restore",
             promise: "Persist and restore very large workspaces without startup stalls.",
             families: &["session-persistence"],
-            benchmark_keys: &[],
+            benchmark_keys: &["session_restore_latency", "session_persist_latency"],
             capacity_scenarios: &[],
             resource_scenarios: &[
                 "session_persist_cost",

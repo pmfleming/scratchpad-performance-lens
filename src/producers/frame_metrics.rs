@@ -1,5 +1,6 @@
 use super::common::{probe_path, run_probe_object};
 use super::render::render_frame_metrics;
+use crate::cli::MeasureOptions;
 use crate::config::LensConfig;
 use crate::shared;
 use anyhow::{bail, Result};
@@ -7,7 +8,7 @@ use serde_json::{json, Value};
 
 const REALISTIC_FRAME_PROBE: &str = "realistic_frame_metrics";
 
-pub fn frame_metrics(config: &LensConfig) -> Result<()> {
+pub fn frame_metrics(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
     let mut payload = match run_probe_object(
         &config.project_root,
         &[
@@ -33,6 +34,10 @@ pub fn frame_metrics(config: &LensConfig) -> Result<()> {
 
     add_realistic_frame_metrics(&mut payload, config);
     annotate_frame_scenarios(&mut payload);
+    if payload["meta"]["realistic_probe"]["status"].as_str() == Some("failed") {
+        payload["meta"]["probe_status"] = json!("failed");
+        payload["meta"]["error"] = payload["meta"]["realistic_probe"]["error"].clone();
+    }
 
     let failed = payload
         .get("meta")

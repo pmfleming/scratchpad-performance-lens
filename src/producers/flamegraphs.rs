@@ -2,7 +2,7 @@ use super::render::render_flamegraphs;
 use crate::cli::MeasureOptions;
 use crate::config::LensConfig;
 use crate::shared;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
@@ -51,7 +51,11 @@ pub fn flamegraphs(config: &LensConfig, options: MeasureOptions) -> Result<()> {
         &payload,
         "flamegraph index",
         render_flamegraphs(&payload),
-    )
+    )?;
+    if let Some(error) = issue {
+        bail!("flamegraph probe failed: {error}");
+    }
+    Ok(())
 }
 
 pub(super) fn fallback_flamegraphs(output_dir: &Path) -> Value {

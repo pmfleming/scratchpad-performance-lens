@@ -10,7 +10,13 @@ use crate::shared;
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
 pub fn search_speed(config: &LensConfig, options: MeasureOptions) -> Result<()> {
-    if !options.skip_bench {
+    let mut probe_failure = (!config.project_root.is_dir()).then(|| {
+        format!(
+            "project root does not exist: {}",
+            config.project_root.display()
+        )
+    });
+    if !options.skip_bench && probe_failure.is_none() {
         if let Err(error) = shared::run_progress_command(
             &config.project_root,
             &["cargo", "bench", "--bench", "search_speed"],
@@ -18,6 +24,7 @@ pub fn search_speed(config: &LensConfig, options: MeasureOptions) -> Result<()> 
         ) {
             eprintln!("Search benchmarking failed: {error}");
             eprintln!("Falling back to existing Criterion search results.");
+            probe_failure = Some(error.to_string());
         }
     }
 
@@ -35,7 +42,7 @@ pub fn search_speed(config: &LensConfig, options: MeasureOptions) -> Result<()> 
         if !shared::string_field(meta, "workload_family", "").starts_with("search") {
             continue;
         }
-        let estimates = shared::read_json(&path, json!({}));
+        let estimates = shared::read_json(&path).into_value_or(json!({}));
         let parameter_value = benchmark_parameter(&name);
         let parameter_unit = shared::string_field(meta, "parameter_unit", "value");
         let item_count = if parameter_unit == "bytes" {
@@ -142,6 +149,9 @@ pub fn search_speed(config: &LensConfig, options: MeasureOptions) -> Result<()> 
         "search-speed",
         cli,
     )?;
+    if let Some(error) = probe_failure {
+        bail!("search probe failed: {error}");
+    }
     if options.fail_on_slow
         && payload
             .as_array()
