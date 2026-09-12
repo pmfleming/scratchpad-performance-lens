@@ -168,7 +168,12 @@ pub fn capacity_report(config: &LensConfig, _options: MeasureOptions) -> Result<
         for spec in CAPACITY_SCENARIOS {
             anyhow::ensure!(events.iter().any(|event| event["scenario"] == spec.id
                 || (spec.id == "text_layout_ceiling" && event["scenario"] == "layout_bytes_ceiling")),
-                "capacity probe omitted expected scenario {}", spec.id);
+                "capacity probe omitted expected scenario {} ({})", spec.id, spec.label);
+            let matching: Vec<_> = events.iter().filter(|event| event["scenario"] == spec.id
+                || (spec.id == "text_layout_ceiling" && event["scenario"] == "layout_bytes_ceiling")).collect();
+            anyhow::ensure!(matching.iter().all(|event| event["workload_unit"] == spec.unit), "wrong workload unit for {}", spec.id);
+            anyhow::ensure!(matching.iter().filter_map(|event| event["workload_value"].as_i64()).max()
+                >= spec.fallback_values.iter().copied().max(), "incomplete workload sweep for {}", spec.id);
         }
         Ok(events)
     });
@@ -193,7 +198,7 @@ pub fn capacity_report(config: &LensConfig, _options: MeasureOptions) -> Result<
         Err(error) => {
             let error = error.to_string();
             (
-                summarize_capacity(fallback_capacity_events(), "failed", Some(&error)),
+                empty_capacity(&error),
                 Some(error),
             )
         }
@@ -219,6 +224,7 @@ fn capacity_scenario(scenario: &str) -> Option<&'static CapacityScenarioSpec> {
     CAPACITY_SCENARIOS.iter().find(|spec| spec.id == scenario)
 }
 
+#[cfg(test)]
 fn fallback_capacity_events() -> Vec<Value> {
     CAPACITY_SCENARIOS
         .iter()

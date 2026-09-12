@@ -19,7 +19,7 @@ pub(super) fn frame_rows(payload: &Value) -> Vec<Value> {
     }).collect()
 }
 
-pub(super) fn valid_frame(row: &Value) -> bool {
+pub(in crate::producers) fn valid_frame(row: &Value) -> bool {
     ["p95_ms", "p99_ms", "budget_ms", "p99_budget_ms"].iter()
         .all(|key| row[*key].as_f64().is_some_and(|value| value.is_finite() && value > 0.0))
         && row["frame_count"].as_u64().is_some_and(|count| count > 0)

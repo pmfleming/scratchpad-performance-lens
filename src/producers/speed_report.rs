@@ -67,8 +67,14 @@ pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) ->
     }
     let capacity_rows: Vec<_> = scenarios_array(&capacity)
         .iter()
-        .map(normalize_capacity_row)
+        .map(|row| normalize_capacity_row(row, capacity["meta"]["synthetic"] == true || capacity["summary"]["synthetic"] == true))
         .collect();
+    let available_profiles: HashSet<_> = array_value(&flamegraphs).into_iter()
+        .filter(|row| row["available"] == true).filter_map(|row| row["id"].as_str().map(str::to_owned)).collect();
+    for row in search_dispatch.iter_mut().chain(&mut search_rows).chain(&mut editor_rows).chain(&mut tabs_rows) {
+        row["has_profile_coverage"] = json!(row["matching_flamegraphs"].as_array().is_some_and(|ids|
+            ids.iter().any(|id| id.as_str().is_some_and(|id| available_profiles.contains(id)))));
+    }
     let latency_rows: Vec<&Value> = search_dispatch
         .iter()
         .chain(&search_rows)
@@ -78,9 +84,17 @@ pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) ->
     let flamegraph_rows = flamegraph_coverage_rows(array_value(&flamegraphs), &latency_rows);
     let triage = build_triage(&latency_rows, &capacity_rows);
     let resource_rows = scenarios_array(&resources).to_vec();
+    let context = crate::provenance::context(&config.project_root);
+    let source_status: Vec<_> = ["slowspots.json", "search_speed.json", "search_workflow_metrics.json", "capacity_report.json",
+        "resource_profiles.json", "frame_metrics.json", "flamegraphs.json"].into_iter().map(|file| {
+            json!({"file":file,"required":file != "flamegraphs.json",
+                "status":crate::provenance::validity(&config.output_dir.join(file), &context)})
+        }).collect();
+    let complete_sources = source_status.iter().all(|source| source["required"] != true || source["status"] == "valid");
     let payload = json!({
         "meta": {
             "generated_from": "rust:speed_efficiency_report",
+            "source_status": source_status,
             "source_artifacts": [
                 config.output_dir.join("slowspots.json").to_string_lossy(),
                 config.output_dir.join("search_speed.json").to_string_lossy(),
@@ -92,6 +106,7 @@ pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) ->
             ],
         },
         "summary": {
+            "measurement_status": if complete_sources { "valid" } else { "incomplete" },
             "search_scenarios": search_rows.len(),
             "search_dispatch_scenarios": search_dispatch.len(),
             "editor_scenarios": editor_rows.len(),
@@ -168,24 +183,31 @@ fn normalize_latency_row(row: Value, capacity_lookup: &HashMap<String, Value>) -
         "has_profile_coverage": matching.as_array().is_some_and(|items| !items.is_empty()),
         "last_known_failure_ceiling": ceiling.and_then(|row| row.get("last_successful_label").or_else(|| row.get("first_failure_label"))).cloned(),
         "suspected_limiting_resource": row.get("suspected_limiting_resource").and_then(Value::as_str).unwrap_or("cpu"),
-        "signals": row.get("signals").and_then(Value::as_str).unwrap_or("nominal"),
+        "signals": row.get("signals").and_then(Value::as_str).unwrap_or("budget status unknown"),
         "budget_status": row.get("budget_status").cloned().unwrap_or(json!("unmeasured")),
         "mean_confidence_interval_ns": row.get("mean_confidence_interval_ns").cloned(),
-        "over_budget": super::common::over_threshold(&row),
+        "measurement_status": row.get("measurement_status").cloned().unwrap_or(json!("unmeasured")),
+        "over_budget": if row["measurement_status"] != "valid" { None } else { match row["budget_status"].as_str() {
+            Some("pass") => Some(false), Some("fail") => Some(true), _ => None,
+        } },
     })
 }
 
-fn normalize_capacity_row(row: &Value) -> Value {
+fn normalize_capacity_row(row: &Value, synthetic: bool) -> Value {
+    let known = !synthetic && row["ceiling_reached"].is_boolean()
+        && !matches!(row["failure_mode"].as_str(), Some("unmeasured" | "incomplete"));
     json!({
         "scenario_id": row.get("scenario").cloned(),
         "probe_class": row.get("probe_class").and_then(Value::as_str).unwrap_or("ceiling_health"),
         "measurement_role": row.get("measurement_role").and_then(Value::as_str).unwrap_or("promise_health"),
         "scenario_label": row.get("scenario_label").or_else(|| row.get("scenario")).cloned(),
         "family": row.get("workload_family").and_then(Value::as_str).unwrap_or("capacity-stress"),
-        "failure_mode": row.get("failure_mode").and_then(Value::as_str).unwrap_or("not_reached"),
-        "ceiling_reached": row.get("ceiling_reached").and_then(Value::as_bool).unwrap_or(false),
-        "last_successful_label": row.get("last_successful_label").cloned(),
-        "first_failure_label": row.get("first_failure_label").cloned(),
+        "failure_mode": row.get("failure_mode").and_then(Value::as_str).unwrap_or("unmeasured"),
+        "synthetic": synthetic,
+        "measurement_status": if known { "valid" } else { "unmeasured" },
+        "ceiling_reached": if known { row.get("ceiling_reached").cloned() } else { None },
+        "last_successful_label": if synthetic { None } else { row.get("last_successful_label").cloned() },
+        "first_failure_label": if synthetic { None } else { row.get("first_failure_label").cloned() },
         "matching_flamegraphs": row.get("matching_flamegraphs").cloned().unwrap_or_else(|| json!([])),
         "suspected_limiting_resource": row.get("suspected_limiting_resource").and_then(Value::as_str).unwrap_or("cpu"),
         "peak_working_set_bytes": row.get("peak_working_set_bytes").cloned(),
@@ -195,6 +217,7 @@ fn normalize_capacity_row(row: &Value) -> Value {
 }
 
 fn normalize_frame_row(row: &Value) -> Value {
+    let valid = super::review::frames::valid_frame(row);
     let budget_ms = row.get("budget_ms").and_then(Value::as_f64).unwrap_or(8.33);
     let p99_budget_ms = row
         .get("p99_budget_ms")
@@ -215,7 +238,10 @@ fn normalize_frame_row(row: &Value) -> Value {
         "max_ms": row.get("max_ms").cloned(),
         "budget_ms": budget_ms,
         "p99_budget_ms": p99_budget_ms,
-        "stability": "stable",
+        "stability": "unknown",
+        "measurement_status": if valid { "valid" } else { "unmeasured" },
+        "percentile_method": row.get("percentile_method").cloned(),
+        "percentile_resolution_ms": row.get("percentile_resolution_ms").cloned(),
         "measurement_scope": row.get("measurement_scope").and_then(Value::as_str).unwrap_or("measured_frame_path_cpu"),
         "metric_role": row.get("metric_role").and_then(Value::as_str).unwrap_or("theoretical_frame_production_capacity"),
         "present_included": row.get("present_included").and_then(Value::as_bool).unwrap_or(false),
@@ -229,7 +255,7 @@ fn normalize_frame_row(row: &Value) -> Value {
         "has_profile_coverage": true,
         "suspected_limiting_resource": "cpu",
         "signals": format!("p95 {p95_ms:.2} ms vs {budget_ms:.2} ms budget; p99 {p99_ms:.2} ms vs {p99_budget_ms:.2} ms budget"),
-        "over_budget": row.get("over_budget").and_then(Value::as_bool).unwrap_or(p95_ms > budget_ms || p99_ms > p99_budget_ms),
+        "over_budget": valid.then_some(p95_ms > budget_ms || p99_ms > p99_budget_ms),
         "phases": row.get("phases").cloned().unwrap_or_else(|| json!([])),
     })
 }
@@ -268,6 +294,7 @@ fn flamegraph_coverage_rows(flamegraphs: Vec<Value>, latency_rows: &[&Value]) ->
 fn build_triage(latency_rows: &[&Value], capacity_rows: &[Value]) -> Vec<Value> {
     let mut rows = Vec::new();
     for row in latency_rows {
+        if row["over_budget"].is_null() { continue; }
         let over_budget = row
             .get("over_budget")
             .and_then(Value::as_bool)
@@ -353,7 +380,10 @@ fn latency_rank(row: &Value) -> f64 {
         .and_then(Value::as_f64)
         .or_else(|| row.get("mean_ms").and_then(Value::as_f64))
         .unwrap_or(0.0);
-    let overrun = if budget > 0.0 {
+    let overrun = if let (Some(p95), Some(p99), Some(p99_budget)) =
+        (row["p95_ms"].as_f64(), row["p99_ms"].as_f64(), row["p99_budget_ms"].as_f64()) {
+        if budget > 0.0 && p99_budget > 0.0 { (p95 / budget).max(p99 / p99_budget) } else { 0.0 }
+    } else if budget > 0.0 {
         budget_probe / budget
     } else {
         budget_probe / 25.0
@@ -398,37 +428,42 @@ fn family_priority(family: &str) -> f64 {
 }
 
 fn triage_summary(latency_rows: &[&Value], capacity_rows: &[Value]) -> Value {
-    let critical = latency_rows
-        .iter()
-        .filter(|row| {
-            row.get("over_budget")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-        })
-        .count()
-        + capacity_rows
-            .iter()
-            .filter(|row| {
-                row.get("ceiling_reached")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-            })
-            .count();
-    let watch = latency_rows
-        .iter()
-        .filter(|row| {
-            !row.get("over_budget")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-                && row
-                    .get("stability")
-                    .and_then(Value::as_str)
-                    .unwrap_or("stable")
-                    != "stable"
-        })
-        .count();
-    let total = latency_rows.len() + capacity_rows.len();
-    json!({"critical": critical, "watch": watch, "ok": total.saturating_sub(critical + watch)})
+    let (mut critical, mut watch, mut ok, mut unknown) = (0, 0, 0, 0);
+    for row in latency_rows {
+        match row["over_budget"].as_bool() {
+            Some(true) => critical += 1,
+            Some(false) if matches!(row["stability"].as_str(), Some("watch" | "high-variance")) => watch += 1,
+            Some(false) => ok += 1,
+            None => unknown += 1,
+        }
+    }
+    for row in capacity_rows {
+        match row["ceiling_reached"].as_bool() {
+            Some(true) => critical += 1,
+            Some(false) => ok += 1,
+            None => unknown += 1,
+        }
+    }
+    json!({"critical":critical,"watch":watch,"ok":ok,"unknown":unknown})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn synthetic_and_unknown_capacity_are_not_reported_as_ok() {
+        let row = normalize_capacity_row(&json!({"ceiling_reached":null,"failure_mode":"unmeasured"}), true);
+        assert!(row["ceiling_reached"].is_null());
+        assert_eq!(row["synthetic"], true);
+        let summary = triage_summary(&[&json!({"over_budget":null})], &[row]);
+        assert_eq!(summary["ok"],0);
+        assert_eq!(summary["unknown"],2);
+    }
+    #[test]
+    fn missing_budgets_remain_unknown_in_latency_normalization() {
+        let row = normalize_latency_row(json!({"mean_ns":1,"measurement_status":"valid"}), &HashMap::new());
+        assert!(row["over_budget"].is_null());
+    }
 }
 
 fn methodology_notes() -> Vec<&'static str> {

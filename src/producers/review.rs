@@ -1,6 +1,6 @@
 mod evidence;
 mod coverage;
-mod frames;
+pub(super) mod frames;
 mod health;
 mod registry;
 #[cfg(test)]

@@ -35,7 +35,7 @@ pub fn resource_profiles(config: &LensConfig, _options: MeasureOptions) -> Resul
         Err(error) => {
             let error = error.to_string();
             (
-                summarize_resources(fallback_resource_events(), "failed", Some(&error)),
+                empty_resources(&error),
                 Some(error),
             )
         }
