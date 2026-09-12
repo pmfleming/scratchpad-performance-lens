@@ -5,11 +5,14 @@ use crate::artifacts::performance_review::{
     ScaleCheckStatus,
 };
 use serde_json::Value;
-pub(super) fn coverage_axis(count: usize, required: bool) -> CoverageAxis {
+pub(super) fn coverage_axis(expected: &[&str], available: Vec<String>, valid: Vec<String>) -> CoverageAxis {
+    let missing_evidence: Vec<_> = expected.iter().filter(|id| !valid.iter().any(|value| value == **id))
+        .map(|id| id.to_string()).collect();
     CoverageAxis {
-        required,
-        covered: count > 0,
-        count,
+        required: !expected.is_empty(),
+        covered: if expected.is_empty() { !valid.is_empty() } else { missing_evidence.is_empty() },
+        count: available.len(), available_count: available.len(), valid_count: valid.len(),
+        expected_count: expected.len(), missing_evidence,
     }
 }
 
@@ -22,7 +25,7 @@ pub(super) fn scenario_gaps(axes: &CoverageAxes) -> Vec<String> {
     ]
     .into_iter()
     .filter(|(_, axis)| axis.required && !axis.covered)
-    .map(|(name, _)| format!("Missing {name} evidence."))
+    .map(|(name, axis)| format!("Missing valid {name} evidence: {}.", axis.missing_evidence.join(", "))) 
     .collect()
 }
 
@@ -205,10 +208,11 @@ pub(super) fn promise_health(
     missing_scale_targets: usize,
     synthetic_evidence: bool,
 ) -> PromiseHealth {
-    if synthetic_evidence || coverage_status == CoverageStatus::Missing {
-        PromiseHealth::Unmeasured
-    } else if budget_misses > 0 || scale_failures > 0 {
+    if budget_misses > 0 || scale_failures > 0 {
+        // Known real failures must not be hidden by unrelated missing evidence.
         PromiseHealth::Fail
+    } else if synthetic_evidence || coverage_status == CoverageStatus::Missing {
+        PromiseHealth::Unmeasured
     } else if coverage_status == CoverageStatus::Thin || missing_scale_targets > 0 {
         PromiseHealth::AtRisk
     } else {

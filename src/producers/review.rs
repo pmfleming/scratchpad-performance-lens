@@ -1,4 +1,5 @@
 mod evidence;
+mod coverage;
 mod health;
 mod registry;
 #[cfg(test)]
@@ -9,7 +10,7 @@ use super::flamegraphs::fallback_flamegraphs;
 use super::render::render_performance_review;
 use crate::artifacts::capacity_report::{CapacityReportArtifact, CapacityScenario};
 use crate::artifacts::performance_review::{
-    CoverageAxes, CoverageStatus, MeasurementClassSummary, MeasurementSplit,
+    CoverageStatus, MeasurementClassSummary, MeasurementSplit,
     PerformanceReviewArtifact, PerformanceReviewMeta, PerformanceReviewScenario,
     PerformanceReviewSummary, Presentation, PromiseHealth, PromiseHealthSummary,
     PromiseRegistryEntry, ScaleCheckStatus, ScenarioEvidence,
@@ -22,7 +23,7 @@ use evidence::{
     mean_ms, over_budget_latency, payload_synthetic, resource_contract_failed, review_row_matches,
     source_status, unique_rows,
 };
-use health::{coverage_axis, promise_health, scale_checks, scenario_gaps, scenario_opportunities};
+use health::{promise_health, scale_checks, scenario_gaps, scenario_opportunities};
 use registry::{probe_classes, promised_scale_payload, review_scenarios, ReviewScenario};
 use serde_json::{json, Value};
 pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
@@ -197,12 +198,8 @@ fn build_review_scenario(
                 .is_some_and(|id| scenario.profile_ids.contains(&id))
         })
         .collect();
-    let axes = CoverageAxes {
-        speed: coverage_axis(latency_rows.len(), !scenario.benchmark_keys.is_empty()),
-        capacity: coverage_axis(capacity_rows.len(), !scenario.capacity_scenarios.is_empty()),
-        resource: coverage_axis(resource_rows.len(), !scenario.resource_scenarios.is_empty()),
-        profiles: coverage_axis(profile_rows.len(), !scenario.profile_ids.is_empty()),
-    };
+    let axes = coverage::axes(scenario, &latency_rows, &capacity_rows, &resource_rows,
+        &profile_rows, capacity_synthetic, resources_synthetic);
     let axis_values = [&axes.speed, &axes.capacity, &axes.resource, &axes.profiles];
     let required = axis_values.iter().filter(|axis| axis.required).count();
     let covered = axis_values
@@ -211,7 +208,7 @@ fn build_review_scenario(
         .count();
     let coverage_status = if required == covered {
         CoverageStatus::Covered
-    } else if covered > 0 {
+    } else if axis_values.iter().any(|axis| axis.required && axis.available_count > 0) {
         CoverageStatus::Thin
     } else {
         CoverageStatus::Missing
@@ -225,10 +222,10 @@ fn build_review_scenario(
         resources_synthetic,
     );
     let budget_misses = latency_rows.iter().filter(over_budget_latency).count()
-        + resource_rows
+        + if resources_synthetic { 0 } else { resource_rows
             .iter()
             .filter(|row| resource_contract_failed(row))
-            .count();
+            .count() };
     let ceilings_reached = capacity_rows
         .iter()
         .filter(|row| row.ceiling_reached.unwrap_or(false))
@@ -391,7 +388,7 @@ mod tests {
             false,
             false,
         );
-        assert_eq!(row.coverage_status, CoverageStatus::Covered);
+        assert_eq!(row.coverage_status, CoverageStatus::Thin);
         assert_eq!(row.promise_health, PromiseHealth::Fail);
         assert_eq!(row.budget_misses, 1);
     }
@@ -448,7 +445,7 @@ mod tests {
             false,
             false,
         );
-        assert_eq!(row.coverage_status, CoverageStatus::Covered);
+        assert_eq!(row.coverage_status, CoverageStatus::Thin);
         assert_eq!(row.promise_health, PromiseHealth::AtRisk);
         assert_eq!(row.ceilings_reached, 1);
         assert_eq!(row.scale_failures, 0);
@@ -496,7 +493,7 @@ mod tests {
             false,
             false,
         );
-        assert_eq!(row.coverage_status, CoverageStatus::Covered);
+        assert_eq!(row.coverage_status, CoverageStatus::Thin);
         assert_eq!(row.promise_health, PromiseHealth::Fail);
         assert_eq!(row.scale_failures, 1);
         assert!(!row.scale_checks[0].met);

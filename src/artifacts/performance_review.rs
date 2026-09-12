@@ -136,6 +136,14 @@ pub struct CoverageAxis {
     pub required: bool,
     pub covered: bool,
     pub count: usize,
+    #[serde(default)]
+    pub available_count: usize,
+    #[serde(default)]
+    pub valid_count: usize,
+    #[serde(default)]
+    pub expected_count: usize,
+    #[serde(default)]
+    pub missing_evidence: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
