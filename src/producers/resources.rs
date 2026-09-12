@@ -294,6 +294,7 @@ fn summarize_resources(events: Vec<Value>, status: &str, fallback_reason: Option
         events.sort_by_key(|event| event.get("step_index").and_then(Value::as_i64).unwrap_or(0));
         let first = events.first().cloned().unwrap_or_else(|| json!({}));
         let last = events.last().cloned().unwrap_or_else(|| json!({}));
+        let gap_evidence = super::resource_contracts::gap_evidence(&scenario, &events, fallback_reason.is_some());
         scenarios.push(json!({
             "scenario": scenario,
             "probe_class": "targeted_path",
@@ -303,7 +304,8 @@ fn summarize_resources(events: Vec<Value>, status: &str, fallback_reason: Option
             "workload_family": first.get("workload_family").and_then(Value::as_str).unwrap_or("unmapped"),
             "focus": first.get("focus").and_then(Value::as_str).unwrap_or("resource"),
             "measurement_gap": gap_map.get(scenario.as_str()).copied(),
-            "closes_measurement_gap": gap_map.contains_key(scenario.as_str()),
+            "closes_measurement_gap": gap_evidence["closed"],
+            "gap_evidence": gap_evidence,
             "sample_count": events.len(),
             "max_setup_elapsed_ms": max_i64(&events, "setup_elapsed_ns").map(|value| value as f64 / 1_000_000.0),
             "max_elapsed_ms": events.iter().map(|event| event.get("elapsed_ns").and_then(Value::as_f64).unwrap_or(0.0) / 1_000_000.0).fold(0.0, f64::max),
@@ -326,6 +328,10 @@ fn summarize_resources(events: Vec<Value>, status: &str, fallback_reason: Option
             "samples": events.iter().map(resource_sample).collect::<Vec<_>>(),
         }));
     }
+    let closed_gaps = gap_map.values().copied().collect::<HashSet<_>>().into_iter().filter(|gap| {
+        gap_map.iter().filter(|(_, description)| **description == *gap).all(|(id, _)|
+            scenarios.iter().any(|row| row["scenario"] == *id && row["closes_measurement_gap"] == true))
+    }).count();
     let mut payload = json!({
         "meta": {"generated_from": "rust:resource_profiles", "probe_command": probe_path("resource_probe").to_string_lossy(), "scenario_count": scenarios.len(), "probe_status": status},
         "summary": {
@@ -334,7 +340,7 @@ fn summarize_resources(events: Vec<Value>, status: &str, fallback_reason: Option
             "memory_scenarios": scenarios.iter().filter(|row| row.get("focus").and_then(Value::as_str) == Some("memory")).count(),
             "session_scenarios": scenarios.iter().filter(|row| row.get("focus").and_then(Value::as_str) == Some("session")).count(),
             "measurement_gap_scenarios": scenarios.iter().filter(|row| row.get("closes_measurement_gap").and_then(Value::as_bool).unwrap_or(false)).count(),
-            "measurement_gaps_closed": scenarios.iter().filter_map(|row| row.get("measurement_gap").and_then(Value::as_str)).collect::<HashSet<_>>().len(),
+            "measurement_gaps_closed": closed_gaps,
             "probe_status": status,
         },
         "scenarios": scenarios,

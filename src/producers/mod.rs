@@ -6,6 +6,7 @@ mod frame_metrics;
 mod project_code;
 mod render;
 mod resources;
+mod resource_contracts;
 mod review;
 mod search;
 mod slowspots;
