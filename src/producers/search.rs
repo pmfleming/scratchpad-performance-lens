@@ -1,7 +1,7 @@
 use super::common::{
-    dispersion_lower_ns, dispersion_upper_ns, benchmark_parameter, capitalize, criterion_dir, ns_per_kb,
-    over_threshold, parameter_label, run_benchmarks, score_of, search_signals, stability_label,
-    string_value, throughput_mb_s, variance_ratio,
+    benchmark_parameter, capitalize, criterion_dir, dispersion_lower_ns, dispersion_upper_ns,
+    ns_per_kb, over_threshold, parameter_label, run_benchmarks, score_of, search_signals,
+    stability_label, string_value, throughput_mb_s, variance_ratio,
 };
 use super::render::render_search;
 use crate::cli::MeasureOptions;
@@ -63,7 +63,10 @@ pub fn search_speed(config: &LensConfig, options: MeasureOptions) -> Result<()> 
         bail!("search probe failed: {error}");
     }
     if payload.as_array().is_none_or(Vec::is_empty) || !invalid.is_empty() {
-        bail!("search measurements incomplete or invalid: {}", invalid.join("; "));
+        bail!(
+            "search measurements incomplete or invalid: {}",
+            invalid.join("; ")
+        );
     }
     if options.fail_on_slow
         && payload
@@ -84,8 +87,11 @@ fn build_search_row(name: String, key: String, meta: &Value, estimates: &Value) 
     let std_dev_ns = shared::f64_field(estimates, &["std_dev", "point_estimate"]);
     let dispersion_upper = dispersion_upper_ns(mean_ns, std_dev_ns);
     let median_ns = shared::f64_field(estimates, &["median", "point_estimate"]);
-    let processed_bytes = meta["processed_item_count"].as_i64()
-        .zip(bytes_per_item).and_then(|(count, bytes)| count.checked_mul(bytes)).or(total_bytes);
+    let processed_bytes = meta["processed_item_count"]
+        .as_i64()
+        .zip(bytes_per_item)
+        .and_then(|(count, bytes)| count.checked_mul(bytes))
+        .or(total_bytes);
     let throughput_mb_s = throughput_mb_s(processed_bytes, mean_ns);
     let ns_per_kb = ns_per_kb(processed_bytes, mean_ns);
     let threshold_ms = shared::authoritative_threshold_ms(meta);
@@ -177,19 +183,6 @@ fn search_workload(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn first_target_throughput_does_not_claim_unscanned_targets() {
-        let row = super::build_search_row("first/32".into(), "first".into(),
-            &serde_json::json!({"parameter_unit":"files","bytes_per_item":16384,"processed_item_count":1}),
-            &serde_json::json!({"mean":{"point_estimate":1_000_000}}));
-        assert_eq!(row["total_bytes"], 32 * 16384);
-        assert_eq!(row["processed_bytes"], 16384);
-        assert_eq!(row["throughput_mb_s"], 15.625);
-    }
-}
-
 fn search_scenario_label(key: &str) -> String {
     key.trim_start_matches("search_")
         .replace('_', " ")
@@ -197,4 +190,20 @@ fn search_scenario_label(key: &str) -> String {
         .map(capitalize)
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn first_target_throughput_does_not_claim_unscanned_targets() {
+        let row = super::build_search_row(
+            "first/32".into(),
+            "first".into(),
+            &serde_json::json!({"parameter_unit":"files","bytes_per_item":16384,"processed_item_count":1}),
+            &serde_json::json!({"mean":{"point_estimate":1_000_000}}),
+        );
+        assert_eq!(row["total_bytes"], 32 * 16384);
+        assert_eq!(row["processed_bytes"], 16384);
+        assert_eq!(row["throughput_mb_s"], 15.625);
+    }
 }

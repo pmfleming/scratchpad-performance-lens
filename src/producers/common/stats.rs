@@ -20,7 +20,8 @@ pub(in crate::producers) fn run_benchmarks(
     let suites = super::criterion::suite_names(cargo_args);
     // Invalidate prior run manifests before executing: partial/failing reruns cannot reuse them.
     for suite in &suites {
-        let _ = std::fs::remove_file(criterion_dir(project_root).join(format!("splens-{suite}.json")));
+        let _ =
+            std::fs::remove_file(criterion_dir(project_root).join(format!("splens-{suite}.json")));
     }
     shared::run_progress_command(project_root, cargo_args, label)
         .and_then(|()| super::criterion::record_run(project_root, &suites, started, context))
@@ -30,14 +31,24 @@ pub(in crate::producers) fn run_benchmarks(
 
 pub(in crate::producers) fn criterion_dir(project_root: &Path) -> PathBuf {
     // Cargo resolves workspace roots, environment overrides and .cargo/config.toml.
-    let target = shared::run_command(project_root, &["cargo", "metadata", "--no-deps", "--format-version", "1"])
-        .ok().filter(|output| output.status.success())
-        .and_then(|output| serde_json::from_slice::<Value>(&output.stdout).ok())
-        .and_then(|meta| meta["target_directory"].as_str().map(PathBuf::from))
-        .unwrap_or_else(|| {
-            let path = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("target"));
-            if path.is_absolute() { path } else { project_root.join(path) }
-        });
+    let target = shared::run_command(
+        project_root,
+        &["cargo", "metadata", "--no-deps", "--format-version", "1"],
+    )
+    .ok()
+    .filter(|output| output.status.success())
+    .and_then(|output| serde_json::from_slice::<Value>(&output.stdout).ok())
+    .and_then(|meta| meta["target_directory"].as_str().map(PathBuf::from))
+    .unwrap_or_else(|| {
+        let path = std::env::var_os("CARGO_TARGET_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("target"));
+        if path.is_absolute() {
+            path
+        } else {
+            project_root.join(path)
+        }
+    });
     target.join("criterion")
 }
 
@@ -90,7 +101,9 @@ pub(in crate::producers) fn slowspot_signals(
     let mut signals = Vec::new();
     let heuristic_ms = dispersion_upper_ns(mean_ns, std_dev_ns) / 1_000_000.0;
     if threshold_ms > 0.0 && heuristic_ms > threshold_ms {
-        signals.push(format!("dispersion heuristic > {threshold_ms}ms (not a percentile)"));
+        signals.push(format!(
+            "dispersion heuristic > {threshold_ms}ms (not a percentile)"
+        ));
     }
     if mean_ns > 1_000_000.0 && variance_ratio(mean_ns, std_dev_ns) > 0.2 {
         signals.push("high variance".to_string());
@@ -118,7 +131,9 @@ pub(in crate::producers) fn search_signals(
     let mut signals = Vec::new();
     let heuristic_ms = dispersion_upper_ns(mean_ns, std_dev_ns) / 1_000_000.0;
     if threshold_ms > 0.0 && heuristic_ms > threshold_ms {
-        signals.push(format!("dispersion heuristic > {threshold_ms:.1}ms (not a percentile)"));
+        signals.push(format!(
+            "dispersion heuristic > {threshold_ms:.1}ms (not a percentile)"
+        ));
     }
     signals.push(
         if latency_kind == "first_target_completion" {
@@ -176,8 +191,15 @@ pub(in crate::producers) fn capitalize(value: &str) -> String {
 }
 
 pub(in crate::producers) fn over_threshold(row: &Value) -> bool {
-    if let Some(status) = row["budget_status"].as_str() { return status == "fail"; }
-    if row["measurement_status"].as_str().is_some_and(|status| status != "valid") { return false; }
+    if let Some(status) = row["budget_status"].as_str() {
+        return status == "fail";
+    }
+    if row["measurement_status"]
+        .as_str()
+        .is_some_and(|status| status != "valid")
+    {
+        return false;
+    }
     let budget_probe_ms = budget_probe_ms(row).unwrap_or(0.0);
     let threshold_ms = row
         .get("threshold_ms")

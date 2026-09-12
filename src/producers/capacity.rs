@@ -164,43 +164,74 @@ pub fn capacity_report(config: &LensConfig, _options: MeasureOptions) -> Result<
         ],
         probe_path("capacity_probe"),
         "capacity probe",
-    ).and_then(|events| {
+    )
+    .and_then(|events| {
         for spec in CAPACITY_SCENARIOS {
-            anyhow::ensure!(events.iter().any(|event| event["scenario"] == spec.id
-                || (spec.id == "text_layout_ceiling" && event["scenario"] == "layout_bytes_ceiling")),
-                "capacity probe omitted expected scenario {} ({})", spec.id, spec.label);
-            let matching: Vec<_> = events.iter().filter(|event| event["scenario"] == spec.id
-                || (spec.id == "text_layout_ceiling" && event["scenario"] == "layout_bytes_ceiling")).collect();
-            anyhow::ensure!(matching.iter().all(|event| event["workload_unit"] == spec.unit), "wrong workload unit for {}", spec.id);
-            anyhow::ensure!(matching.iter().filter_map(|event| event["workload_value"].as_i64()).max()
-                >= spec.fallback_values.iter().copied().max(), "incomplete workload sweep for {}", spec.id);
+            anyhow::ensure!(
+                events.iter().any(|event| event["scenario"] == spec.id
+                    || (spec.id == "text_layout_ceiling"
+                        && event["scenario"] == "layout_bytes_ceiling")),
+                "capacity probe omitted expected scenario {} ({})",
+                spec.id,
+                spec.label
+            );
+            let matching: Vec<_> = events
+                .iter()
+                .filter(|event| {
+                    event["scenario"] == spec.id
+                        || (spec.id == "text_layout_ceiling"
+                            && event["scenario"] == "layout_bytes_ceiling")
+                })
+                .collect();
+            anyhow::ensure!(
+                matching
+                    .iter()
+                    .all(|event| event["workload_unit"] == spec.unit),
+                "wrong workload unit for {}",
+                spec.id
+            );
+            anyhow::ensure!(
+                matching
+                    .iter()
+                    .filter_map(|event| event["workload_value"].as_i64())
+                    .max()
+                    >= spec.fallback_values.iter().copied().max(),
+                "incomplete workload sweep for {}",
+                spec.id
+            );
         }
         Ok(events)
     });
     let (payload, failure) = match events {
         Ok(events) if !events.is_empty() => {
             let mut payload = summarize_capacity(events, "completed", None);
-            let incomplete = payload["scenarios"].as_array().unwrap().iter().flat_map(|row|
-                row["samples"].as_array().into_iter().flatten()).any(|sample| sample["complete"] != true);
-            let failed = payload["scenarios"].as_array().unwrap().iter().flat_map(|row|
-                row["samples"].as_array().into_iter().flatten()).any(|sample| sample["failure_count"].as_u64().unwrap_or(0) > 0);
-            let failure = (incomplete || failed).then(|| "capacity contains incomplete or failed repetitions".to_owned());
+            let incomplete = payload["scenarios"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|row| row["samples"].as_array().into_iter().flatten())
+                .any(|sample| sample["complete"] != true);
+            let failed = payload["scenarios"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|row| row["samples"].as_array().into_iter().flatten())
+                .any(|sample| sample["failure_count"].as_u64().unwrap_or(0) > 0);
+            let failure = (incomplete || failed)
+                .then(|| "capacity contains incomplete or failed repetitions".to_owned());
             if incomplete || failed {
                 payload["meta"]["probe_status"] = json!("partial");
                 payload["summary"]["probe_status"] = json!("partial");
             }
             (payload, failure)
-        },
+        }
         Ok(_) => {
             let error = "No probe samples were recorded.".to_string();
             (empty_capacity(&error), Some(error))
         }
         Err(error) => {
             let error = error.to_string();
-            (
-                empty_capacity(&error),
-                Some(error),
-            )
+            (empty_capacity(&error), Some(error))
         }
     };
     let payload = serde_json::to_value(serde_json::from_value::<CapacityReportArtifact>(payload)?)?;
@@ -265,8 +296,11 @@ fn empty_capacity(reason: &str) -> Value {
 
 fn summarize_capacity(events: Vec<Value>, status: &str, fallback_reason: Option<&str>) -> Value {
     let synthetic = fallback_reason.is_some();
-    let probe_command = events.first().and_then(|event| event["probe_executable"].as_str())
-        .unwrap_or("cargo build --release --bin capacity_probe (executable unavailable)").to_owned();
+    let probe_command = events
+        .first()
+        .and_then(|event| event["probe_executable"].as_str())
+        .unwrap_or("cargo build --release --bin capacity_probe (executable unavailable)")
+        .to_owned();
     let scenarios: Vec<_> = group_capacity_events(events)
         .into_iter()
         .map(|(scenario, events)| capacity_scenario_summary(scenario, events, synthetic))
@@ -283,8 +317,14 @@ fn summarize_capacity(events: Vec<Value>, status: &str, fallback_reason: Option<
                 == Some("memory")
         })
         .count();
-    let cpu = scenarios.iter().filter(|row| row["suspected_limiting_resource"] == "cpu").count();
-    let unknown = scenarios.iter().filter(|row| row["suspected_limiting_resource"] == "unknown").count();
+    let cpu = scenarios
+        .iter()
+        .filter(|row| row["suspected_limiting_resource"] == "cpu")
+        .count();
+    let unknown = scenarios
+        .iter()
+        .filter(|row| row["suspected_limiting_resource"] == "unknown")
+        .count();
     let mut payload = json!({
         "meta": {"generated_from": "rust:capacity_report", "probe_command": probe_command, "scenario_count": scenarios.len(), "probe_status": status, "synthetic": synthetic},
         "summary": {"scenario_count": scenarios.len(), "ceilings_reached": ceilings, "memory_bound_scenarios": memory, "cpu_bound_scenarios": cpu, "unknown_resource_scenarios": unknown, "probe_status": status, "synthetic": synthetic},
@@ -320,9 +360,16 @@ fn capacity_scenario_summary(scenario: String, events: Vec<Value>, synthetic: bo
         .iter()
         .position(|event| capacity_step_failed(event, threshold_ms));
     let first_failure = failure_index.and_then(|index| events.get(index));
-    let last_success = events[..failure_index.unwrap_or(events.len())].iter().rev().find(|event|
-        event["complete"] == true && event["status"] == "ok"
-            && event["elapsed_ns"].as_f64().is_some_and(|ns| ns > 0.0 && ns / 1e6 <= threshold_ms));
+    let last_success = events[..failure_index.unwrap_or(events.len())]
+        .iter()
+        .rev()
+        .find(|event| {
+            event["complete"] == true
+                && event["status"] == "ok"
+                && event["elapsed_ns"]
+                    .as_f64()
+                    .is_some_and(|ns| ns > 0.0 && ns / 1e6 <= threshold_ms)
+        });
     let complete = events.iter().all(|event| event["complete"] == true);
     let first = events.first().unwrap_or(&Value::Null);
     let last = events.last().unwrap_or(&Value::Null);
@@ -376,13 +423,16 @@ fn capacity_scenario_summary(scenario: String, events: Vec<Value>, synthetic: bo
 }
 
 fn capacity_step_failed(event: &Value, threshold_ms: f64) -> bool {
-    event["failure_count"].as_u64().is_some_and(|count| count > 0)
-        || event["complete"] == true && event
-            .get("elapsed_ns")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0)
-            / 1_000_000.0
-            > threshold_ms
+    event["failure_count"]
+        .as_u64()
+        .is_some_and(|count| count > 0)
+        || event["complete"] == true
+            && event
+                .get("elapsed_ns")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0)
+                / 1_000_000.0
+                > threshold_ms
 }
 
 fn bool_field(value: &Value, key: &str) -> bool {
@@ -396,9 +446,12 @@ fn aggregate_capacity_repetitions(events: Vec<Value>) -> Vec<Value> {
 fn infer_limiting_resource(events: &[Value]) -> String {
     // Growth and elapsed time do not establish saturation or causality. Only an
     // explicit instrumented saturation observation can name a limiting resource.
-    events.iter().filter_map(|event| event["saturated_resource"].as_str())
+    events
+        .iter()
+        .filter_map(|event| event["saturated_resource"].as_str())
         .find(|resource| matches!(*resource, "cpu" | "memory" | "i/o" | "os-handles"))
-        .unwrap_or("unknown").to_owned()
+        .unwrap_or("unknown")
+        .to_owned()
 }
 
 fn diagnosis_guidance(limiting: &str, matching: &[String]) -> Vec<String> {
@@ -468,11 +521,15 @@ mod tests {
 
     #[test]
     fn missing_resource_counters_are_unknown_and_raw_counters_survive() {
-        assert_eq!(super::infer_limiting_resource(&[json!({"elapsed_ns":999})]), "unknown");
+        assert_eq!(
+            super::infer_limiting_resource(&[json!({"elapsed_ns":999})]),
+            "unknown"
+        );
         let sample = super::capacity_sample(&json!({"elapsed_ns":10,
             "metrics":{"search_max_queue_depth":4}, "memory_budget":{"layout_bytes":100},
             "process_resources":{"cpu_elapsed_ms":2}}));
-        let typed: crate::artifacts::capacity_report::CapacitySample = serde_json::from_value(sample).unwrap();
+        let typed: crate::artifacts::capacity_report::CapacitySample =
+            serde_json::from_value(sample).unwrap();
         assert_eq!(typed.metrics["search_max_queue_depth"], 4);
         assert_eq!(typed.process_resources["cpu_elapsed_ms"], 2);
     }
@@ -496,20 +553,29 @@ mod tests {
 
     #[test]
     fn incomplete_repetitions_do_not_create_a_successful_ceiling() {
-        let payload = summarize_capacity(vec![json!({"scenario":"tab_count_ceiling", "step_index":0,
-            "repeat_index":0,"workload_value":10000,"elapsed_ns":10,"status":"ok"})], "partial", None);
+        let payload = summarize_capacity(
+            vec![json!({"scenario":"tab_count_ceiling", "step_index":0,
+            "repeat_index":0,"workload_value":10000,"elapsed_ns":10,"status":"ok"})],
+            "partial",
+            None,
+        );
         let row = &payload["scenarios"][0];
         assert_eq!(row["failure_mode"], "incomplete");
         assert!(row["ceiling_reached"].is_null());
         assert!(row["last_successful_workload"].is_null());
-        let typed: crate::artifacts::capacity_report::CapacityReportArtifact = serde_json::from_value(payload).unwrap();
+        let typed: crate::artifacts::capacity_report::CapacityReportArtifact =
+            serde_json::from_value(payload).unwrap();
         assert_eq!(typed.scenarios[0].demonstrated_workload(), None);
     }
 
     #[test]
     fn all_failed_trials_preserve_failure_and_have_no_successful_median() {
-        let events = (0..3).map(|repeat_index| json!({"scenario":"tab_count_ceiling", "step_index":0,
-            "repeat_index":repeat_index,"workload_value":10000,"elapsed_ns":10,"status":"panic"})).collect();
+        let events = (0..3)
+            .map(|repeat_index| {
+                json!({"scenario":"tab_count_ceiling", "step_index":0,
+            "repeat_index":repeat_index,"workload_value":10000,"elapsed_ns":10,"status":"panic"})
+            })
+            .collect();
         let payload = summarize_capacity(events, "partial", None);
         assert_eq!(payload["scenarios"][0]["failure_mode"], "operation_failed");
         assert_eq!(payload["scenarios"][0]["samples"][0]["failure_count"], 3);

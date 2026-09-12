@@ -8,7 +8,8 @@ pub(in crate::producers) fn read_analysis(
     default: Value,
 ) -> Value {
     let path = config.output_dir.join(file);
-    let status = crate::provenance::validity(&path, &crate::provenance::context(&config.project_root));
+    let status =
+        crate::provenance::validity(&path, &crate::provenance::context(&config.project_root));
     if status != "valid" {
         eprintln!("Excluding {file}: {status} measurement provenance");
         return default;

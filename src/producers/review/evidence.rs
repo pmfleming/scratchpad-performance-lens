@@ -17,14 +17,26 @@ pub(super) fn review_row_matches(row: &Value, scenario: &ReviewScenario) -> bool
         .or_else(|| row.get("family"))
         .and_then(Value::as_str)
         .unwrap_or("");
-    scenario.benchmark_keys.contains(&key) || scenario.families.contains(&family)
-        || row["promise_scenarios"].as_array().is_some_and(|ids| ids.iter().any(|id| id == scenario.id))
+    scenario.benchmark_keys.contains(&key)
+        || scenario.families.contains(&family)
+        || row["promise_scenarios"]
+            .as_array()
+            .is_some_and(|ids| ids.iter().any(|id| id == scenario.id))
 }
 
 pub(super) fn over_budget_latency(row: &&Value) -> bool {
-    if row["measurement_status"].as_str().is_some_and(|status| status != "valid") { return false; }
-    if row["evidence_kind"] == "frame" { return super::frames::over_budget(row); }
-    if let Some(status) = row["budget_status"].as_str() { return status == "fail"; }
+    if row["measurement_status"]
+        .as_str()
+        .is_some_and(|status| status != "valid")
+    {
+        return false;
+    }
+    if row["evidence_kind"] == "frame" {
+        return super::frames::over_budget(row);
+    }
+    if let Some(status) = row["budget_status"].as_str() {
+        return status == "fail";
+    }
     let budget_probe = budget_probe_ms(row);
     let threshold = row
         .get("threshold_ms")
@@ -63,23 +75,47 @@ pub(super) fn mean_ms(row: &Value) -> Option<f64> {
 pub(super) fn unique_rows(rows: Vec<Value>) -> Vec<Value> {
     let mut unique: BTreeMap<String, Value> = BTreeMap::new();
     for row in rows {
-        let name = row["name"].as_str().or_else(|| row["scenario_id"].as_str())
-            .map(str::to_owned).unwrap_or_else(|| format!("{}/{}",
-                row["benchmark_key"].as_str().unwrap_or("unknown"), row["parameter_value"]));
-        let kind = if row["evidence_kind"] == "frame" { "frame" }
-            else if row["budget_probe_label"] == "median_of_independent_trials" { "workflow" }
-            else { "criterion" };
+        let name = row["name"]
+            .as_str()
+            .or_else(|| row["scenario_id"].as_str())
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                format!(
+                    "{}/{}",
+                    row["benchmark_key"].as_str().unwrap_or("unknown"),
+                    row["parameter_value"]
+                )
+            });
+        let kind = if row["evidence_kind"] == "frame" {
+            "frame"
+        } else if row["budget_probe_label"] == "median_of_independent_trials" {
+            "workflow"
+        } else {
+            "criterion"
+        };
         // Criterion names already encode the workload. Report-specific labels,
         // inferred parameter fields and descriptions are not measurement identity.
-        let scope = if kind == "criterion" { "" } else { row["measurement_scope"].as_str().unwrap_or("") };
+        let scope = if kind == "criterion" {
+            ""
+        } else {
+            row["measurement_scope"].as_str().unwrap_or("")
+        };
         let key = format!("{kind}|{name}|{scope}");
-        let quality = |value: &Value| (
-            value["measurement_status"] == "valid",
-            value["measurement_finished_at"].as_f64().map(|time| (time * 1_000.0) as u64).unwrap_or(0),
-            value["threshold_authoritative"] == true,
-            value.as_object().map_or(0, |object| object.len()),
-        );
-        if unique.get(&key).is_none_or(|old| quality(&row) > quality(old)) {
+        let quality = |value: &Value| {
+            (
+                value["measurement_status"] == "valid",
+                value["measurement_finished_at"]
+                    .as_f64()
+                    .map(|time| (time * 1_000.0) as u64)
+                    .unwrap_or(0),
+                value["threshold_authoritative"] == true,
+                value.as_object().map_or(0, |object| object.len()),
+            )
+        };
+        if unique
+            .get(&key)
+            .is_none_or(|old| quality(&row) > quality(old))
+        {
             unique.insert(key, row);
         }
     }
@@ -125,8 +161,20 @@ pub(super) fn source_status(config: &LensConfig) -> Vec<SourceArtifactStatus> {
                     })
                     .and_then(Value::as_str)
                     .map(ToString::to_string);
-                let validity = crate::provenance::validity(&path, &crate::provenance::context(&config.project_root));
-                (validity == "valid", if validity == "valid" { "loaded" } else { validity }, probe_status, None)
+                let validity = crate::provenance::validity(
+                    &path,
+                    &crate::provenance::context(&config.project_root),
+                );
+                (
+                    validity == "valid",
+                    if validity == "valid" {
+                        "loaded"
+                    } else {
+                        validity
+                    },
+                    probe_status,
+                    None,
+                )
             }
             shared::JsonRead::Missing => (false, "missing", None, None),
             shared::JsonRead::Unparseable(error) => (false, "unparseable", None, Some(error)),

@@ -9,7 +9,11 @@ use std::collections::{HashMap, HashSet};
 pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
     let slowspots = read_analysis(config, "slowspots.json", json!([]));
     let search = read_analysis(config, "search_speed.json", json!([]));
-    let workflows = read_analysis(config, "search_workflow_metrics.json", json!({"scenarios": []}));
+    let workflows = read_analysis(
+        config,
+        "search_workflow_metrics.json",
+        json!({"scenarios": []}),
+    );
     let flamegraphs = read_analysis(config, "flamegraphs.json", json!([]));
     let capacity = read_analysis(config, "capacity_report.json", json!({"scenarios": []}));
     let resources = read_analysis(config, "resource_profiles.json", json!({"scenarios": []}));
@@ -24,7 +28,10 @@ pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) ->
 
     let mut search_dispatch = Vec::new();
     let mut search_rows = Vec::new();
-    for row in array_value(&search).into_iter().chain(scenarios_array(&workflows).iter().cloned()) {
+    for row in array_value(&search)
+        .into_iter()
+        .chain(scenarios_array(&workflows).iter().cloned())
+    {
         let normalized = normalize_latency_row(row, &capacity_lookup);
         if normalized.get("family").and_then(Value::as_str) == Some("search-dispatch") {
             search_dispatch.push(normalized);
@@ -67,13 +74,30 @@ pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) ->
     }
     let capacity_rows: Vec<_> = scenarios_array(&capacity)
         .iter()
-        .map(|row| normalize_capacity_row(row, capacity["meta"]["synthetic"] == true || capacity["summary"]["synthetic"] == true))
+        .map(|row| {
+            normalize_capacity_row(
+                row,
+                capacity["meta"]["synthetic"] == true || capacity["summary"]["synthetic"] == true,
+            )
+        })
         .collect();
-    let available_profiles: HashSet<_> = array_value(&flamegraphs).into_iter()
-        .filter(|row| row["available"] == true).filter_map(|row| row["id"].as_str().map(str::to_owned)).collect();
-    for row in search_dispatch.iter_mut().chain(&mut search_rows).chain(&mut editor_rows).chain(&mut tabs_rows) {
-        row["has_profile_coverage"] = json!(row["matching_flamegraphs"].as_array().is_some_and(|ids|
-            ids.iter().any(|id| id.as_str().is_some_and(|id| available_profiles.contains(id)))));
+    let available_profiles: HashSet<_> = array_value(&flamegraphs)
+        .into_iter()
+        .filter(|row| row["available"] == true)
+        .filter_map(|row| row["id"].as_str().map(str::to_owned))
+        .collect();
+    for row in search_dispatch
+        .iter_mut()
+        .chain(&mut search_rows)
+        .chain(&mut editor_rows)
+        .chain(&mut tabs_rows)
+    {
+        row["has_profile_coverage"] =
+            json!(row["matching_flamegraphs"].as_array().is_some_and(|ids| ids
+                .iter()
+                .any(|id| id
+                    .as_str()
+                    .is_some_and(|id| available_profiles.contains(id)))));
     }
     let latency_rows: Vec<&Value> = search_dispatch
         .iter()
@@ -85,12 +109,24 @@ pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) ->
     let triage = build_triage(&latency_rows, &capacity_rows);
     let resource_rows = scenarios_array(&resources).to_vec();
     let context = crate::provenance::context(&config.project_root);
-    let source_status: Vec<_> = ["slowspots.json", "search_speed.json", "search_workflow_metrics.json", "capacity_report.json",
-        "resource_profiles.json", "frame_metrics.json", "flamegraphs.json"].into_iter().map(|file| {
-            json!({"file":file,"required":file != "flamegraphs.json",
+    let source_status: Vec<_> = [
+        "slowspots.json",
+        "search_speed.json",
+        "search_workflow_metrics.json",
+        "capacity_report.json",
+        "resource_profiles.json",
+        "frame_metrics.json",
+        "flamegraphs.json",
+    ]
+    .into_iter()
+    .map(|file| {
+        json!({"file":file,"required":file != "flamegraphs.json",
                 "status":crate::provenance::validity(&config.output_dir.join(file), &context)})
-        }).collect();
-    let complete_sources = source_status.iter().all(|source| source["required"] != true || source["status"] == "valid");
+    })
+    .collect();
+    let complete_sources = source_status
+        .iter()
+        .all(|source| source["required"] != true || source["status"] == "valid");
     let payload = json!({
         "meta": {
             "generated_from": "rust:speed_efficiency_report",
@@ -153,8 +189,15 @@ fn normalize_latency_row(row: Value, capacity_lookup: &HashMap<String, Value>) -
         "split-layout" => capacity_lookup.get("split_count_ceiling"),
         _ => None,
     };
-    let mean_ms = row.get("mean_ms").and_then(Value::as_f64)
-        .or_else(|| row.get("mean_ns").and_then(Value::as_f64).map(|ns| ns / 1_000_000.0)).unwrap_or(0.0);
+    let mean_ms = row
+        .get("mean_ms")
+        .and_then(Value::as_f64)
+        .or_else(|| {
+            row.get("mean_ns")
+                .and_then(Value::as_f64)
+                .map(|ns| ns / 1_000_000.0)
+        })
+        .unwrap_or(0.0);
     let budget_probe_ms = budget_probe_ms(&row).unwrap_or(mean_ms);
     let budget_ms = row
         .get("threshold_ms")
@@ -194,8 +237,12 @@ fn normalize_latency_row(row: Value, capacity_lookup: &HashMap<String, Value>) -
 }
 
 fn normalize_capacity_row(row: &Value, synthetic: bool) -> Value {
-    let known = !synthetic && row["ceiling_reached"].is_boolean()
-        && !matches!(row["failure_mode"].as_str(), Some("unmeasured" | "incomplete"));
+    let known = !synthetic
+        && row["ceiling_reached"].is_boolean()
+        && !matches!(
+            row["failure_mode"].as_str(),
+            Some("unmeasured" | "incomplete")
+        );
     json!({
         "scenario_id": row.get("scenario").cloned(),
         "probe_class": row.get("probe_class").and_then(Value::as_str).unwrap_or("ceiling_health"),
@@ -294,7 +341,9 @@ fn flamegraph_coverage_rows(flamegraphs: Vec<Value>, latency_rows: &[&Value]) ->
 fn build_triage(latency_rows: &[&Value], capacity_rows: &[Value]) -> Vec<Value> {
     let mut rows = Vec::new();
     for row in latency_rows {
-        if row["over_budget"].is_null() { continue; }
+        if row["over_budget"].is_null() {
+            continue;
+        }
         let over_budget = row
             .get("over_budget")
             .and_then(Value::as_bool)
@@ -380,9 +429,16 @@ fn latency_rank(row: &Value) -> f64 {
         .and_then(Value::as_f64)
         .or_else(|| row.get("mean_ms").and_then(Value::as_f64))
         .unwrap_or(0.0);
-    let overrun = if let (Some(p95), Some(p99), Some(p99_budget)) =
-        (row["p95_ms"].as_f64(), row["p99_ms"].as_f64(), row["p99_budget_ms"].as_f64()) {
-        if budget > 0.0 && p99_budget > 0.0 { (p95 / budget).max(p99 / p99_budget) } else { 0.0 }
+    let overrun = if let (Some(p95), Some(p99), Some(p99_budget)) = (
+        row["p95_ms"].as_f64(),
+        row["p99_ms"].as_f64(),
+        row["p99_budget_ms"].as_f64(),
+    ) {
+        if budget > 0.0 && p99_budget > 0.0 {
+            (p95 / budget).max(p99 / p99_budget)
+        } else {
+            0.0
+        }
     } else if budget > 0.0 {
         budget_probe / budget
     } else {
@@ -432,7 +488,9 @@ fn triage_summary(latency_rows: &[&Value], capacity_rows: &[Value]) -> Value {
     for row in latency_rows {
         match row["over_budget"].as_bool() {
             Some(true) => critical += 1,
-            Some(false) if matches!(row["stability"].as_str(), Some("watch" | "high-variance")) => watch += 1,
+            Some(false) if matches!(row["stability"].as_str(), Some("watch" | "high-variance")) => {
+                watch += 1
+            }
             Some(false) => ok += 1,
             None => unknown += 1,
         }
@@ -447,32 +505,38 @@ fn triage_summary(latency_rows: &[&Value], capacity_rows: &[Value]) -> Value {
     json!({"critical":critical,"watch":watch,"ok":ok,"unknown":unknown})
 }
 
+fn methodology_notes() -> Vec<&'static str> {
+    vec![
+        "Criterion estimates component means and confidence intervals, not request latency tails.",
+        "Search workflows measure real dispatch, delivery, headless render preparation and completion.",
+        "Only available profiles count as diagnosis coverage; profiles do not prove budgets.",
+        "Capacity health requires successful complete repetitions for every required operation.",
+        "Unknown, invalid and synthetic evidence never counts as passing triage.",
+        "Process high-water RSS and absolute heap baselines are not per-operation memory peaks.",
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     fn synthetic_and_unknown_capacity_are_not_reported_as_ok() {
-        let row = normalize_capacity_row(&json!({"ceiling_reached":null,"failure_mode":"unmeasured"}), true);
+        let row = normalize_capacity_row(
+            &json!({"ceiling_reached":null,"failure_mode":"unmeasured"}),
+            true,
+        );
         assert!(row["ceiling_reached"].is_null());
         assert_eq!(row["synthetic"], true);
         let summary = triage_summary(&[&json!({"over_budget":null})], &[row]);
-        assert_eq!(summary["ok"],0);
-        assert_eq!(summary["unknown"],2);
+        assert_eq!(summary["ok"], 0);
+        assert_eq!(summary["unknown"], 2);
     }
     #[test]
     fn missing_budgets_remain_unknown_in_latency_normalization() {
-        let row = normalize_latency_row(json!({"mean_ns":1,"measurement_status":"valid"}), &HashMap::new());
+        let row = normalize_latency_row(
+            json!({"mean_ns":1,"measurement_status":"valid"}),
+            &HashMap::new(),
+        );
         assert!(row["over_budget"].is_null());
     }
-}
-
-fn methodology_notes() -> Vec<&'static str> {
-    vec![
-        "Broad Criterion slowspots remain the wide detector for general latency regressions.",
-        "The dedicated search report remains the authoritative scaling view for search latency.",
-        "Flamegraphs explain CPU hot paths; they do not replace benchmark budgets or capacity ceilings.",
-        "Capacity sweeps stay out of the latency leaderboard and record the first unusable ceiling separately.",
-        "Ceiling probes answer promise-health questions; targeted path probes validate whether a specific change worked.",
-        "Resource profiles capture allocation-heavy, working-set, and session-cost scenarios that are not visible in CPU flamegraphs alone.",
-    ]
 }

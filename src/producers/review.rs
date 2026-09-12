@@ -1,5 +1,5 @@
-mod evidence;
 mod coverage;
+mod evidence;
 pub(super) mod frames;
 mod health;
 mod registry;
@@ -11,10 +11,9 @@ use super::flamegraphs::fallback_flamegraphs;
 use super::render::render_performance_review;
 use crate::artifacts::capacity_report::{CapacityReportArtifact, CapacityScenario};
 use crate::artifacts::performance_review::{
-    CoverageStatus, MeasurementClassSummary, MeasurementSplit,
-    PerformanceReviewArtifact, PerformanceReviewMeta, PerformanceReviewScenario,
-    PerformanceReviewSummary, Presentation, PromiseHealth, PromiseHealthSummary,
-    PromiseRegistryEntry, ScaleCheckStatus, ScenarioEvidence,
+    CoverageStatus, MeasurementClassSummary, MeasurementSplit, PerformanceReviewArtifact,
+    PerformanceReviewMeta, PerformanceReviewScenario, PerformanceReviewSummary, Presentation,
+    PromiseHealth, PromiseHealthSummary, PromiseRegistryEntry, ScaleCheckStatus, ScenarioEvidence,
 };
 use crate::cli::MeasureOptions;
 use crate::config::LensConfig;
@@ -45,9 +44,20 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
     let speed_report = read_analysis(config, "speed_efficiency_report.json", json!({}));
 
     let frame_metrics = read_analysis(config, "frame_metrics.json", json!({"scenarios": []}));
-    let workflows = read_analysis(config, "search_workflow_metrics.json", json!({"scenarios": []}));
-    let latency_rows = unique_rows([array_value(&slowspots), array_value(&search), frames::frame_rows(&frame_metrics),
-        scenarios_array(&workflows).to_vec()].concat());
+    let workflows = read_analysis(
+        config,
+        "search_workflow_metrics.json",
+        json!({"scenarios": []}),
+    );
+    let latency_rows = unique_rows(
+        [
+            array_value(&slowspots),
+            array_value(&search),
+            frames::frame_rows(&frame_metrics),
+            scenarios_array(&workflows).to_vec(),
+        ]
+        .concat(),
+    );
     let capacity_rows = capacity.scenarios;
     let resource_rows = scenarios_array(&resources).to_vec();
     let capacity_synthetic = capacity.meta.synthetic;
@@ -202,8 +212,15 @@ fn build_review_scenario(
                 .is_some_and(|id| scenario.profile_ids.contains(&id))
         })
         .collect();
-    let axes = coverage::axes(scenario, &latency_rows, &capacity_rows, &resource_rows,
-        &profile_rows, capacity_synthetic, resources_synthetic);
+    let axes = coverage::axes(
+        scenario,
+        &latency_rows,
+        &capacity_rows,
+        &resource_rows,
+        &profile_rows,
+        capacity_synthetic,
+        resources_synthetic,
+    );
     let axis_values = [&axes.speed, &axes.capacity, &axes.resource, &axes.profiles];
     let required = axis_values.iter().filter(|axis| axis.required).count();
     let covered = axis_values
@@ -212,7 +229,10 @@ fn build_review_scenario(
         .count();
     let coverage_status = if required == covered {
         CoverageStatus::Covered
-    } else if axis_values.iter().any(|axis| axis.required && axis.available_count > 0) {
+    } else if axis_values
+        .iter()
+        .any(|axis| axis.required && axis.available_count > 0)
+    {
         CoverageStatus::Thin
     } else {
         CoverageStatus::Missing
@@ -226,10 +246,14 @@ fn build_review_scenario(
         resources_synthetic,
     );
     let budget_misses = latency_rows.iter().filter(over_budget_latency).count()
-        + if resources_synthetic { 0 } else { resource_rows
-            .iter()
-            .filter(|row| resource_contract_failed(row))
-            .count() };
+        + if resources_synthetic {
+            0
+        } else {
+            resource_rows
+                .iter()
+                .filter(|row| resource_contract_failed(row))
+                .count()
+        };
     let ceilings_reached = capacity_rows
         .iter()
         .filter(|row| row.ceiling_reached.unwrap_or(false))

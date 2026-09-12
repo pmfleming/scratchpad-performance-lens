@@ -7,34 +7,58 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn timestamp() -> f64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs_f64()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs_f64()
 }
 
 // Deterministic content fingerprint (not a security/authenticity signature).
 pub fn fingerprint(bytes: &[u8]) -> String {
-    let hash = bytes.iter().fold(0xcbf29ce484222325u64, |hash, byte|
-        (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3));
+    let hash = bytes.iter().fold(0xcbf29ce484222325u64, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+    });
     format!("{hash:016x}")
 }
 
 fn command(root: &Path, program: &str, args: &[&str]) -> Option<String> {
-    let output = Command::new(program).args(args).current_dir(root).output().ok()?;
-    output.status.success().then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    let output = Command::new(program)
+        .args(args)
+        .current_dir(root)
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
 fn executable_fingerprint() -> &'static Option<String> {
     static HASH: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-    HASH.get_or_init(|| std::env::current_exe().ok()
-        .and_then(|path| std::fs::read(path).ok()).map(|bytes| fingerprint(&bytes)))
+    HASH.get_or_init(|| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|path| std::fs::read(path).ok())
+            .map(|bytes| fingerprint(&bytes))
+    })
 }
 
 pub fn context(root: &Path) -> Value {
-    let files = Command::new("git").args(["ls-files", "-c", "-o", "--exclude-standard", "-z"])
-        .current_dir(root).output().ok().filter(|out| out.status.success());
+    let files = Command::new("git")
+        .args(["ls-files", "-c", "-o", "--exclude-standard", "-z"])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|out| out.status.success());
     let mut contents = Vec::new();
     if let Some(files) = files {
-        let mut paths: Vec<_> = files.stdout.split(|byte| *byte == 0).filter(|path| !path.is_empty()).collect();
-        paths.sort(); paths.dedup();
+        let mut paths: Vec<_> = files
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|path| !path.is_empty())
+            .collect();
+        paths.sort();
+        paths.dedup();
         for path in paths {
             contents.extend_from_slice(path);
             contents.push(0);
@@ -67,18 +91,27 @@ pub fn context(root: &Path) -> Value {
 }
 
 pub fn sidecar(path: &Path) -> PathBuf {
-    path.with_file_name(format!("{}.provenance.json", path.file_name().unwrap_or_default().to_string_lossy()))
+    path.with_file_name(format!(
+        "{}.provenance.json",
+        path.file_name().unwrap_or_default().to_string_lossy()
+    ))
 }
 
-pub fn record(config: &LensConfig, file: &str, started: f64, context: &Value, success: bool) -> Result<()> {
+pub fn record(
+    config: &LensConfig,
+    file: &str,
+    started: f64,
+    context: &Value,
+    success: bool,
+) -> Result<()> {
     let path = config.output_dir.join(file);
     let bytes = std::fs::read(&path)?;
     let artifact: Value = serde_json::from_slice(&bytes)?;
     // Budget failures are valid measurements. A structurally partial probe also
     // retains its real successful/failed samples; per-row completeness gates proof.
-    let measured_failure = artifact.as_array().is_some_and(|rows| !rows.is_empty()
-        && rows.iter().all(|row| row["measurement_status"] == "valid"))
-        || artifact["meta"]["probe_status"] == "partial";
+    let measured_failure = artifact.as_array().is_some_and(|rows| {
+        !rows.is_empty() && rows.iter().all(|row| row["measurement_status"] == "valid")
+    }) || artifact["meta"]["probe_status"] == "partial";
     let payload = json!({"version": 1, "run_id": format!("{}-{started:.9}", std::process::id()),
         "started_at": started, "finished_at": timestamp(), "context": context,
         "producer_success": success, "artifact_fingerprint": fingerprint(&bytes),
@@ -88,13 +121,26 @@ pub fn record(config: &LensConfig, file: &str, started: f64, context: &Value, su
 }
 
 pub fn validity(path: &Path, current_context: &Value) -> &'static str {
-    let shared::JsonRead::Loaded(meta) = shared::read_json(&sidecar(path)) else { return "unverified"; };
-    if meta["status"] != "valid" { return "failed"; }
-    let Ok(bytes) = std::fs::read(path) else { return "missing"; };
-    if meta["artifact_fingerprint"] != fingerprint(&bytes) { return "invalid"; }
-    if &meta["context"] != current_context { return "stale"; }
+    let shared::JsonRead::Loaded(meta) = shared::read_json(&sidecar(path)) else {
+        return "unverified";
+    };
+    if meta["status"] != "valid" {
+        return "failed";
+    }
+    let Ok(bytes) = std::fs::read(path) else {
+        return "missing";
+    };
+    if meta["artifact_fingerprint"] != fingerprint(&bytes) {
+        return "invalid";
+    }
+    if &meta["context"] != current_context {
+        return "stale";
+    }
     // Same-revision measurements still expire: scheduling/thermal/environment conditions change.
-    if meta["finished_at"].as_f64().is_none_or(|time| !(0.0..=86400.0).contains(&(timestamp() - time))) {
+    if meta["finished_at"]
+        .as_f64()
+        .is_none_or(|time| !(0.0..=86400.0).contains(&(timestamp() - time)))
+    {
         return "stale";
     }
     "valid"
@@ -106,7 +152,11 @@ mod tests {
     #[test]
     fn validity_requires_success_matching_context_and_unchanged_content() {
         let dir = tempfile::tempdir().unwrap();
-        let config = LensConfig { project_name: "test".into(), project_root: dir.path().into(), output_dir: dir.path().into() };
+        let config = LensConfig {
+            project_name: "test".into(),
+            project_root: dir.path().into(),
+            output_dir: dir.path().into(),
+        };
         let path = dir.path().join("test.json");
         std::fs::write(&path, "[]").unwrap();
         let context = json!({"revision": "a"});

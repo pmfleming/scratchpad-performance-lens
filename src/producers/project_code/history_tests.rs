@@ -4,7 +4,21 @@ use std::path::Path;
 
 fn commit(root: &Path, message: &str) {
     git(root, &["add", "-A"]).unwrap();
-    git(root, &["-c", "user.name=fixture", "-c", "user.email=fixture@example.test", "-c", "commit.gpgsign=false", "commit", "-m", message]).unwrap();
+    git(
+        root,
+        &[
+            "-c",
+            "user.name=fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            message,
+        ],
+    )
+    .unwrap();
 }
 
 #[test]
@@ -13,7 +27,8 @@ fn history_counts_each_revision_consistently_across_blanks_tests_renames_and_mer
     let root = dir.path();
     git(root, &["init", "--initial-branch=main"]).unwrap();
     std::fs::create_dir(root.join("src")).unwrap();
-    let original = "pub fn app() {}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn works() {}\n}\n";
+    let original =
+        "pub fn app() {}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn works() {}\n}\n";
     std::fs::write(root.join("src/lib.rs"), original).unwrap();
     commit(root, "initial");
     let initial = git(root, &["rev-parse", "HEAD"]).unwrap().trim().to_owned();
@@ -28,11 +43,37 @@ fn history_counts_each_revision_consistently_across_blanks_tests_renames_and_mer
     std::fs::write(root.join("src/extra.rs"), "pub fn extra() {}\n").unwrap();
     commit(root, "side branch");
     git(root, &["checkout", "main"]).unwrap();
-    git(root, &["-c", "user.name=fixture", "-c", "user.email=fixture@example.test", "-c", "commit.gpgsign=false",
-        "merge", "--no-ff", "side", "-m", "merge side"]).unwrap();
+    git(
+        root,
+        &[
+            "-c",
+            "user.name=fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "-c",
+            "commit.gpgsign=false",
+            "merge",
+            "--no-ff",
+            "side",
+            "-m",
+            "merge side",
+        ],
+    )
+    .unwrap();
     let mut cache = HashMap::new();
     let history = commit_history(root, "HEAD", 40, &mut cache).unwrap();
-    let categories: Vec<_> = history.iter().map(|row| (row["lines"]["application"].as_i64().unwrap(), row["lines"]["test"].as_i64().unwrap())).collect();
-    assert_eq!(categories, [(1,5),(1,5),(1,0),(0,1),(1,1)]);
-    assert_eq!(history.last().unwrap()["lines"], count_ref(root,"HEAD",&mut cache).unwrap().to_json());
+    let categories: Vec<_> = history
+        .iter()
+        .map(|row| {
+            (
+                row["lines"]["application"].as_i64().unwrap(),
+                row["lines"]["test"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(categories, [(1, 5), (1, 5), (1, 0), (0, 1), (1, 1)]);
+    assert_eq!(
+        history.last().unwrap()["lines"],
+        count_ref(root, "HEAD", &mut cache).unwrap().to_json()
+    );
 }

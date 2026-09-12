@@ -19,25 +19,34 @@ pub fn resource_profiles(config: &LensConfig, _options: MeasureOptions) -> Resul
         ],
         probe_path("resource_probe"),
         "resource probe",
-    ).and_then(|events| {
+    )
+    .and_then(|events| {
         for expected in fallback_resource_events() {
-            anyhow::ensure!(events.iter().any(|event| event["scenario"] == expected["scenario"]),
-                "resource probe omitted expected scenario {}", expected["scenario"]);
+            anyhow::ensure!(
+                events
+                    .iter()
+                    .any(|event| event["scenario"] == expected["scenario"]),
+                "resource probe omitted expected scenario {}",
+                expected["scenario"]
+            );
         }
         Ok(events)
     });
     let (payload, failure) = match events {
-        Ok(events) if !events.is_empty() => (summarize_resources(events, "completed", None), None),
+        Ok(events) if !events.is_empty() => {
+            let failed = events.iter().any(|event| event["status"] != "ok");
+            (
+                summarize_resources(events, if failed { "partial" } else { "completed" }, None),
+                failed.then(|| "resource probe contains failed samples".to_owned()),
+            )
+        }
         Ok(_) => {
             let error = "No probe samples were recorded.".to_string();
             (empty_resources(&error), Some(error))
         }
         Err(error) => {
             let error = error.to_string();
-            (
-                empty_resources(&error),
-                Some(error),
-            )
+            (empty_resources(&error), Some(error))
         }
     };
     write_probe_artifact(
@@ -282,8 +291,11 @@ fn empty_resources(reason: &str) -> Value {
 }
 
 fn summarize_resources(events: Vec<Value>, status: &str, fallback_reason: Option<&str>) -> Value {
-    let probe_command = events.first().and_then(|event| event["probe_executable"].as_str())
-        .unwrap_or("cargo build --release --bin resource_probe (executable unavailable)").to_owned();
+    let probe_command = events
+        .first()
+        .and_then(|event| event["probe_executable"].as_str())
+        .unwrap_or("cargo build --release --bin resource_probe (executable unavailable)")
+        .to_owned();
     let mut grouped: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     for event in events {
         if let Some(scenario) = event.get("scenario").and_then(Value::as_str) {
@@ -296,7 +308,8 @@ fn summarize_resources(events: Vec<Value>, status: &str, fallback_reason: Option
         events.sort_by_key(|event| event.get("step_index").and_then(Value::as_i64).unwrap_or(0));
         let first = events.first().cloned().unwrap_or_else(|| json!({}));
         let last = events.last().cloned().unwrap_or_else(|| json!({}));
-        let gap_evidence = super::resource_contracts::gap_evidence(&scenario, &events, fallback_reason.is_some());
+        let gap_evidence =
+            super::resource_contracts::gap_evidence(&scenario, &events, fallback_reason.is_some());
         scenarios.push(json!({
             "scenario": scenario,
             "probe_class": "targeted_path",
@@ -314,6 +327,7 @@ fn summarize_resources(events: Vec<Value>, status: &str, fallback_reason: Option
             "max_allocated_bytes": max_i64(&events, "allocated_bytes"),
             "max_peak_live_bytes": max_i64(&events, "peak_live_bytes"),
             "max_live_bytes": max_i64(&events, "live_bytes"),
+            "max_retained_live_bytes_before_teardown": max_i64(&events, "retained_live_bytes_before_teardown"),
             "max_baseline_live_bytes": max_i64(&events, "baseline_live_bytes"),
             "max_live_growth_bytes": max_i64(&events, "live_growth_bytes"),
             "peak_working_set_bytes": max_i64(&events, "peak_working_set_bytes"),
@@ -330,10 +344,22 @@ fn summarize_resources(events: Vec<Value>, status: &str, fallback_reason: Option
             "samples": events.iter().map(resource_sample).collect::<Vec<_>>(),
         }));
     }
-    let closed_gaps = gap_map.values().copied().collect::<HashSet<_>>().into_iter().filter(|gap| {
-        gap_map.iter().filter(|(_, description)| **description == *gap).all(|(id, _)|
-            scenarios.iter().any(|row| row["scenario"] == *id && row["closes_measurement_gap"] == true))
-    }).count();
+    let closed_gaps = gap_map
+        .values()
+        .copied()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .filter(|gap| {
+            gap_map
+                .iter()
+                .filter(|(_, description)| **description == *gap)
+                .all(|(id, _)| {
+                    scenarios
+                        .iter()
+                        .any(|row| row["scenario"] == *id && row["closes_measurement_gap"] == true)
+                })
+        })
+        .count();
     let mut payload = json!({
         "meta": {"generated_from": "rust:resource_profiles", "probe_command": probe_command, "scenario_count": scenarios.len(), "probe_status": status},
         "summary": {
@@ -387,7 +413,9 @@ fn resource_sample(event: &Value) -> Value {
     });
     // Preserve the probe's resource counters, units and scope even as it evolves.
     if let (Some(source), Some(target)) = (event.as_object(), sample.as_object_mut()) {
-        for (key, value) in source { target.entry(key).or_insert_with(|| value.clone()); }
+        for (key, value) in source {
+            target.entry(key).or_insert_with(|| value.clone());
+        }
     }
     sample
 }
@@ -448,8 +476,10 @@ mod tests {
     fn retained_heap_scope_and_process_counters_survive_serialization() {
         let sample = super::resource_sample(&json!({"elapsed_ns":10, "live_bytes":100,
             "baseline_live_bytes":200, "live_growth_bytes":-100,
+            "retained_live_bytes_before_teardown":350,
             "measurement_scope":"prepared_operation", "process_resources":{"read_bytes":1024}}));
         assert_eq!(sample["live_bytes"], 100);
+        assert_eq!(sample["retained_live_bytes_before_teardown"], 350);
         assert_eq!(sample["live_growth_bytes"], -100);
         assert_eq!(sample["measurement_scope"], "prepared_operation");
         assert_eq!(sample["process_resources"]["read_bytes"], 1024);

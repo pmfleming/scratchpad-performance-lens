@@ -75,15 +75,23 @@ impl CapacityScenario {
         if !self.threshold_ms.is_finite() || self.threshold_ms <= 0.0 {
             return None;
         }
-        self.samples.iter().filter(|sample| {
-            sample.status == "ok"
-                && sample.complete && sample.failure_count == 0
-                && sample.elapsed_ms.is_some_and(|value| value.is_finite() && value > 0.0 && value <= self.threshold_ms)
-                && sample.repetition_count >= 3
-                && sample.workload_value.is_some_and(|value| {
-                    self.first_failure_workload.is_none_or(|failure| value < failure)
-                })
-        }).filter_map(|sample| sample.workload_value).max()
+        self.samples
+            .iter()
+            .filter(|sample| {
+                sample.status == "ok"
+                    && sample.complete
+                    && sample.failure_count == 0
+                    && sample.elapsed_ms.is_some_and(|value| {
+                        value.is_finite() && value > 0.0 && value <= self.threshold_ms
+                    })
+                    && sample.repetition_count >= 3
+                    && sample.workload_value.is_some_and(|value| {
+                        self.first_failure_workload
+                            .is_none_or(|failure| value < failure)
+                    })
+            })
+            .filter_map(|sample| sample.workload_value)
+            .max()
     }
 
     pub fn max_workload_value(&self) -> Option<i64> {

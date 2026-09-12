@@ -33,6 +33,14 @@ pub fn frame_metrics(config: &LensConfig, _options: MeasureOptions) -> Result<()
 
     add_realistic_frame_metrics(&mut payload, config);
     annotate_frame_scenarios(&mut payload);
+    if !payload["scenarios"]
+        .as_array()
+        .is_some_and(|rows| !rows.is_empty() && rows.iter().all(super::review::frames::valid_frame))
+    {
+        payload["meta"]["probe_status"] = json!("failed");
+        payload["meta"]["error"] =
+            json!("frame probe returned empty, invalid, or unspecified-scope measurements");
+    }
     if payload["meta"]["realistic_probe"]["status"].as_str() == Some("failed") {
         payload["meta"]["probe_status"] = json!("failed");
         payload["meta"]["error"] = payload["meta"]["realistic_probe"]["error"].clone();
@@ -244,11 +252,11 @@ mod tests {
         let row = &payload["scenarios"][0];
 
         assert_eq!(row["probe_binary"], json!("realistic_frame_metrics"));
+        assert_eq!(row["measurement_scope"], json!("unknown"));
         assert_eq!(
-            row["measurement_scope"],
-            json!("unknown")
+            row["metric_role"],
+            json!("render_preparation_scope_unspecified")
         );
-        assert_eq!(row["metric_role"], json!("render_preparation_scope_unspecified"));
         assert_eq!(row["refresh_budget_utilization"]["240_hz"], json!(1.5));
     }
 

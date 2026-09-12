@@ -5,14 +5,28 @@ use crate::artifacts::performance_review::{
     ScaleCheckStatus,
 };
 use serde_json::Value;
-pub(super) fn coverage_axis(expected: &[&str], available: Vec<String>, valid: Vec<String>) -> CoverageAxis {
-    let missing_evidence: Vec<_> = expected.iter().filter(|id| !valid.iter().any(|value| value == **id))
-        .map(|id| id.to_string()).collect();
+pub(super) fn coverage_axis(
+    expected: &[&str],
+    available: Vec<String>,
+    valid: Vec<String>,
+) -> CoverageAxis {
+    let missing_evidence: Vec<_> = expected
+        .iter()
+        .filter(|id| !valid.iter().any(|value| value == **id))
+        .map(|id| id.to_string())
+        .collect();
     CoverageAxis {
         required: !expected.is_empty(),
-        covered: if expected.is_empty() { !valid.is_empty() } else { missing_evidence.is_empty() },
-        count: available.len(), available_count: available.len(), valid_count: valid.len(),
-        expected_count: expected.len(), missing_evidence,
+        covered: if expected.is_empty() {
+            !valid.is_empty()
+        } else {
+            missing_evidence.is_empty()
+        },
+        count: available.len(),
+        available_count: available.len(),
+        valid_count: valid.len(),
+        expected_count: expected.len(),
+        missing_evidence,
     }
 }
 
@@ -25,7 +39,12 @@ pub(super) fn scenario_gaps(axes: &CoverageAxes) -> Vec<String> {
     ]
     .into_iter()
     .filter(|(_, axis)| axis.required && !axis.covered)
-    .map(|(name, axis)| format!("Missing valid {name} evidence: {}.", axis.missing_evidence.join(", "))) 
+    .map(|(name, axis)| {
+        format!(
+            "Missing valid {name} evidence: {}.",
+            axis.missing_evidence.join(", ")
+        )
+    })
     .collect()
 }
 
@@ -64,18 +83,33 @@ pub(super) fn scale_checks(
             // Every required operation must demonstrate the target independently.
             // Resource workload sizes cannot substitute for capacity latency evidence.
             let demonstrated: Vec<Option<i64>> = if !target.capacity_scenarios.is_empty() {
-                target.capacity_scenarios.iter().map(|id| {
-                    matching_capacity.iter().find(|row| row.scenario == *id)
-                        .and_then(|row| row.demonstrated_workload())
-                }).collect()
+                target
+                    .capacity_scenarios
+                    .iter()
+                    .map(|id| {
+                        matching_capacity
+                            .iter()
+                            .find(|row| row.scenario == *id)
+                            .and_then(|row| row.demonstrated_workload())
+                    })
+                    .collect()
             } else {
-                target.resource_scenarios.iter().map(|id| {
-                    matching_resources.iter().find(|row| row["scenario"].as_str() == Some(*id))
-                        .and_then(|row| demonstrated_resource_workload(row))
-                }).collect()
+                target
+                    .resource_scenarios
+                    .iter()
+                    .map(|id| {
+                        matching_resources
+                            .iter()
+                            .find(|row| row["scenario"].as_str() == Some(*id))
+                            .and_then(|row| demonstrated_resource_workload(row))
+                    })
+                    .collect()
             };
-            let last_successful_workload = demonstrated.iter().copied()
-                .collect::<Option<Vec<_>>>().and_then(|values| values.into_iter().min());
+            let last_successful_workload = demonstrated
+                .iter()
+                .copied()
+                .collect::<Option<Vec<_>>>()
+                .and_then(|values| values.into_iter().min());
             let synthetic = (capacity_synthetic && !matching_capacity.is_empty())
                 || (resources_synthetic && !matching_resources.is_empty());
             let failed_capacity_scenarios = matching_capacity
@@ -104,10 +138,7 @@ pub(super) fn scale_checks(
                 max_workload_value,
                 first_failure_workload,
                 last_successful_workload,
-                headroom_workload: headroom_workload(
-                    target.minimum,
-                    last_successful_workload,
-                ),
+                headroom_workload: headroom_workload(target.minimum, last_successful_workload),
                 evidence_count: matching_capacity.len() + matching_resources.len(),
                 failed_capacity_scenarios,
                 synthetic,
@@ -155,10 +186,7 @@ fn ceiling_status(
     }
 }
 
-fn headroom_workload(
-    minimum: i64,
-    last_successful_workload: Option<i64>,
-) -> Option<i64> {
+fn headroom_workload(minimum: i64, last_successful_workload: Option<i64>) -> Option<i64> {
     last_successful_workload
         .filter(|success| *success >= minimum)
         .map(|value| value - minimum)
@@ -171,11 +199,21 @@ fn row_scenario_matches(row: &Value, scenario_ids: &[&str]) -> bool {
 }
 
 fn demonstrated_resource_workload(row: &Value) -> Option<i64> {
-    let threshold = row.get("threshold_ms")?.as_f64().filter(|value| *value > 0.0)?;
-    row.get("samples")?.as_array()?.iter().filter(|sample| {
-        sample["status"].as_str() == Some("ok")
-            && sample["elapsed_ms"].as_f64().is_some_and(|value| value > 0.0 && value <= threshold)
-    }).filter_map(|sample| sample["workload_value"].as_i64()).max()
+    let threshold = row
+        .get("threshold_ms")?
+        .as_f64()
+        .filter(|value| *value > 0.0)?;
+    row.get("samples")?
+        .as_array()?
+        .iter()
+        .filter(|sample| {
+            sample["status"].as_str() == Some("ok")
+                && sample["elapsed_ms"]
+                    .as_f64()
+                    .is_some_and(|value| value > 0.0 && value <= threshold)
+        })
+        .filter_map(|sample| sample["workload_value"].as_i64())
+        .max()
 }
 
 fn max_resource_workload_value(row: &Value) -> Option<i64> {

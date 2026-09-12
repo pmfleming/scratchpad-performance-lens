@@ -1,6 +1,6 @@
 use super::common::{
-    dispersion_lower_ns, dispersion_upper_ns, criterion_dir, estimate_optional, latency_score, over_threshold,
-    run_benchmarks, score_of, slowspot_signals, stability_label,
+    criterion_dir, dispersion_lower_ns, dispersion_upper_ns, estimate_optional, latency_score,
+    over_threshold, run_benchmarks, score_of, slowspot_signals, stability_label,
 };
 use super::render::render_slowspots;
 use crate::cli::MeasureOptions;
@@ -41,8 +41,12 @@ pub fn slowspots(config: &LensConfig, options: MeasureOptions) -> Result<()> {
             eprintln!("Skipping stale or unmapped Criterion result: {name}");
             continue;
         };
-        let estimates = match super::common::read_estimates(&config.project_root, &path, &name,
-            &["search_speed", "frame_budget", "promise_latency"]) {
+        let estimates = match super::common::read_estimates(
+            &config.project_root,
+            &path,
+            &name,
+            &["search_speed", "frame_budget", "promise_latency"],
+        ) {
             Ok(estimates) => estimates,
             Err(error) => {
                 invalid.push(format!("{name}: {error}"));
@@ -51,7 +55,7 @@ pub fn slowspots(config: &LensConfig, options: MeasureOptions) -> Result<()> {
                     "error": error.to_string(), "mean_ns": null, "budget_probe_ns": null}));
                 continue;
             }
-        }; 
+        };
         let mean_ns = shared::f64_field(&estimates, &["mean", "point_estimate"]);
         let std_dev_ns = shared::f64_field(&estimates, &["std_dev", "point_estimate"]);
         let dispersion_upper = dispersion_upper_ns(mean_ns, std_dev_ns);
@@ -120,7 +124,10 @@ pub fn slowspots(config: &LensConfig, options: MeasureOptions) -> Result<()> {
         bail!("slowspots probe failed: {error}");
     }
     if payload.as_array().is_none_or(Vec::is_empty) || !invalid.is_empty() {
-        bail!("slowspot measurements incomplete or invalid: {}", invalid.join("; "));
+        bail!(
+            "slowspot measurements incomplete or invalid: {}",
+            invalid.join("; ")
+        );
     }
     if options.fail_on_slow
         && payload

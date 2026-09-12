@@ -42,7 +42,14 @@ const PRODUCERS: &[ProducerSpec] = &[
         true,
         false,
     ),
-    ProducerSpec::standard("search-workflows", "search_workflow_metrics.json", producers::search_workflows, &[], false, false),
+    ProducerSpec::standard(
+        "search-workflows",
+        "search_workflow_metrics.json",
+        producers::search_workflows,
+        &[],
+        false,
+        false,
+    ),
     ProducerSpec::standard(
         "capacity",
         "capacity_report.json",
@@ -334,7 +341,13 @@ fn measure(args: MeasureArgs) -> Result<()> {
         let context = crate::provenance::context(&config.project_root);
         let result = (producer.run)(&config, producer_options);
         if config.output_dir.join(producer.artifact).exists() {
-            crate::provenance::record(&config, producer.artifact, started, &context, result.is_ok())?;
+            crate::provenance::record(
+                &config,
+                producer.artifact,
+                started,
+                &context,
+                result.is_ok(),
+            )?;
         }
         match result {
             Ok(()) => {

@@ -176,11 +176,20 @@ fn count_ref(project_root: &Path, ref_name: &str, cache: &mut CountCache) -> Res
     let tree = git(project_root, &["ls-tree", "-r", "-z", ref_name])?;
     let mut totals = CodeCounts::zero();
     for record in tree.split('\0').filter(|record| !record.is_empty()) {
-        let (header, path) = record.split_once('\t').ok_or_else(|| anyhow::anyhow!("invalid git tree record"))?;
-        if !is_included_code_path(path) { continue; }
-        let blob = header.split_whitespace().last().ok_or_else(|| anyhow::anyhow!("missing git blob id"))?;
+        let (header, path) = record
+            .split_once('\t')
+            .ok_or_else(|| anyhow::anyhow!("invalid git tree record"))?;
+        if !is_included_code_path(path) {
+            continue;
+        }
+        let blob = header
+            .split_whitespace()
+            .last()
+            .ok_or_else(|| anyhow::anyhow!("missing git blob id"))?;
         let key = (blob.to_owned(), classify_path(path).to_owned());
-        let counts = if let Some(counts) = cache.get(&key) { *counts } else {
+        let counts = if let Some(counts) = cache.get(&key) {
+            *counts
+        } else {
             // Cache by content and path category: renames across src/tests must reclassify.
             let content = git(project_root, &["cat-file", "blob", blob])?;
             let counts = count_content(path, &content);
