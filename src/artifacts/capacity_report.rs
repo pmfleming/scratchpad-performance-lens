@@ -67,6 +67,24 @@ pub struct CapacityScenario {
 }
 
 impl CapacityScenario {
+    /// Largest workload actually observed to complete within this operation's budget.
+    /// Summary labels and failed attempts are never evidence of a successful run.
+    pub fn demonstrated_workload(&self) -> Option<i64> {
+        if !self.threshold_ms.is_finite() || self.threshold_ms <= 0.0 {
+            return None;
+        }
+        self.samples.iter().filter(|sample| {
+            sample.status == "ok"
+                && sample.elapsed_ms.is_finite()
+                && sample.elapsed_ms > 0.0
+                && sample.elapsed_ms <= self.threshold_ms
+                && sample.repetition_count > 0
+                && sample.workload_value.is_some_and(|value| {
+                    self.first_failure_workload.is_none_or(|failure| value < failure)
+                })
+        }).filter_map(|sample| sample.workload_value).max()
+    }
+
     pub fn max_workload_value(&self) -> Option<i64> {
         self.last_successful_workload
             .into_iter()

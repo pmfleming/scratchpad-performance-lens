@@ -58,10 +58,21 @@ pub(super) fn scale_checks(
                 .iter()
                 .filter_map(|row| row.first_failure_workload)
                 .min();
-            let last_successful_workload = matching_capacity
-                .iter()
-                .filter_map(|row| row.last_successful_workload)
-                .max();
+            // Every required operation must demonstrate the target independently.
+            // Resource workload sizes cannot substitute for capacity latency evidence.
+            let demonstrated: Vec<Option<i64>> = if !target.capacity_scenarios.is_empty() {
+                target.capacity_scenarios.iter().map(|id| {
+                    matching_capacity.iter().find(|row| row.scenario == *id)
+                        .and_then(|row| row.demonstrated_workload())
+                }).collect()
+            } else {
+                target.resource_scenarios.iter().map(|id| {
+                    matching_resources.iter().find(|row| row["scenario"].as_str() == Some(*id))
+                        .and_then(|row| demonstrated_resource_workload(row))
+                }).collect()
+            };
+            let last_successful_workload = demonstrated.iter().copied()
+                .collect::<Option<Vec<_>>>().and_then(|values| values.into_iter().min());
             let synthetic = (capacity_synthetic && !matching_capacity.is_empty())
                 || (resources_synthetic && !matching_resources.is_empty());
             let failed_capacity_scenarios = matching_capacity
@@ -78,7 +89,8 @@ pub(super) fn scale_checks(
             let failed_before_promise = !failed_capacity_scenarios.is_empty();
             let met = !synthetic
                 && !failed_before_promise
-                && max_workload_value.is_some_and(|value| value >= target.minimum);
+                && !demonstrated.is_empty()
+                && last_successful_workload.is_some_and(|value| value >= target.minimum);
             let ceiling_status =
                 ceiling_status(synthetic, failed_before_promise, first_failure_workload);
             ScaleCheck {
@@ -91,7 +103,6 @@ pub(super) fn scale_checks(
                 last_successful_workload,
                 headroom_workload: headroom_workload(
                     target.minimum,
-                    first_failure_workload,
                     last_successful_workload,
                 ),
                 evidence_count: matching_capacity.len() + matching_resources.len(),
@@ -143,12 +154,10 @@ fn ceiling_status(
 
 fn headroom_workload(
     minimum: i64,
-    first_failure_workload: Option<i64>,
     last_successful_workload: Option<i64>,
 ) -> Option<i64> {
-    first_failure_workload
-        .filter(|failure| *failure > minimum)
-        .or_else(|| last_successful_workload.filter(|success| *success >= minimum))
+    last_successful_workload
+        .filter(|success| *success >= minimum)
         .map(|value| value - minimum)
 }
 
@@ -156,6 +165,14 @@ fn row_scenario_matches(row: &Value, scenario_ids: &[&str]) -> bool {
     row.get("scenario")
         .and_then(Value::as_str)
         .is_some_and(|id| scenario_ids.contains(&id))
+}
+
+fn demonstrated_resource_workload(row: &Value) -> Option<i64> {
+    let threshold = row.get("threshold_ms")?.as_f64().filter(|value| *value > 0.0)?;
+    row.get("samples")?.as_array()?.iter().filter(|sample| {
+        sample["status"].as_str() == Some("ok")
+            && sample["elapsed_ms"].as_f64().is_some_and(|value| value > 0.0 && value <= threshold)
+    }).filter_map(|sample| sample["workload_value"].as_i64()).max()
 }
 
 fn max_resource_workload_value(row: &Value) -> Option<i64> {

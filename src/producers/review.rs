@@ -1,6 +1,8 @@
 mod evidence;
 mod health;
 mod registry;
+#[cfg(test)]
+mod scale_tests;
 
 use super::common::{array_value, read_analysis, scenarios_array};
 use super::flamegraphs::fallback_flamegraphs;
@@ -419,7 +421,7 @@ mod tests {
     }
 
     #[test]
-    fn ceiling_hit_after_promised_scale_still_passes() {
+    fn partial_scale_evidence_does_not_prove_all_operations() {
         let scenario = review_scenarios()
             .into_iter()
             .find(|scenario| scenario.id == "many_files")
@@ -447,15 +449,15 @@ mod tests {
             false,
         );
         assert_eq!(row.coverage_status, CoverageStatus::Covered);
-        assert_eq!(row.promise_health, PromiseHealth::Pass);
+        assert_eq!(row.promise_health, PromiseHealth::AtRisk);
         assert_eq!(row.ceilings_reached, 1);
         assert_eq!(row.scale_failures, 0);
-        assert!(row.scale_checks[0].met);
+        assert!(!row.scale_checks[0].met);
         assert_eq!(
             row.scale_checks[0].ceiling_status,
             CeilingStatus::FailedAfterPromise
         );
-        assert_eq!(row.scale_checks[0].headroom_workload, Some(40_000));
+        assert_eq!(row.scale_checks[0].headroom_workload, None);
     }
 
     #[test]
