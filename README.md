@@ -95,6 +95,8 @@ trial exists. Any failed repetition remains a failure regardless of the median;
 resource peaks include all repetitions. Staged
 workflows can additionally report `background_completion_ms`, keeping the
 first-visible threshold separate from eventual hydration or shell installation.
+Such samples require `completed_workload_value` to match the requested workload;
+a timed-out wait is not background completion.
 
 `performance_review.json` carries a typed contract for the dashboard-facing
 scenario matrix:
@@ -145,6 +147,9 @@ misses instead of remaining passive diagnostics.
 
 See [Measurement integrity and migration](docs/measurement-integrity.md) for the
 full contracts, validation rules, and remaining measurement boundaries.
+The [end-to-end Scratchpad investigation](docs/scratchpad-performance-investigation.md)
+records actual full runs, measured improvements, discovered probe failures, and
+remaining budget violations.
 
 - Every producer writes a `.json.provenance.json` sidecar binding its artifact
   contents to the measured checkout, toolchain, host, relevant environment,
@@ -169,7 +174,10 @@ full contracts, validation rules, and remaining measurement boundaries.
   supported. Unsupported counters remain null. RSS high-water is explicitly
   process-lifetime; allocator live bytes are absolute with an interval baseline.
   Missing saturation evidence produces `unknown`, never an assumed CPU bottleneck.
-- Resource gaps close only with successful, correctly scoped measurements at
+- Resource probe IDs are declared by Scratchpad in
+  `benches/measurement_manifest.json` under `probes.resource_probe`. Missing
+  scenarios fail the run but preserve valid samples in a partial artifact.
+  Resource gaps close only with successful, correctly scoped measurements at
   the required workload and with all required metrics. Session phase timings
   are numeric data, not just formatted labels.
 - Frame p95 and p99 budgets both affect promise health. Histogram resolution,

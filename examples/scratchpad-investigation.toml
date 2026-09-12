@@ -1,0 +1,5 @@
+# Run from the performance-lens checkout. Adjust project_root if necessary.
+project_name = "scratchpad"
+project_root = "../scratchpad"
+# Keep the recorded baseline/final investigation snapshots separate from new runs.
+output_dir = "target/analysis/investigation/latest"
