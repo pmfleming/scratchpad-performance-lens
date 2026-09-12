@@ -56,16 +56,18 @@ pub(super) fn record_run(root: &Path, suites: &[&str], started: f64, context: Va
 
 pub(in crate::producers) fn read_estimates(root: &Path, path: &Path, name: &str, suites: &[&str]) -> Result<Value> {
     let bytes = std::fs::read(path)?;
-    let estimates: Value = serde_json::from_slice(&bytes).context("invalid Criterion JSON")?;
+    let mut estimates: Value = serde_json::from_slice(&bytes).context("invalid Criterion JSON")?;
     validate_estimates(&estimates)?;
     let current = provenance::context(root);
-    let valid = suites.iter().any(|suite| {
-        let shared::JsonRead::Loaded(manifest) = shared::read_json(&criterion_dir(root).join(format!("splens-{suite}.json"))) else { return false; };
-        manifest["context"] == current
+    let measured_at = suites.iter().filter_map(|suite| {
+        let shared::JsonRead::Loaded(manifest) = shared::read_json(&criterion_dir(root).join(format!("splens-{suite}.json"))) else { return None; };
+        let valid = manifest["context"] == current
             && manifest["finished_at"].as_f64().is_some_and(|time| (0.0..=86400.0).contains(&(provenance::timestamp() - time)))
-            && manifest["entries"][name] == provenance::fingerprint(&bytes)
-    });
-    if !valid { bail!("unverified or stale Criterion measurement: {name}"); }
+            && manifest["entries"][name] == provenance::fingerprint(&bytes);
+        valid.then(|| manifest["finished_at"].as_f64()).flatten()
+    }).max_by(f64::total_cmp);
+    if measured_at.is_none() { bail!("unverified or stale Criterion measurement: {name}"); }
+    estimates["measurement_finished_at"] = json!(measured_at);
     Ok(estimates)
 }
 

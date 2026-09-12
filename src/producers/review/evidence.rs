@@ -4,7 +4,7 @@ use crate::artifacts::performance_review::SourceArtifactStatus;
 use crate::config::LensConfig;
 use crate::shared;
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::BTreeMap;
 pub(super) fn review_row_matches(row: &Value, scenario: &ReviewScenario) -> bool {
     let key = row
         .get("benchmark_key")
@@ -61,27 +61,29 @@ pub(super) fn mean_ms(row: &Value) -> Option<f64> {
 }
 
 pub(super) fn unique_rows(rows: Vec<Value>) -> Vec<Value> {
-    let mut seen = HashSet::new();
-    rows.into_iter()
-        .filter(|row| {
-            let key = format!(
-                "{}|{}|{}|{}",
-                row.get("benchmark_key")
-                    .or_else(|| row.get("scenario"))
-                    .or_else(|| row.get("name"))
-                    .and_then(Value::as_str)
-                    .unwrap_or(""),
-                row.get("name").and_then(Value::as_str).unwrap_or(""),
-                row.get("parameter_value")
-                    .map(Value::to_string)
-                    .unwrap_or_default(),
-                row.get("scenario_label")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-            );
-            seen.insert(key)
-        })
-        .collect()
+    let mut unique: BTreeMap<String, Value> = BTreeMap::new();
+    for row in rows {
+        let name = row["name"].as_str().or_else(|| row["scenario_id"].as_str())
+            .map(str::to_owned).unwrap_or_else(|| format!("{}/{}",
+                row["benchmark_key"].as_str().unwrap_or("unknown"), row["parameter_value"]));
+        let kind = if row["evidence_kind"] == "frame" { "frame" }
+            else if row["budget_probe_label"] == "median_of_independent_trials" { "workflow" }
+            else { "criterion" };
+        // Criterion names already encode the workload. Report-specific labels,
+        // inferred parameter fields and descriptions are not measurement identity.
+        let scope = if kind == "criterion" { "" } else { row["measurement_scope"].as_str().unwrap_or("") };
+        let key = format!("{kind}|{name}|{scope}");
+        let quality = |value: &Value| (
+            value["measurement_status"] == "valid",
+            value["measurement_finished_at"].as_f64().map(|time| (time * 1_000.0) as u64).unwrap_or(0),
+            value["threshold_authoritative"] == true,
+            value.as_object().map_or(0, |object| object.len()),
+        );
+        if unique.get(&key).is_none_or(|old| quality(&row) > quality(old)) {
+            unique.insert(key, row);
+        }
+    }
+    unique.into_values().collect()
 }
 
 pub(super) fn payload_synthetic(payload: &Value) -> bool {
@@ -145,6 +147,19 @@ pub(super) fn source_status(config: &LensConfig) -> Vec<SourceArtifactStatus> {
 mod tests {
     use super::{resource_contract_failed, source_status};
     use crate::config::LensConfig;
+
+    #[test]
+    fn duplicate_criterion_rows_ignore_presentation_but_preserve_frame_scope() {
+        let rows = super::unique_rows(vec![
+            serde_json::json!({"name":"search/32", "benchmark_key":"search", "measurement_status":"valid"}),
+            serde_json::json!({"name":"search/32", "benchmark_key":"search", "parameter_value":32,
+                "scenario_label":"Search", "measurement_status":"valid", "threshold_authoritative":true}),
+            serde_json::json!({"name":"search/32", "evidence_kind":"frame", "measurement_scope":"event_to_tessellation"}),
+        ]);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["threshold_authoritative"], true);
+        assert_eq!(rows[1]["evidence_kind"], "frame");
+    }
 
     #[test]
     fn resource_contract_detects_cache_violations_and_failed_samples() {

@@ -141,6 +141,7 @@ fn build_search_row(name: String, key: String, meta: &Value, estimates: &Value) 
         "measurement_role": "change_validation",
         "measurement_question": "Did this search path stay inside its latency budget?",
     });
+    row["measurement_finished_at"] = estimates["measurement_finished_at"].clone();
     super::common::annotate_budget(&mut row, estimates, threshold_ms);
     row["threshold_authoritative"] = json!(threshold_ms.is_some());
     row["threshold_source"] = json!(meta.get("threshold_source"));

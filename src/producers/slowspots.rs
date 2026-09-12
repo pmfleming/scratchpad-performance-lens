@@ -73,6 +73,7 @@ pub fn slowspots(config: &LensConfig, options: MeasureOptions) -> Result<()> {
         let mut row = json!({
             "name": name,
             "measurement_status": "valid",
+            "measurement_finished_at": estimates["measurement_finished_at"],
             "measurement_scope": shared::string_field(meta, "measurement_scope", "prepared_component"),
             "mean_ns": mean_ns,
             "std_dev_ns": std_dev_ns,
