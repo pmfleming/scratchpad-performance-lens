@@ -110,8 +110,7 @@ pub fn search_workflows(config: &LensConfig, _: MeasureOptions) -> Result<()> {
         &config.output_dir.join("search_workflow_metrics.json"),
         &payload,
         "search workflows",
-        "Production query dispatch, delivery, render preparation and completion (no present)."
-            .into(),
+        super::render::render_search_workflows(&payload),
         failure,
     )
 }
@@ -119,6 +118,17 @@ pub fn search_workflows(config: &LensConfig, _: MeasureOptions) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn console_exposes_workflow_failures_and_unknown_measurements() {
+        let text = super::super::render::render_search_workflows(&json!({"scenarios":[{
+            "name":"search_workflow_all_dispatch/10000", "median_ms":280.0,
+            "max_ms":300.0, "threshold_ms":50.0, "budget_status":"fail"},
+            {"name":"incomplete"}]}));
+        assert!(text.contains("median=280.000 ms"));
+        assert!(text.contains("status=fail"));
+        assert!(text.contains("median=unknown"));
+    }
+
     #[test]
     fn workflow_flags_must_agree_with_observations_and_repetition_count() {
         let mut row = json!({"sample_elapsed_ms":[1.0],"repetition_count":1,"threshold_ms":2,

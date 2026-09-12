@@ -175,11 +175,14 @@ pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) ->
 }
 
 fn normalize_latency_row(row: Value, capacity_lookup: &HashMap<String, Value>) -> Value {
-    let family = row
-        .get("workload_family")
-        .or_else(|| row.get("family"))
-        .and_then(Value::as_str)
-        .unwrap_or("unmapped");
+    let family = if row["measurement_scope"] == "query_command_to_dispatch" {
+        "search-dispatch"
+    } else {
+        row.get("workload_family")
+            .or_else(|| row.get("family"))
+            .and_then(Value::as_str)
+            .unwrap_or("unmapped")
+    };
     let ceiling = match family {
         "file-load" | "scroll" | "viewport" | "snapshot" => {
             capacity_lookup.get("large_file_background_index_ceiling")
@@ -531,6 +534,16 @@ mod tests {
         assert_eq!(summary["ok"], 0);
         assert_eq!(summary["unknown"], 2);
     }
+    #[test]
+    fn production_dispatch_is_reported_in_its_own_section() {
+        let row = normalize_latency_row(
+            json!({"workload_family":"search",
+            "measurement_scope":"query_command_to_dispatch", "mean_ms":280}),
+            &HashMap::new(),
+        );
+        assert_eq!(row["family"], "search-dispatch");
+    }
+
     #[test]
     fn missing_budgets_remain_unknown_in_latency_normalization() {
         let row = normalize_latency_row(

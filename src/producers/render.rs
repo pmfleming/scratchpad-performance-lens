@@ -28,6 +28,33 @@ fn render_lines(header: &str, rows: Vec<String>, empty: Option<&str>) -> String 
     lines.join("\n")
 }
 
+fn measured_ms(value: &Value, key: &str, scale: f64) -> String {
+    value[key]
+        .as_f64()
+        .map_or_else(|| "unknown".into(), |value| format!("{:.3}", value / scale))
+}
+
+pub(super) fn render_search_workflows(payload: &Value) -> String {
+    let rows = scenarios_array(payload)
+        .iter()
+        .map(|row| {
+            format!(
+                "- {}: median={} ms | max={} ms | budget={} ms | status={}",
+                text(row, "name", "unknown"),
+                measured_ms(row, "median_ms", 1.0),
+                measured_ms(row, "max_ms", 1.0),
+                measured_ms(row, "threshold_ms", 1.0),
+                text(row, "budget_status", "unmeasured"),
+            )
+        })
+        .collect();
+    render_lines(
+        "Production Search Workflows (headless; no display present)",
+        rows,
+        Some("No valid search workflows were produced."),
+    )
+}
+
 pub(super) fn render_slowspots(payload: &Value) -> String {
     let rows = values_array(payload)
         .iter()
@@ -35,12 +62,13 @@ pub(super) fn render_slowspots(payload: &Value) -> String {
         .enumerate()
         .map(|(index, item)| {
             format!(
-                "{:>2}. {} | family={} | mean={:.2}ms | score={:.2} | {}",
+                "{:>2}. {} | family={} | mean={}ms | score={:.2} | budget={} | {}",
                 index + 1,
                 text(item, "name", "-"),
                 text(item, "workload_family", "unmapped"),
-                shared::f64_field(item, &["mean_ns"]) / 1_000_000.0,
+                measured_ms(item, "mean_ns", 1_000_000.0),
                 shared::f64_field(item, &["score"]),
+                text(item, "budget_status", "unmeasured"),
                 text(item, "signals", "nominal"),
             )
         })
@@ -59,14 +87,15 @@ pub(super) fn render_search(payload: &Value) -> String {
                 .and_then(Value::as_f64)
                 .map_or("-".to_string(), |value| format!("{value:.1} MB/s"));
             format!(
-                "{:>2}. {}/{}/{} | param={} | mean={:.2}ms | throughput={} | {}",
+                "{:>2}. {}/{}/{} | param={} | mean={}ms | throughput={} | budget={} | {}",
                 index + 1,
                 text(item, "mode", "-"),
                 text(item, "latency_kind", "-"),
                 text(item, "scaling_axis", "-"),
                 text(item, "parameter_label", "-"),
-                shared::f64_field(item, &["mean_ns"]) / 1_000_000.0,
+                measured_ms(item, "mean_ns", 1_000_000.0),
                 throughput,
+                text(item, "budget_status", "unmeasured"),
                 text(item, "signals", ""),
             )
         })
