@@ -37,6 +37,7 @@ Run one producer:
 
 ```console
 cargo run --bin splens -- measure search --config splens.toml
+cargo run --bin splens -- measure search-workflows --config splens.toml
 cargo run --bin splens -- measure performance-review --config splens.toml
 cargo run --bin splens -- measure project-code --config splens.toml
 ```
@@ -85,8 +86,13 @@ Current schema output:
 operation. `samples[].setup_elapsed_ms` reports fixture construction, while
 `samples[].elapsed_ms` is the value compared with the capacity threshold;
 `samples[].measurement_scope` identifies prepared operations versus end-to-end
-workloads. Capacity thresholds use the median of three repetitions; each sample
-also reports `elapsed_min_ms`, `elapsed_max_ms`, and `repetition_count`. Staged
+workloads. Capacity thresholds use the successful-trial median, with at least
+three complete, uniquely identified repetitions required to demonstrate success.
+Each sample also reports `elapsed_min_ms`, `elapsed_max_ms`, `repetition_count`,
+`expected_repetition_count`, `successful_repetition_count`, `failure_count`,
+`complete`, and `raw_repetitions`. Timing fields are nullable when no successful
+trial exists. Any failed repetition remains a failure regardless of the median;
+resource peaks include all repetitions. Staged
 workflows can additionally report `background_completion_ms`, keeping the
 first-visible threshold separate from eventual hydration or shell installation.
 
@@ -105,7 +111,11 @@ scenario matrix:
 Criterion budget thresholds are treated as authoritative only when they come
 from Scratchpad-owned benchmark metadata JSON. Built-in metadata can still
 classify older or missing benchmark rows, but built-in thresholds are marked
-`stale_budget_risk: true` and do not drive budget pass/fail judgment.
+`stale_budget_risk: true` and do not drive budget pass/fail judgment. Criterion
+budgets use the mean confidence interval: wholly below the budget is `pass`,
+wholly above is `fail`, overlap is `uncertain`, and missing authority/intervals
+is `unmeasured`. `dispersion_upper_ns` and `dispersion_lower_ns` are explicitly
+mean ± two standard deviations, not latency percentiles.
 
 `resource_profiles.json` separates prepared setup from measured work where a
 scenario requires expensive fixture construction or indexing. Cache-oriented
@@ -130,6 +140,48 @@ misses instead of remaining passive diagnostics.
   render submission, compositor, present, and vsync must not be inferred from
   that result. A future real-window probe should set `present_included: true`
   only when the stop point is an actual present/frame callback.
+
+## Measurement Integrity
+
+See [Measurement integrity and migration](docs/measurement-integrity.md) for the
+full contracts, validation rules, and remaining measurement boundaries.
+
+- Every producer writes a `.json.provenance.json` sidecar binding its artifact
+  contents to the measured checkout, toolchain, host, relevant environment,
+  lens executable, and run time. Evidence expires after 24 hours. Missing,
+  changed, failed, or stale evidence does not prove a promise.
+- Scratchpad owns `benches/measurement_manifest.json`, listing expected Criterion
+  suites and workload parameters. A fresh run must produce every declared row.
+  `--skip-bench` requires matching, unexpired lens-generated Criterion manifests;
+  arbitrary pre-existing Criterion caches are unverified, not zero-latency data.
+- Required operation IDs are evaluated individually. `available_count`,
+  `valid_count`, `expected_count`, and `missing_evidence` explain coverage.
+  Diagnostic profiles are optional and must actually be available to count.
+- Scale checks use successful, within-budget samples for **every required
+  capacity operation**, never failed attempts or an unrelated resource row.
+  `headroom_workload` is demonstrated success minus the promised minimum.
+- `search-workflows` measures production query dispatch, first result delivered,
+  first result tessellated, and completion using independent prepared fixtures.
+  It defaults to 30 repetitions, with all-tabs coverage up to 10,000 targets.
+  `SCRATCHPAD_WORKFLOW_REPETITIONS` and `SCRATCHPAD_WORKFLOW_MAX_TARGETS` can
+  reduce a smoke run; fewer than 30 repetitions cannot produce a passing budget.
+- Process CPU, RSS, I/O, faults, and open-file counters are preserved where
+  supported. Unsupported counters remain null. RSS high-water is explicitly
+  process-lifetime; allocator live bytes are absolute with an interval baseline.
+  Missing saturation evidence produces `unknown`, never an assumed CPU bottleneck.
+- Resource gaps close only with successful, correctly scoped measurements at
+  the required workload and with all required metrics. Session phase timings
+  are numeric data, not just formatted labels.
+- Frame p95 and p99 budgets both affect promise health. Histogram resolution,
+  overflow and percentile method remain visible; headless work never implies
+  display presentation. Speed-report triage counts unknown evidence separately.
+- Probe executables come from Cargo compiler-artifact messages, respecting
+  workspace, `.cargo/config.toml`, and `CARGO_TARGET_DIR` configuration.
+
+**Migration:** regenerate measurements and export schemas after upgrading. Old
+artifacts without provenance are intentionally unverified. Dashboard consumers
+must support nullable timing/ceiling fields and explicit unknown/uncertain
+statuses; they must not coerce those states to zero or passing.
 
 ## Boundary
 
@@ -177,8 +229,9 @@ remain nonzero as usual.
 `measure slowspots` runs Scratchpad's `search_speed`, `frame_budget`, and
 `promise_latency` Criterion suites; `measure search` runs `search_speed`.
 `measure all` reuses suites already run by an earlier producer instead of
-running `search_speed` twice. Pass `--skip-bench` to read existing
-`target/criterion` output only.
+running `search_speed` twice after a successful producer. Pass `--skip-bench`
+to read existing, provenance-validated Criterion output only. It does not skip
+standalone probes such as `search-workflows`, capacity, resources, or frames.
 `--fail-on-slow` applies only to slowspots/search, and `--index-only` applies
 only to flamegraphs; the CLI rejects either flag when no selected producer can
 use it.
