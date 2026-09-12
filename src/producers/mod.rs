@@ -9,6 +9,8 @@ mod review;
 mod search;
 mod slowspots;
 mod speed_report;
+mod workflows;
+pub use workflows::search_workflows;
 
 pub use capacity::capacity_report;
 pub use flamegraphs::flamegraphs;

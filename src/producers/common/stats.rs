@@ -115,10 +115,12 @@ pub(in crate::producers) fn search_signals(
         signals.push(format!("dispersion heuristic > {threshold_ms:.1}ms (not a percentile)"));
     }
     signals.push(
-        if latency_kind == "first_response" {
-            "partial-result latency"
+        if latency_kind == "first_target_completion" {
+            "first-target full-scan component latency (not result delivery)"
+        } else if latency_kind == "first_response" {
+            "first-response boundary unspecified"
         } else {
-            "full-scan latency"
+            "full-scan component latency"
         }
         .to_string(),
     );

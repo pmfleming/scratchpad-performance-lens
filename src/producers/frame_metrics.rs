@@ -97,7 +97,7 @@ fn append_realistic_scenarios(payload: &mut Value, realistic: Value) {
         scenario.as_object_mut().map(|object| {
             object
                 .entry("measurement_scope".to_string())
-                .or_insert_with(|| json!("end_to_end_render_submission"))
+                .or_insert_with(|| json!("unknown"))
         });
         base_scenarios.push(scenario);
     }
@@ -154,16 +154,9 @@ fn annotate_frame_scenario(scenario: &mut Value) {
 fn frame_defaults(realistic: bool) -> (&'static str, &'static str, Value, Value) {
     if realistic {
         (
-            "end_to_end_render_submission",
-            "user_visible_frame_realism",
-            json!([
-                "event/update boundary",
-                "app state update",
-                "layout/viewport computation",
-                "text shaping or glyph/cache lookup when the probe exercises it",
-                "paint command generation",
-                "GPU upload/render submission when available",
-            ]),
+            "unknown",
+            "render_preparation_scope_unspecified",
+            json!([]),
             json!([
                 "present callback unless present_included is true",
                 "vsync pacing unless vsync is true",
@@ -253,9 +246,9 @@ mod tests {
         assert_eq!(row["probe_binary"], json!("realistic_frame_metrics"));
         assert_eq!(
             row["measurement_scope"],
-            json!("end_to_end_render_submission")
+            json!("unknown")
         );
-        assert_eq!(row["metric_role"], json!("user_visible_frame_realism"));
+        assert_eq!(row["metric_role"], json!("render_preparation_scope_unspecified"));
         assert_eq!(row["refresh_budget_utilization"]["240_hz"], json!(1.5));
     }
 

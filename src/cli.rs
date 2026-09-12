@@ -42,6 +42,7 @@ const PRODUCERS: &[ProducerSpec] = &[
         true,
         false,
     ),
+    ProducerSpec::standard("search-workflows", "search_workflow_metrics.json", producers::search_workflows, &[], false, false),
     ProducerSpec::standard(
         "capacity",
         "capacity_report.json",

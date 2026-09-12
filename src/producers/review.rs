@@ -45,7 +45,9 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
     let speed_report = read_analysis(config, "speed_efficiency_report.json", json!({}));
 
     let frame_metrics = read_analysis(config, "frame_metrics.json", json!({"scenarios": []}));
-    let latency_rows = unique_rows([array_value(&slowspots), array_value(&search), frames::frame_rows(&frame_metrics)].concat());
+    let workflows = read_analysis(config, "search_workflow_metrics.json", json!({"scenarios": []}));
+    let latency_rows = unique_rows([array_value(&slowspots), array_value(&search), frames::frame_rows(&frame_metrics),
+        scenarios_array(&workflows).to_vec()].concat());
     let capacity_rows = capacity.scenarios;
     let resource_rows = scenarios_array(&resources).to_vec();
     let capacity_synthetic = capacity.meta.synthetic;

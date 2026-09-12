@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
     let slowspots = read_analysis(config, "slowspots.json", json!([]));
     let search = read_analysis(config, "search_speed.json", json!([]));
+    let workflows = read_analysis(config, "search_workflow_metrics.json", json!({"scenarios": []}));
     let flamegraphs = read_analysis(config, "flamegraphs.json", json!([]));
     let capacity = read_analysis(config, "capacity_report.json", json!({"scenarios": []}));
     let resources = read_analysis(config, "resource_profiles.json", json!({"scenarios": []}));
@@ -23,7 +24,7 @@ pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) ->
 
     let mut search_dispatch = Vec::new();
     let mut search_rows = Vec::new();
-    for row in array_value(&search) {
+    for row in array_value(&search).into_iter().chain(scenarios_array(&workflows).iter().cloned()) {
         let normalized = normalize_latency_row(row, &capacity_lookup);
         if normalized.get("family").and_then(Value::as_str) == Some("search-dispatch") {
             search_dispatch.push(normalized);
@@ -83,6 +84,7 @@ pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) ->
             "source_artifacts": [
                 config.output_dir.join("slowspots.json").to_string_lossy(),
                 config.output_dir.join("search_speed.json").to_string_lossy(),
+                config.output_dir.join("search_workflow_metrics.json").to_string_lossy(),
                 config.output_dir.join("flamegraphs.json").to_string_lossy(),
                 config.output_dir.join("capacity_report.json").to_string_lossy(),
                 config.output_dir.join("resource_profiles.json").to_string_lossy(),
@@ -136,7 +138,8 @@ fn normalize_latency_row(row: Value, capacity_lookup: &HashMap<String, Value>) -
         "split-layout" => capacity_lookup.get("split_count_ceiling"),
         _ => None,
     };
-    let mean_ms = row.get("mean_ns").and_then(Value::as_f64).unwrap_or(0.0) / 1_000_000.0;
+    let mean_ms = row.get("mean_ms").and_then(Value::as_f64)
+        .or_else(|| row.get("mean_ns").and_then(Value::as_f64).map(|ns| ns / 1_000_000.0)).unwrap_or(0.0);
     let budget_probe_ms = budget_probe_ms(&row).unwrap_or(mean_ms);
     let budget_ms = row
         .get("threshold_ms")
@@ -153,6 +156,8 @@ fn normalize_latency_row(row: Value, capacity_lookup: &HashMap<String, Value>) -
         "measurement_role": row.get("measurement_role").and_then(Value::as_str).unwrap_or("change_validation"),
         "scenario_label": row.get("scenario_label").or_else(|| row.get("name")).cloned(),
         "family": family,
+        "measurement_scope": row.get("measurement_scope").cloned(),
+        "present_included": row.get("present_included").cloned(),
         "mean_ms": mean_ms,
         "budget_probe_ms": budget_probe_ms,
         "budget_probe_label": row.get("budget_probe_label").and_then(Value::as_str).unwrap_or("mean"),

@@ -102,6 +102,7 @@ pub(super) fn source_status(config: &LensConfig) -> Vec<SourceArtifactStatus> {
         ("slowspots", "slowspots.json"),
         ("frame_metrics", "frame_metrics.json"),
         ("search_speed", "search_speed.json"),
+        ("search_workflows", "search_workflow_metrics.json"),
         ("capacity", "capacity_report.json"),
         ("resources", "resource_profiles.json"),
         ("flamegraphs", "flamegraphs.json"),

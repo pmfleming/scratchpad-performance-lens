@@ -84,8 +84,10 @@ fn build_search_row(name: String, key: String, meta: &Value, estimates: &Value) 
     let std_dev_ns = shared::f64_field(estimates, &["std_dev", "point_estimate"]);
     let dispersion_upper = dispersion_upper_ns(mean_ns, std_dev_ns);
     let median_ns = shared::f64_field(estimates, &["median", "point_estimate"]);
-    let throughput_mb_s = throughput_mb_s(total_bytes, mean_ns);
-    let ns_per_kb = ns_per_kb(total_bytes, mean_ns);
+    let processed_bytes = meta["processed_item_count"].as_i64()
+        .zip(bytes_per_item).and_then(|(count, bytes)| count.checked_mul(bytes)).or(total_bytes);
+    let throughput_mb_s = throughput_mb_s(processed_bytes, mean_ns);
+    let ns_per_kb = ns_per_kb(processed_bytes, mean_ns);
     let threshold_ms = shared::authoritative_threshold_ms(meta);
     let latency_kind = shared::string_field(meta, "latency_kind", "completion");
     let matching = shared::matching_flamegraph_ids(&key);
@@ -99,7 +101,7 @@ fn build_search_row(name: String, key: String, meta: &Value, estimates: &Value) 
     let mut row = json!({
         "name": name,
         "measurement_status": "valid",
-        "measurement_scope": "prepared_search_component",
+        "measurement_scope": shared::string_field(meta, "measurement_scope", "unknown"),
         "benchmark_key": key,
         "scenario_label": search_scenario_label(&key),
         "description": shared::string_field(meta, "description", &key),
@@ -118,6 +120,9 @@ fn build_search_row(name: String, key: String, meta: &Value, estimates: &Value) 
         "item_count": item_count,
         "bytes_per_item": bytes_per_item,
         "total_bytes": total_bytes,
+        "processed_bytes": processed_bytes,
+        "throughput_unit": "MiB/s",
+        "throughput_scope": "actual_scanned_bytes_only",
         "response_match_limit": meta.get("response_match_limit").and_then(Value::as_i64),
         "mean_ns": mean_ns,
         "std_dev_ns": std_dev_ns,
@@ -168,6 +173,19 @@ fn search_workload(
                 .zip(bytes_per_item)
                 .map(|(items, bytes)| items * bytes),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn first_target_throughput_does_not_claim_unscanned_targets() {
+        let row = super::build_search_row("first/32".into(), "first".into(),
+            &serde_json::json!({"parameter_unit":"files","bytes_per_item":16384,"processed_item_count":1}),
+            &serde_json::json!({"mean":{"point_estimate":1_000_000}}));
+        assert_eq!(row["total_bytes"], 32 * 16384);
+        assert_eq!(row["processed_bytes"], 16384);
+        assert_eq!(row["throughput_mb_s"], 15.625);
     }
 }
 
