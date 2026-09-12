@@ -265,6 +265,8 @@ fn empty_capacity(reason: &str) -> Value {
 
 fn summarize_capacity(events: Vec<Value>, status: &str, fallback_reason: Option<&str>) -> Value {
     let synthetic = fallback_reason.is_some();
+    let probe_command = events.first().and_then(|event| event["probe_executable"].as_str())
+        .unwrap_or("cargo build --release --bin capacity_probe (executable unavailable)").to_owned();
     let scenarios: Vec<_> = group_capacity_events(events)
         .into_iter()
         .map(|(scenario, events)| capacity_scenario_summary(scenario, events, synthetic))
@@ -284,7 +286,7 @@ fn summarize_capacity(events: Vec<Value>, status: &str, fallback_reason: Option<
     let cpu = scenarios.iter().filter(|row| row["suspected_limiting_resource"] == "cpu").count();
     let unknown = scenarios.iter().filter(|row| row["suspected_limiting_resource"] == "unknown").count();
     let mut payload = json!({
-        "meta": {"generated_from": "rust:capacity_report", "probe_command": probe_path("capacity_probe").to_string_lossy(), "scenario_count": scenarios.len(), "probe_status": status, "synthetic": synthetic},
+        "meta": {"generated_from": "rust:capacity_report", "probe_command": probe_command, "scenario_count": scenarios.len(), "probe_status": status, "synthetic": synthetic},
         "summary": {"scenario_count": scenarios.len(), "ceilings_reached": ceilings, "memory_bound_scenarios": memory, "cpu_bound_scenarios": cpu, "unknown_resource_scenarios": unknown, "probe_status": status, "synthetic": synthetic},
         "scenarios": scenarios,
     });

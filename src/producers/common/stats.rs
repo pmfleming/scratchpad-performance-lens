@@ -29,10 +29,16 @@ pub(in crate::producers) fn run_benchmarks(
 }
 
 pub(in crate::producers) fn criterion_dir(project_root: &Path) -> PathBuf {
-    std::env::var_os("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| project_root.join("target"))
-        .join("criterion")
+    // Cargo resolves workspace roots, environment overrides and .cargo/config.toml.
+    let target = shared::run_command(project_root, &["cargo", "metadata", "--no-deps", "--format-version", "1"])
+        .ok().filter(|output| output.status.success())
+        .and_then(|output| serde_json::from_slice::<Value>(&output.stdout).ok())
+        .and_then(|meta| meta["target_directory"].as_str().map(PathBuf::from))
+        .unwrap_or_else(|| {
+            let path = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("target"));
+            if path.is_absolute() { path } else { project_root.join(path) }
+        });
+    target.join("criterion")
 }
 
 pub(in crate::producers) fn estimate_optional(value: &Value, path: &[&str]) -> Option<f64> {

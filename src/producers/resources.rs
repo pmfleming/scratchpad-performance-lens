@@ -282,6 +282,8 @@ fn empty_resources(reason: &str) -> Value {
 }
 
 fn summarize_resources(events: Vec<Value>, status: &str, fallback_reason: Option<&str>) -> Value {
+    let probe_command = events.first().and_then(|event| event["probe_executable"].as_str())
+        .unwrap_or("cargo build --release --bin resource_probe (executable unavailable)").to_owned();
     let mut grouped: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     for event in events {
         if let Some(scenario) = event.get("scenario").and_then(Value::as_str) {
@@ -333,7 +335,7 @@ fn summarize_resources(events: Vec<Value>, status: &str, fallback_reason: Option
             scenarios.iter().any(|row| row["scenario"] == *id && row["closes_measurement_gap"] == true))
     }).count();
     let mut payload = json!({
-        "meta": {"generated_from": "rust:resource_profiles", "probe_command": probe_path("resource_probe").to_string_lossy(), "scenario_count": scenarios.len(), "probe_status": status},
+        "meta": {"generated_from": "rust:resource_profiles", "probe_command": probe_command, "scenario_count": scenarios.len(), "probe_status": status},
         "summary": {
             "scenario_count": scenarios.len(),
             "allocation_scenarios": scenarios.iter().filter(|row| row.get("focus").and_then(Value::as_str) == Some("allocation")).count(),

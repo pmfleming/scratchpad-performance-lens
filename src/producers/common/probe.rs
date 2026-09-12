@@ -16,18 +16,18 @@ pub(in crate::producers) fn run_probe_object(
     build_cmd: &[&str],
     probe_path: PathBuf,
 ) -> Result<Value> {
-    let build = shared::run_command(project_root, build_cmd)?;
-    if !build.status.success() {
-        bail!("{}", output_text(&build));
-    }
-    let output = Command::new(project_root.join(probe_path))
+    let executable = build_probe(project_root, build_cmd, &probe_path)?;
+    let output = Command::new(&executable)
         .current_dir(project_root)
         .output()?;
     if !output.status.success() {
         bail!("{}", output_text(&output));
     }
-    let payload: Value = serde_json::from_slice(&output.stdout)?;
+    let mut payload: Value = serde_json::from_slice(&output.stdout)?;
     if payload.is_object() {
+        if payload["meta"].is_null() { payload["meta"] = serde_json::json!({}); }
+        anyhow::ensure!(payload["meta"].is_object(), "probe meta must be an object");
+        payload["meta"]["probe_executable"] = serde_json::json!(executable);
         Ok(payload)
     } else {
         bail!("probe returned a non-object payload")
@@ -40,16 +40,13 @@ pub(in crate::producers) fn run_probe_events(
     probe_path: PathBuf,
     label: &str,
 ) -> Result<Vec<Value>> {
-    let build = shared::run_command(project_root, build_cmd)?;
-    if !build.status.success() {
-        bail!("{}", output_text(&build));
-    }
-    let output = Command::new(project_root.join(probe_path))
+    let executable = build_probe(project_root, build_cmd, &probe_path)?;
+    let output = Command::new(&executable)
         .current_dir(project_root)
         .output()
         .with_context(|| label.to_string())?;
     // Preserve even a crashed/truncated probe's evidence for diagnosis.
-    let archive = project_root.join("target/splens-probes");
+    let archive = super::stats::criterion_dir(project_root).parent().unwrap().join("splens-probes");
     std::fs::create_dir_all(&archive)?;
     let run = format!("{}-{}", label.replace(' ', "-"), crate::provenance::timestamp());
     std::fs::write(archive.join(format!("{run}.ndjson")), &output.stdout)?;
@@ -57,7 +54,27 @@ pub(in crate::producers) fn run_probe_events(
     if !output.status.success() {
         bail!("{}", output_text(&output));
     }
-    parse_events(&output.stdout)
+    let mut events = parse_events(&output.stdout)?;
+    for event in &mut events { event["probe_executable"] = serde_json::json!(executable); }
+    Ok(events)
+}
+
+fn build_probe(root: &Path, args: &[&str], requested: &Path) -> Result<PathBuf> {
+    let bin = requested.file_stem().and_then(|name| name.to_str()).context("missing probe target name")?;
+    let mut args = args.to_vec();
+    args.push("--message-format=json-render-diagnostics");
+    let output = shared::run_command(root, &args)?;
+    if !output.status.success() { bail!("{}", output_text(&output)); }
+    executable_from_messages(root, &output.stdout, bin)
+}
+
+fn executable_from_messages(root: &Path, bytes: &[u8], bin: &str) -> Result<PathBuf> {
+    let executable = String::from_utf8_lossy(bytes).lines().filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|message| message["reason"] == "compiler-artifact" && message["target"]["name"] == bin
+            && message["target"]["kind"].as_array().is_some_and(|kinds| kinds.iter().any(|kind| kind == "bin")))
+        .filter_map(|message| message["executable"].as_str().map(PathBuf::from)).last()
+        .context("Cargo reported no executable for the requested probe; refusing a guessed/stale binary")?;
+    Ok(if executable.is_absolute() { executable } else { root.join(executable) })
 }
 
 fn parse_events(bytes: &[u8]) -> Result<Vec<Value>> {
@@ -95,6 +112,15 @@ pub(in crate::producers) fn write_probe_artifact(
 #[cfg(test)]
 mod tests {
     use super::parse_events;
+    #[test]
+    fn executable_path_comes_from_matching_cargo_artifact_not_default_target() {
+        let root = std::path::Path::new("/workspace");
+        let messages = br#"{"reason":"compiler-artifact","target":{"name":"other","kind":["bin"]},"executable":"/wrong"}
+{"reason":"compiler-artifact","target":{"name":"probe","kind":["bin"]},"executable":"custom-build/triple/release/probe"}"#;
+        assert_eq!(super::executable_from_messages(root, messages, "probe").unwrap(), root.join("custom-build/triple/release/probe"));
+        assert!(super::executable_from_messages(root, b"", "probe").is_err());
+    }
+
     #[test]
     fn malformed_partial_or_missing_fields_never_silently_succeed() {
         let valid = br#"{"scenario":"test","step_index":0,"workload_value":1,"elapsed_ns":10,"status":"ok"}"#;
