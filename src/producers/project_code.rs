@@ -1,4 +1,6 @@
 mod classifier;
+#[cfg(test)]
+mod history_tests;
 
 use super::common::output_text;
 use super::render::render_project_code;
@@ -55,12 +57,16 @@ fn project_code_payload(config: &LensConfig) -> Result<Value> {
     )?
     .trim()
     .to_string();
-    let current = count_ref(&config.project_root, &ref_name)?;
-    let history = commit_history(&config.project_root, &ref_name, 40, current)?;
+    let mut cache = HashMap::new();
+    let current = count_ref(&config.project_root, &ref_name, &mut cache)?;
+    let history = commit_history(&config.project_root, &ref_name, 40, &mut cache)?;
     let payload = json!({
         "version": 1,
         "source": "rust_git_first_parent_history",
         "ref": ref_name,
+        "snapshot_scope": "upstream_tracking_ref_or_HEAD_not_working_tree",
+        "counting_method": "exact_nonblank_rust_lines_with_embedded_test_classification",
+        "timestamp_semantics": "commit_timestamp_not_push_time",
         "latest_push": {
             "sha": latest_sha,
             "short_sha": latest_sha.chars().take(8).collect::<String>(),
@@ -141,28 +147,10 @@ fn is_included_code_path(path: &str) -> bool {
         && !path.split(['/', '\\']).any(|part| excluded.contains(&part))
 }
 
-fn tracked_code_paths(project_root: &Path, ref_name: &str) -> Result<Vec<String>> {
-    Ok(
-        git(project_root, &["ls-tree", "-r", "--name-only", ref_name])?
-            .lines()
-            .map(str::trim)
-            .filter(|path| !path.is_empty() && is_included_code_path(path))
-            .map(ToString::to_string)
-            .collect(),
-    )
-}
-
-fn read_file_at_ref(project_root: &Path, ref_name: &str, path: &str) -> Option<String> {
-    git(project_root, &["show", &format!("{ref_name}:{path}")]).ok()
-}
-
-fn count_path(project_root: &Path, ref_name: &str, path: &str) -> CodeCounts {
-    let Some(content) = read_file_at_ref(project_root, ref_name, path) else {
-        return CodeCounts::zero();
-    };
+fn count_content(path: &str, content: &str) -> CodeCounts {
     let category = classify_path(path);
     let mask = if category == "application" {
-        rust_test_line_mask(&content)
+        rust_test_line_mask(content)
     } else {
         Vec::new()
     };
@@ -182,10 +170,23 @@ fn count_path(project_root: &Path, ref_name: &str, path: &str) -> CodeCounts {
     counts
 }
 
-fn count_ref(project_root: &Path, ref_name: &str) -> Result<CodeCounts> {
+type CountCache = HashMap<(String, String), CodeCounts>;
+
+fn count_ref(project_root: &Path, ref_name: &str, cache: &mut CountCache) -> Result<CodeCounts> {
+    let tree = git(project_root, &["ls-tree", "-r", "-z", ref_name])?;
     let mut totals = CodeCounts::zero();
-    for path in tracked_code_paths(project_root, ref_name)? {
-        let counts = count_path(project_root, ref_name, &path);
+    for record in tree.split('\0').filter(|record| !record.is_empty()) {
+        let (header, path) = record.split_once('\t').ok_or_else(|| anyhow::anyhow!("invalid git tree record"))?;
+        if !is_included_code_path(path) { continue; }
+        let blob = header.split_whitespace().last().ok_or_else(|| anyhow::anyhow!("missing git blob id"))?;
+        let key = (blob.to_owned(), classify_path(path).to_owned());
+        let counts = if let Some(counts) = cache.get(&key) { *counts } else {
+            // Cache by content and path category: renames across src/tests must reclassify.
+            let content = git(project_root, &["cat-file", "blob", blob])?;
+            let counts = count_content(path, &content);
+            cache.insert(key, counts);
+            counts
+        };
         totals.application += counts.application;
         totals.test += counts.test;
         totals.other += counts.other;
@@ -193,45 +194,11 @@ fn count_ref(project_root: &Path, ref_name: &str) -> Result<CodeCounts> {
     Ok(totals)
 }
 
-fn commit_delta(project_root: &Path, sha: &str) -> CodeCounts {
-    let mut totals = CodeCounts::zero();
-    let Some(output) = git_ok(
-        project_root,
-        &["show", "--first-parent", "--format=", "--numstat", sha],
-    ) else {
-        return totals;
-    };
-    for line in output.lines() {
-        let parts: Vec<_> = line.split('\t').collect();
-        if parts.len() < 3 || !is_included_code_path(parts[2]) {
-            continue;
-        }
-        let (Ok(added), Ok(deleted)) = (parts[0].parse::<i64>(), parts[1].parse::<i64>()) else {
-            continue;
-        };
-        let net = added - deleted;
-        match classify_path(parts[2]) {
-            "application" => totals.application += net,
-            "test" => totals.test += net,
-            _ => totals.other += net,
-        }
-    }
-    totals
-}
-
-fn subtract_counts(value: CodeCounts, delta: CodeCounts) -> CodeCounts {
-    CodeCounts {
-        application: (value.application - delta.application).max(0),
-        test: (value.test - delta.test).max(0),
-        other: (value.other - delta.other).max(0),
-    }
-}
-
 fn commit_history(
     project_root: &Path,
     ref_name: &str,
     limit: usize,
-    current: CodeCounts,
+    cache: &mut CountCache,
 ) -> Result<Vec<Value>> {
     let output = git(
         project_root,
@@ -255,14 +222,8 @@ fn commit_history(
             ))
         })
         .collect();
-    let mut counts_by_sha = HashMap::new();
-    let mut running = current;
-    for (sha, _, _) in &commits {
-        counts_by_sha.insert(sha.clone(), running);
-        running = subtract_counts(running, commit_delta(project_root, sha));
-    }
-    Ok(commits.into_iter().rev().map(|(sha, date, subject)| {
-        let counts = counts_by_sha.get(&sha).copied().unwrap_or_else(CodeCounts::zero);
-        json!({"sha": sha, "short_sha": sha.chars().take(8).collect::<String>(), "date": date, "subject": subject, "lines": counts.to_json()})
-    }).collect())
+    commits.into_iter().rev().map(|(sha, date, subject)| {
+        let counts = count_ref(project_root, &sha, cache)?;
+        Ok(json!({"sha": sha, "short_sha": sha.chars().take(8).collect::<String>(), "date": date, "subject": subject, "lines": counts.to_json()}))
+    }).collect()
 }
