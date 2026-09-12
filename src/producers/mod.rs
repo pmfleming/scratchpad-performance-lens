@@ -1,4 +1,5 @@
 mod capacity;
+mod capacity_repetitions;
 mod common;
 mod flamegraphs;
 mod frame_metrics;

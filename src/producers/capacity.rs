@@ -173,7 +173,19 @@ pub fn capacity_report(config: &LensConfig, _options: MeasureOptions) -> Result<
         Ok(events)
     });
     let (payload, failure) = match events {
-        Ok(events) if !events.is_empty() => (summarize_capacity(events, "completed", None), None),
+        Ok(events) if !events.is_empty() => {
+            let mut payload = summarize_capacity(events, "completed", None);
+            let incomplete = payload["scenarios"].as_array().unwrap().iter().flat_map(|row|
+                row["samples"].as_array().into_iter().flatten()).any(|sample| sample["complete"] != true);
+            let failed = payload["scenarios"].as_array().unwrap().iter().flat_map(|row|
+                row["samples"].as_array().into_iter().flatten()).any(|sample| sample["failure_count"].as_u64().unwrap_or(0) > 0);
+            let failure = (incomplete || failed).then(|| "capacity contains incomplete or failed repetitions".to_owned());
+            if incomplete || failed {
+                payload["meta"]["probe_status"] = json!("partial");
+                payload["summary"]["probe_status"] = json!("partial");
+            }
+            (payload, failure)
+        },
         Ok(_) => {
             let error = "No probe samples were recorded.".to_string();
             (empty_capacity(&error), Some(error))
@@ -300,9 +312,10 @@ fn capacity_scenario_summary(scenario: String, events: Vec<Value>, synthetic: bo
         .iter()
         .position(|event| capacity_step_failed(event, threshold_ms));
     let first_failure = failure_index.and_then(|index| events.get(index));
-    let last_success = failure_index
-        .and_then(|index| index.checked_sub(1).and_then(|index| events.get(index)))
-        .or_else(|| failure_index.is_none().then(|| events.last()).flatten());
+    let last_success = events[..failure_index.unwrap_or(events.len())].iter().rev().find(|event|
+        event["complete"] == true && event["status"] == "ok"
+            && event["elapsed_ns"].as_f64().is_some_and(|ns| ns > 0.0 && ns / 1e6 <= threshold_ms));
+    let complete = events.iter().all(|event| event["complete"] == true);
     let first = events.first().unwrap_or(&Value::Null);
     let last = events.last().unwrap_or(&Value::Null);
     let limiting = infer_limiting_resource(&events);
@@ -335,8 +348,8 @@ fn capacity_scenario_summary(scenario: String, events: Vec<Value>, synthetic: bo
         "scenario_label": scenario_label,
         "workload_family": workload_family,
         "threshold_ms": threshold_ms,
-        "failure_mode": if synthetic { "unmeasured" } else if first_failure.is_some() { "unusable_latency" } else { "not_reached" },
-        "ceiling_reached": (!synthetic).then_some(first_failure.is_some()),
+        "failure_mode": if synthetic { "unmeasured" } else if first_failure.is_some_and(|event| event["failure_count"].as_u64().unwrap_or(0) > 0) { "operation_failed" } else if first_failure.is_some() { "unusable_latency" } else if !complete { "incomplete" } else { "not_reached" },
+        "ceiling_reached": if synthetic { None } else if first_failure.is_some() { Some(true) } else { complete.then_some(false) },
         "last_successful_workload": last_success.and_then(|row| row.get("workload_value")),
         "last_successful_label": last_success.and_then(|row| row.get("workload_label")),
         "first_failure_workload": first_failure.and_then(|row| row.get("workload_value")),
@@ -355,8 +368,8 @@ fn capacity_scenario_summary(scenario: String, events: Vec<Value>, synthetic: bo
 }
 
 fn capacity_step_failed(event: &Value, threshold_ms: f64) -> bool {
-    event.get("status").and_then(Value::as_str) != Some("ok")
-        || event
+    event["failure_count"].as_u64().is_some_and(|count| count > 0)
+        || event["complete"] == true && event
             .get("elapsed_ns")
             .and_then(Value::as_f64)
             .unwrap_or(0.0)
@@ -369,60 +382,7 @@ fn bool_field(value: &Value, key: &str) -> bool {
 }
 
 fn aggregate_capacity_repetitions(events: Vec<Value>) -> Vec<Value> {
-    let mut by_step: BTreeMap<i64, Vec<Value>> = BTreeMap::new();
-    for event in events {
-        let step = event.get("step_index").and_then(Value::as_i64).unwrap_or(0);
-        by_step.entry(step).or_default().push(event);
-    }
-
-    by_step
-        .into_values()
-        .map(|mut repetitions| {
-            repetitions.sort_by_key(|event| {
-                event
-                    .get("elapsed_ns")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(u64::MAX)
-            });
-            let repetition_count = repetitions.len();
-            let min_elapsed_ns = repetitions
-                .first()
-                .and_then(|event| event.get("elapsed_ns"))
-                .cloned()
-                .unwrap_or(Value::Null);
-            let max_elapsed_ns = repetitions
-                .last()
-                .and_then(|event| event.get("elapsed_ns"))
-                .cloned()
-                .unwrap_or(Value::Null);
-            let mut median = repetitions[repetition_count / 2].clone();
-            let mut setup_times = repetitions
-                .iter()
-                .filter_map(|event| event.get("setup_elapsed_ns").and_then(Value::as_u64))
-                .collect::<Vec<_>>();
-            setup_times.sort_unstable();
-            if let Some(setup_elapsed_ns) = setup_times.get(setup_times.len() / 2) {
-                median["setup_elapsed_ns"] = json!(setup_elapsed_ns);
-            }
-            let mut completion_times = repetitions
-                .iter()
-                .filter_map(|event| {
-                    event
-                        .get("background_completion_ns")
-                        .and_then(Value::as_u64)
-                })
-                .collect::<Vec<_>>();
-            completion_times.sort_unstable();
-            if let Some(background_completion_ns) = completion_times.get(completion_times.len() / 2)
-            {
-                median["background_completion_ns"] = json!(background_completion_ns);
-            }
-            median["repetition_count"] = json!(repetition_count);
-            median["elapsed_min_ns"] = min_elapsed_ns;
-            median["elapsed_max_ns"] = max_elapsed_ns;
-            median
-        })
-        .collect()
+    super::capacity_repetitions::aggregate(events)
 }
 
 fn infer_limiting_resource(events: &[Value]) -> String {
@@ -465,10 +425,16 @@ fn capacity_sample(event: &Value) -> Value {
         "workload_value": event.get("workload_value").cloned(),
         "workload_label": event.get("workload_label").cloned(),
         "setup_elapsed_ms": event.get("setup_elapsed_ns").and_then(Value::as_f64).map(|value| value / 1_000_000.0),
-        "elapsed_ms": event.get("elapsed_ns").and_then(Value::as_f64).unwrap_or(0.0) / 1_000_000.0,
+        "elapsed_ms": event.get("elapsed_ns").and_then(Value::as_f64).map(|ns| ns / 1_000_000.0),
         "background_completion_ms": event.get("background_completion_ns").and_then(Value::as_f64).map(|value| value / 1_000_000.0),
-        "elapsed_min_ms": event.get("elapsed_min_ns").and_then(Value::as_f64).unwrap_or(0.0) / 1_000_000.0,
-        "elapsed_max_ms": event.get("elapsed_max_ns").and_then(Value::as_f64).unwrap_or(0.0) / 1_000_000.0,
+        "elapsed_min_ms": event.get("elapsed_min_ns").and_then(Value::as_f64).map(|ns| ns / 1_000_000.0),
+        "elapsed_max_ms": event.get("elapsed_max_ns").and_then(Value::as_f64).map(|ns| ns / 1_000_000.0),
+        "complete": event["complete"].as_bool().unwrap_or(false),
+        "failure_count": event["failure_count"].as_u64().unwrap_or(0),
+        "expected_repetition_count": event["expected_repetition_count"].as_u64(),
+        "successful_repetition_count": event["successful_repetition_count"].as_u64(),
+        "raw_repetitions": event["raw_repetitions"].as_array().cloned().unwrap_or_default(),
+        "statistical_claim": "successful-trial median; no population tail guarantee",
         "repetition_count": event.get("repetition_count").and_then(Value::as_u64).unwrap_or(1),
         "measurement_scope": event.get("measurement_scope").cloned(),
         "metrics": event.get("metrics").cloned(),
@@ -506,9 +472,9 @@ mod tests {
     #[test]
     fn repeated_capacity_steps_use_median_elapsed_time() {
         let rows = aggregate_capacity_repetitions(vec![
-            json!({"step_index": 0, "elapsed_ns": 900, "setup_elapsed_ns": 90, "background_completion_ns": 9_000}),
-            json!({"step_index": 0, "elapsed_ns": 100, "setup_elapsed_ns": 10, "background_completion_ns": 1_000}),
-            json!({"step_index": 0, "elapsed_ns": 300, "setup_elapsed_ns": 30, "background_completion_ns": 3_000}),
+            json!({"step_index": 0, "repeat_index": 0, "status": "ok", "elapsed_ns": 900, "setup_elapsed_ns": 90, "background_completion_ns": 9_000}),
+            json!({"step_index": 0, "repeat_index": 1, "status": "ok", "elapsed_ns": 100, "setup_elapsed_ns": 10, "background_completion_ns": 1_000}),
+            json!({"step_index": 0, "repeat_index": 2, "status": "ok", "elapsed_ns": 300, "setup_elapsed_ns": 30, "background_completion_ns": 3_000}),
         ]);
 
         assert_eq!(rows.len(), 1);
@@ -518,6 +484,28 @@ mod tests {
         assert_eq!(rows[0]["setup_elapsed_ns"], json!(30));
         assert_eq!(rows[0]["background_completion_ns"], json!(3_000));
         assert_eq!(rows[0]["repetition_count"], json!(3));
+    }
+
+    #[test]
+    fn incomplete_repetitions_do_not_create_a_successful_ceiling() {
+        let payload = summarize_capacity(vec![json!({"scenario":"tab_count_ceiling", "step_index":0,
+            "repeat_index":0,"workload_value":10000,"elapsed_ns":10,"status":"ok"})], "partial", None);
+        let row = &payload["scenarios"][0];
+        assert_eq!(row["failure_mode"], "incomplete");
+        assert!(row["ceiling_reached"].is_null());
+        assert!(row["last_successful_workload"].is_null());
+        let typed: crate::artifacts::capacity_report::CapacityReportArtifact = serde_json::from_value(payload).unwrap();
+        assert_eq!(typed.scenarios[0].demonstrated_workload(), None);
+    }
+
+    #[test]
+    fn all_failed_trials_preserve_failure_and_have_no_successful_median() {
+        let events = (0..3).map(|repeat_index| json!({"scenario":"tab_count_ceiling", "step_index":0,
+            "repeat_index":repeat_index,"workload_value":10000,"elapsed_ns":10,"status":"panic"})).collect();
+        let payload = summarize_capacity(events, "partial", None);
+        assert_eq!(payload["scenarios"][0]["failure_mode"], "operation_failed");
+        assert_eq!(payload["scenarios"][0]["samples"][0]["failure_count"], 3);
+        assert!(payload["scenarios"][0]["samples"][0]["elapsed_ms"].is_null());
     }
 
     #[test]

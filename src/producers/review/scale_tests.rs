@@ -8,9 +8,9 @@ fn failed_attempt_above_target_is_not_success_or_headroom() {
     let mut capacity = CapacityScenario {
         scenario: "tab_count_ceiling".into(), threshold_ms: 140.0,
         first_failure_workload: Some(20_000), last_successful_workload: Some(4096),
-        samples: vec![CapacitySample { workload_value: Some(4096), elapsed_ms: 5.0,
+        samples: vec![CapacitySample { workload_value: Some(4096), elapsed_ms: Some(5.0), complete: true,
             repetition_count: 3, status: "ok".into(), ..Default::default() },
-            CapacitySample { workload_value: Some(20_000), elapsed_ms: 200.0,
+            CapacitySample { workload_value: Some(20_000), elapsed_ms: Some(200.0), complete: true,
                 repetition_count: 3, status: "ok".into(), ..Default::default() }],
         ..Default::default()
     };

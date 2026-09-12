@@ -77,10 +77,9 @@ impl CapacityScenario {
         }
         self.samples.iter().filter(|sample| {
             sample.status == "ok"
-                && sample.elapsed_ms.is_finite()
-                && sample.elapsed_ms > 0.0
-                && sample.elapsed_ms <= self.threshold_ms
-                && sample.repetition_count > 0
+                && sample.complete && sample.failure_count == 0
+                && sample.elapsed_ms.is_some_and(|value| value.is_finite() && value > 0.0 && value <= self.threshold_ms)
+                && sample.repetition_count >= 3
                 && sample.workload_value.is_some_and(|value| {
                     self.first_failure_workload.is_none_or(|failure| value < failure)
                 })
@@ -105,11 +104,23 @@ pub struct CapacitySample {
     pub workload_value: Option<i64>,
     pub workload_label: Option<String>,
     pub setup_elapsed_ms: Option<f64>,
-    pub elapsed_ms: f64,
+    pub elapsed_ms: Option<f64>,
     pub background_completion_ms: Option<f64>,
-    pub elapsed_min_ms: f64,
-    pub elapsed_max_ms: f64,
+    pub elapsed_min_ms: Option<f64>,
+    pub elapsed_max_ms: Option<f64>,
     pub repetition_count: usize,
+    #[serde(default)]
+    pub complete: bool,
+    #[serde(default)]
+    pub failure_count: usize,
+    #[serde(default)]
+    pub expected_repetition_count: Option<usize>,
+    #[serde(default)]
+    pub successful_repetition_count: Option<usize>,
+    #[serde(default)]
+    pub raw_repetitions: Vec<Value>,
+    #[serde(default)]
+    pub statistical_claim: String,
     pub measurement_scope: Option<String>,
     pub working_set_bytes: Option<i64>,
     pub page_fault_count: Option<i64>,

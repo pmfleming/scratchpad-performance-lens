@@ -73,9 +73,16 @@ pub fn sidecar(path: &Path) -> PathBuf {
 pub fn record(config: &LensConfig, file: &str, started: f64, context: &Value, success: bool) -> Result<()> {
     let path = config.output_dir.join(file);
     let bytes = std::fs::read(&path)?;
+    let artifact: Value = serde_json::from_slice(&bytes)?;
+    // Budget failures are valid measurements. A structurally partial probe also
+    // retains its real successful/failed samples; per-row completeness gates proof.
+    let measured_failure = artifact.as_array().is_some_and(|rows| !rows.is_empty()
+        && rows.iter().all(|row| row["measurement_status"] == "valid"))
+        || artifact["meta"]["probe_status"] == "partial";
     let payload = json!({"version": 1, "run_id": format!("{}-{started:.9}", std::process::id()),
         "started_at": started, "finished_at": timestamp(), "context": context,
-        "artifact_fingerprint": fingerprint(&bytes), "status": if success { "valid" } else { "failed" }});
+        "producer_success": success, "artifact_fingerprint": fingerprint(&bytes),
+        "status": if success || measured_failure { "valid" } else { "failed" }});
     std::fs::write(sidecar(&path), serde_json::to_vec_pretty(&payload)?)?;
     Ok(())
 }

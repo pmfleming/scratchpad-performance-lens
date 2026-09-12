@@ -35,9 +35,10 @@ pub(super) fn axes(scenario: &ReviewScenario, latency: &[Value], capacity: &[Cap
             latency.iter().filter(|row| valid_latency(row)).map(latency_id).collect()),
         capacity: coverage_axis(scenario.capacity_scenarios, capacity.iter().map(|row| row.scenario.clone()).collect(),
             capacity.iter().filter(|row| !capacity_synthetic && row.threshold_ms > 0.0 && !row.samples.is_empty()
-                && row.samples.iter().all(|sample| sample.elapsed_ms > 0.0 && sample.repetition_count > 0
+                && row.samples.iter().all(|sample| sample.complete && sample.repetition_count >= 3
+                    && (sample.elapsed_ms.is_some_and(|ms| ms > 0.0) || sample.failure_count > 0)
                     && sample.measurement_scope.as_deref().is_some_and(|scope| scope != "unknown")
-                    && matches!(sample.status.as_str(), "ok" | "panic")))
+                    && matches!(sample.status.as_str(), "ok" | "failed")))
                 .map(|row| row.scenario.clone()).collect()),
         resource: coverage_axis(scenario.resource_scenarios, resources.iter().map(resource_id).collect(),
             resources.iter().filter(|row| !resources_synthetic && valid_resource(row)).map(resource_id).collect()),
