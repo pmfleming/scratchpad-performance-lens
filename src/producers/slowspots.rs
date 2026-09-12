@@ -1,5 +1,5 @@
 use super::common::{
-    approx_p05_ns, approx_p95_ns, criterion_dir, estimate_optional, latency_score, over_threshold,
+    dispersion_lower_ns, dispersion_upper_ns, criterion_dir, estimate_optional, latency_score, over_threshold,
     run_benchmarks, score_of, slowspot_signals, stability_label,
 };
 use super::render::render_slowspots;
@@ -54,7 +54,7 @@ pub fn slowspots(config: &LensConfig, options: MeasureOptions) -> Result<()> {
         }; 
         let mean_ns = shared::f64_field(&estimates, &["mean", "point_estimate"]);
         let std_dev_ns = shared::f64_field(&estimates, &["std_dev", "point_estimate"]);
-        let approx_p95_ns = approx_p95_ns(mean_ns, std_dev_ns);
+        let dispersion_upper = dispersion_upper_ns(mean_ns, std_dev_ns);
         let median_ns = shared::f64_field(&estimates, &["median", "point_estimate"]);
         let dispersion_ns = estimate_optional(&estimates, &["median_abs_dev", "point_estimate"]);
         let threshold_ms = shared::authoritative_threshold_ms(meta);
@@ -77,10 +77,8 @@ pub fn slowspots(config: &LensConfig, options: MeasureOptions) -> Result<()> {
             "mean_ns": mean_ns,
             "std_dev_ns": std_dev_ns,
             "median_ns": median_ns,
-            "approx_p95_ns": approx_p95_ns,
-            "approx_p05_ns": approx_p05_ns(mean_ns, std_dev_ns),
-            "budget_probe_ns": approx_p95_ns,
-            "budget_probe_label": "approx_p95_from_mean_std_dev",
+            "dispersion_upper_ns": dispersion_upper,
+            "dispersion_lower_ns": dispersion_lower_ns(mean_ns, std_dev_ns),
             "dispersion_ns": dispersion_ns,
             "dispersion_label": "median_abs_dev",
             "score": score,
@@ -98,6 +96,7 @@ pub fn slowspots(config: &LensConfig, options: MeasureOptions) -> Result<()> {
             "measurement_role": "change_validation",
             "measurement_question": "Did this implementation path stay inside its latency budget?",
         });
+        super::common::annotate_budget(&mut row, &estimates, threshold_ms);
         row["threshold_authoritative"] = json!(threshold_ms.is_some());
         row["threshold_source"] = meta.get("threshold_source").cloned().unwrap_or(Value::Null);
         row["metadata_source"] = meta.get("metadata_source").cloned().unwrap_or(Value::Null);

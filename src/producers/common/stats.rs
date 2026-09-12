@@ -66,11 +66,11 @@ pub(in crate::producers) fn latency_score(mean_ns: f64, std_dev_ns: f64) -> f64 
     (score * 100.0).round() / 100.0
 }
 
-pub(in crate::producers) fn approx_p95_ns(mean_ns: f64, std_dev_ns: f64) -> f64 {
+pub(in crate::producers) fn dispersion_upper_ns(mean_ns: f64, std_dev_ns: f64) -> f64 {
     (mean_ns + (2.0 * std_dev_ns)).max(0.0)
 }
 
-pub(in crate::producers) fn approx_p05_ns(mean_ns: f64, std_dev_ns: f64) -> f64 {
+pub(in crate::producers) fn dispersion_lower_ns(mean_ns: f64, std_dev_ns: f64) -> f64 {
     (mean_ns - (2.0 * std_dev_ns)).max(0.0)
 }
 
@@ -82,9 +82,9 @@ pub(in crate::producers) fn slowspot_signals(
     has_profiles: bool,
 ) -> String {
     let mut signals = Vec::new();
-    let budget_probe_ms = approx_p95_ns(mean_ns, std_dev_ns) / 1_000_000.0;
-    if threshold_ms > 0.0 && budget_probe_ms > threshold_ms {
-        signals.push(format!("slow > {threshold_ms}ms"));
+    let heuristic_ms = dispersion_upper_ns(mean_ns, std_dev_ns) / 1_000_000.0;
+    if threshold_ms > 0.0 && heuristic_ms > threshold_ms {
+        signals.push(format!("dispersion heuristic > {threshold_ms}ms (not a percentile)"));
     }
     if mean_ns > 1_000_000.0 && variance_ratio(mean_ns, std_dev_ns) > 0.2 {
         signals.push("high variance".to_string());
@@ -110,9 +110,9 @@ pub(in crate::producers) fn search_signals(
     has_profiles: bool,
 ) -> String {
     let mut signals = Vec::new();
-    let budget_probe_ms = approx_p95_ns(mean_ns, std_dev_ns) / 1_000_000.0;
-    if threshold_ms > 0.0 && budget_probe_ms > threshold_ms {
-        signals.push(format!("over budget > {threshold_ms:.1}ms"));
+    let heuristic_ms = dispersion_upper_ns(mean_ns, std_dev_ns) / 1_000_000.0;
+    if threshold_ms > 0.0 && heuristic_ms > threshold_ms {
+        signals.push(format!("dispersion heuristic > {threshold_ms:.1}ms (not a percentile)"));
     }
     signals.push(
         if latency_kind == "first_response" {
@@ -168,6 +168,8 @@ pub(in crate::producers) fn capitalize(value: &str) -> String {
 }
 
 pub(in crate::producers) fn over_threshold(row: &Value) -> bool {
+    if let Some(status) = row["budget_status"].as_str() { return status == "fail"; }
+    if row["measurement_status"].as_str().is_some_and(|status| status != "valid") { return false; }
     let budget_probe_ms = budget_probe_ms(row).unwrap_or(0.0);
     let threshold_ms = row
         .get("threshold_ms")
@@ -182,7 +184,6 @@ pub(in crate::producers) fn budget_probe_ms(row: &Value) -> Option<f64> {
         .and_then(Value::as_f64)
         .or_else(|| {
             row.get("budget_probe_ns")
-                .or_else(|| row.get("approx_p95_ns"))
                 .and_then(Value::as_f64)
                 .map(|value| value / 1_000_000.0)
         })
@@ -230,7 +231,7 @@ mod tests {
     fn budget_checks_prefer_tail_probe_over_mean() {
         let row = serde_json::json!({
             "mean_ns": 80_000_000.0,
-            "approx_p95_ns": 130_000_000.0,
+            "budget_probe_ns": 130_000_000.0,
             "threshold_ms": 100.0,
         });
         assert!(over_threshold(&row));

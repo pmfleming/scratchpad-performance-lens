@@ -12,6 +12,7 @@ pub(super) fn valid_latency(row: &Value) -> bool {
         && row["threshold_authoritative"].as_bool() == Some(true)
         && row["measurement_scope"].as_str().is_some_and(|scope| !scope.is_empty() && scope != "unknown")
         && row["measurement_status"].as_str() == Some("valid")
+        && matches!(row["budget_status"].as_str(), Some("pass" | "fail"))
 }
 
 pub(super) fn valid_resource(row: &Value) -> bool {

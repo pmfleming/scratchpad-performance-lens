@@ -1,5 +1,5 @@
 use super::common::{
-    approx_p05_ns, approx_p95_ns, benchmark_parameter, capitalize, criterion_dir, ns_per_kb,
+    dispersion_lower_ns, dispersion_upper_ns, benchmark_parameter, capitalize, criterion_dir, ns_per_kb,
     over_threshold, parameter_label, run_benchmarks, score_of, search_signals, stability_label,
     string_value, throughput_mb_s, variance_ratio,
 };
@@ -82,7 +82,7 @@ fn build_search_row(name: String, key: String, meta: &Value, estimates: &Value) 
         search_workload(meta, parameter_value, &parameter_unit);
     let mean_ns = shared::f64_field(estimates, &["mean", "point_estimate"]);
     let std_dev_ns = shared::f64_field(estimates, &["std_dev", "point_estimate"]);
-    let approx_p95_ns = approx_p95_ns(mean_ns, std_dev_ns);
+    let dispersion_upper = dispersion_upper_ns(mean_ns, std_dev_ns);
     let median_ns = shared::f64_field(estimates, &["median", "point_estimate"]);
     let throughput_mb_s = throughput_mb_s(total_bytes, mean_ns);
     let ns_per_kb = ns_per_kb(total_bytes, mean_ns);
@@ -122,10 +122,8 @@ fn build_search_row(name: String, key: String, meta: &Value, estimates: &Value) 
         "mean_ns": mean_ns,
         "std_dev_ns": std_dev_ns,
         "median_ns": median_ns,
-        "approx_p95_ns": approx_p95_ns,
-        "approx_p05_ns": approx_p05_ns(mean_ns, std_dev_ns),
-        "budget_probe_ns": approx_p95_ns,
-        "budget_probe_label": "approx_p95_from_mean_std_dev",
+        "dispersion_upper_ns": dispersion_upper,
+        "dispersion_lower_ns": dispersion_lower_ns(mean_ns, std_dev_ns),
         "throughput_mb_s": throughput_mb_s,
         "ns_per_kb": ns_per_kb,
         "score": ns_per_kb.map_or((mean_ns / 1_000_000.0 * 100.0).round() / 100.0, |value| (value * (1.0 + variance_ratio(mean_ns, std_dev_ns)) * 100.0).round() / 100.0),
@@ -138,6 +136,7 @@ fn build_search_row(name: String, key: String, meta: &Value, estimates: &Value) 
         "measurement_role": "change_validation",
         "measurement_question": "Did this search path stay inside its latency budget?",
     });
+    super::common::annotate_budget(&mut row, estimates, threshold_ms);
     row["threshold_authoritative"] = json!(threshold_ms.is_some());
     row["threshold_source"] = json!(meta.get("threshold_source"));
     row["metadata_source"] = json!(meta.get("metadata_source"));

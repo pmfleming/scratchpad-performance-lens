@@ -24,6 +24,7 @@ pub(super) fn review_row_matches(row: &Value, scenario: &ReviewScenario) -> bool
 pub(super) fn over_budget_latency(row: &&Value) -> bool {
     if row["measurement_status"].as_str().is_some_and(|status| status != "valid") { return false; }
     if row["evidence_kind"] == "frame" { return super::frames::over_budget(row); }
+    if let Some(status) = row["budget_status"].as_str() { return status == "fail"; }
     let budget_probe = budget_probe_ms(row);
     let threshold = row
         .get("threshold_ms")

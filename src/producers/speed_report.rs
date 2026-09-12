@@ -164,7 +164,9 @@ fn normalize_latency_row(row: Value, capacity_lookup: &HashMap<String, Value>) -
         "last_known_failure_ceiling": ceiling.and_then(|row| row.get("last_successful_label").or_else(|| row.get("first_failure_label"))).cloned(),
         "suspected_limiting_resource": row.get("suspected_limiting_resource").and_then(Value::as_str).unwrap_or("cpu"),
         "signals": row.get("signals").and_then(Value::as_str).unwrap_or("nominal"),
-        "over_budget": budget_ms > 0.0 && budget_probe_ms > budget_ms,
+        "budget_status": row.get("budget_status").cloned().unwrap_or(json!("unmeasured")),
+        "mean_confidence_interval_ns": row.get("mean_confidence_interval_ns").cloned(),
+        "over_budget": super::common::over_threshold(&row),
     })
 }
 

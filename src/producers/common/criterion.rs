@@ -79,9 +79,44 @@ fn validate_estimates(value: &Value) -> Result<()> {
     Ok(())
 }
 
+pub(in crate::producers) fn annotate_budget(row: &mut Value, estimates: &Value, threshold: Option<f64>) {
+    let interval = &estimates["mean"]["confidence_interval"];
+    let lower = interval["lower_bound"].as_f64();
+    let upper = interval["upper_bound"].as_f64();
+    let mean = estimates["mean"]["point_estimate"].as_f64();
+    let level = interval["confidence_level"].as_f64();
+    let valid = matches!((lower, mean, upper, level), (Some(lo), Some(mean), Some(hi), Some(level))
+        if lo > 0.0 && lo <= mean && mean <= hi && level > 0.0 && level < 1.0);
+    row["mean_confidence_interval_ns"] = if valid { interval.clone() } else { Value::Null };
+    row["budget_probe_ns"] = if valid { json!(upper) } else { Value::Null };
+    row["budget_probe_label"] = json!("mean_confidence_interval_upper_bound");
+    row["tail_latency_measured"] = json!(false);
+    row["budget_status"] = json!(match (valid, threshold.filter(|value| *value > 0.0)) {
+        (true, Some(threshold)) if lower.unwrap() / 1e6 > threshold => "fail",
+        (true, Some(threshold)) if upper.unwrap() / 1e6 <= threshold => "pass",
+        (true, Some(_)) => "uncertain",
+        _ => "unmeasured",
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn confidence_interval_not_dispersion_controls_budget_and_overlap_is_uncertain() {
+        let estimates = json!({"mean":{"point_estimate":100_000_000,
+            "confidence_interval":{"lower_bound":90_000_000,"upper_bound":110_000_000,"confidence_level":0.95}}});
+        for (budget, status) in [(80.0,"fail"),(100.0,"uncertain"),(120.0,"pass")] {
+            let mut row = json!({});
+            annotate_budget(&mut row, &estimates, Some(budget));
+            assert_eq!(row["budget_status"], status);
+            assert_eq!(row["tail_latency_measured"], false);
+        }
+        let mut row = json!({});
+        annotate_budget(&mut row, &json!({}), Some(100.0));
+        assert_eq!(row["budget_status"], "unmeasured");
+        assert!(row["budget_probe_ns"].is_null());
+    }
     #[test]
     fn missing_zero_and_negative_estimates_are_invalid() {
         assert!(validate_estimates(&json!({})).is_err());

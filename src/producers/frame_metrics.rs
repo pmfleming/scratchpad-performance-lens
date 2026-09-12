@@ -129,6 +129,8 @@ fn annotate_frame_scenario(scenario: &mut Value) {
         ("measurement_scope", json!(scope)),
         ("metric_role", json!(role)),
         ("present_included", json!(false)),
+        ("percentile_method", json!("unknown_legacy_probe")),
+        ("percentile_resolution_ms", Value::Null),
         ("vsync", json!(false)),
         ("included_work", included),
         ("omitted_work", omitted),
