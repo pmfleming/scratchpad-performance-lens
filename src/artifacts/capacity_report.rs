@@ -114,6 +114,8 @@ pub struct CapacitySample {
     pub setup_elapsed_ms: Option<f64>,
     pub elapsed_ms: Option<f64>,
     pub background_completion_ms: Option<f64>,
+    #[serde(default)]
+    pub completed_workload_value: Option<i64>,
     pub elapsed_min_ms: Option<f64>,
     pub elapsed_max_ms: Option<f64>,
     pub repetition_count: usize,

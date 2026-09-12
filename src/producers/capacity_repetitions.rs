@@ -25,6 +25,12 @@ fn aggregate_step(repetitions: Vec<Value>) -> Value {
                 .as_u64()
                 .is_some_and(|index| index < expected && identities.insert(index))
             && event["elapsed_ns"].as_u64().is_some_and(|ns| ns > 0)
+            && (event["background_completion_ns"].is_null()
+                || (event["completed_workload_value"] == event["workload_value"]
+                    && event["background_completion_ns"]
+                        .as_u64()
+                        .zip(event["elapsed_ns"].as_u64())
+                        .is_some_and(|(completion, visible)| completion >= visible)))
     });
     let complete = expected >= 3 && repetitions.len() as u64 == expected && valid_identity;
     let failure_count = repetitions
@@ -107,6 +113,27 @@ mod tests {
             "workload_value":100,"workload_unit":"tabs","measurement_scope":"prepared_operation",
             "peak_working_set_bytes":peak})
     }
+    #[test]
+    fn a_timeout_with_only_two_installed_files_does_not_prove_background_completion() {
+        let events: Vec<_> = (0..3)
+            .map(|index| {
+                let mut row = sample(index, 10, "ok", 20);
+                row["background_completion_ns"] = json!(20);
+                row["completed_workload_value"] = json!(2);
+                row
+            })
+            .collect();
+        assert_eq!(aggregate(events.clone())[0]["status"], "incomplete");
+        let complete: Vec<_> = events
+            .into_iter()
+            .map(|mut row| {
+                row["completed_workload_value"] = row["workload_value"].clone();
+                row
+            })
+            .collect();
+        assert_eq!(aggregate(complete)[0]["status"], "ok");
+    }
+
     #[test]
     fn panic_cannot_disappear_behind_successful_median() {
         let row = aggregate(vec![

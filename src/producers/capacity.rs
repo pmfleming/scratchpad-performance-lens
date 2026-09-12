@@ -488,6 +488,7 @@ fn capacity_sample(event: &Value) -> Value {
         "setup_elapsed_ms": event.get("setup_elapsed_ns").and_then(Value::as_f64).map(|value| value / 1_000_000.0),
         "elapsed_ms": event.get("elapsed_ns").and_then(Value::as_f64).map(|ns| ns / 1_000_000.0),
         "background_completion_ms": event.get("background_completion_ns").and_then(Value::as_f64).map(|value| value / 1_000_000.0),
+        "completed_workload_value": event.get("completed_workload_value").cloned(),
         "elapsed_min_ms": event.get("elapsed_min_ns").and_then(Value::as_f64).map(|ns| ns / 1_000_000.0),
         "elapsed_max_ms": event.get("elapsed_max_ns").and_then(Value::as_f64).map(|ns| ns / 1_000_000.0),
         "complete": event["complete"].as_bool().unwrap_or(false),
