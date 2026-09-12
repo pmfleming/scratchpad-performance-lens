@@ -192,21 +192,16 @@ fn normalize_latency_row(row: Value, capacity_lookup: &HashMap<String, Value>) -
         "split-layout" => capacity_lookup.get("split_count_ceiling"),
         _ => None,
     };
-    let mean_ms = row
-        .get("mean_ms")
-        .and_then(Value::as_f64)
-        .or_else(|| {
-            row.get("mean_ns")
-                .and_then(Value::as_f64)
-                .map(|ns| ns / 1_000_000.0)
-        })
-        .unwrap_or(0.0);
-    let budget_probe_ms = budget_probe_ms(&row).unwrap_or(mean_ms);
+    let mean_ms = row.get("mean_ms").and_then(Value::as_f64).or_else(|| {
+        row.get("mean_ns")
+            .and_then(Value::as_f64)
+            .map(|ns| ns / 1_000_000.0)
+    });
+    let budget_probe_ms = budget_probe_ms(&row).or(mean_ms);
     let budget_ms = row
         .get("threshold_ms")
         .or_else(|| row.get("budget_ms"))
-        .and_then(Value::as_f64)
-        .unwrap_or(0.0);
+        .and_then(Value::as_f64);
     let matching = row
         .get("matching_flamegraphs")
         .cloned()
@@ -228,8 +223,11 @@ fn normalize_latency_row(row: Value, capacity_lookup: &HashMap<String, Value>) -
         "matching_flamegraphs": matching,
         "has_profile_coverage": matching.as_array().is_some_and(|items| !items.is_empty()),
         "last_known_failure_ceiling": ceiling.and_then(|row| row.get("last_successful_label").or_else(|| row.get("first_failure_label"))).cloned(),
-        "suspected_limiting_resource": row.get("suspected_limiting_resource").and_then(Value::as_str).unwrap_or("cpu"),
-        "signals": row.get("signals").and_then(Value::as_str).unwrap_or("budget status unknown"),
+        "suspected_limiting_resource": row.get("suspected_limiting_resource").and_then(Value::as_str).unwrap_or("unknown"),
+        "signals": row.get("signals").and_then(Value::as_str).unwrap_or(match row["budget_status"].as_str() {
+            Some("fail") => "observed budget violation", Some("pass") => "within observed budget",
+            Some("uncertain") => "budget uncertain", _ => "budget status unknown",
+        }),
         "budget_status": row.get("budget_status").cloned().unwrap_or(json!("unmeasured")),
         "mean_confidence_interval_ns": row.get("mean_confidence_interval_ns").cloned(),
         "measurement_status": row.get("measurement_status").cloned().unwrap_or(json!("unmeasured")),
@@ -259,7 +257,7 @@ fn normalize_capacity_row(row: &Value, synthetic: bool) -> Value {
         "last_successful_label": if synthetic { None } else { row.get("last_successful_label").cloned() },
         "first_failure_label": if synthetic { None } else { row.get("first_failure_label").cloned() },
         "matching_flamegraphs": row.get("matching_flamegraphs").cloned().unwrap_or_else(|| json!([])),
-        "suspected_limiting_resource": row.get("suspected_limiting_resource").and_then(Value::as_str).unwrap_or("cpu"),
+        "suspected_limiting_resource": row.get("suspected_limiting_resource").and_then(Value::as_str).unwrap_or("unknown"),
         "peak_working_set_bytes": row.get("peak_working_set_bytes").cloned(),
         "working_set_growth_bytes": row.get("working_set_growth_bytes").cloned(),
         "diagnosis_guidance": row.get("diagnosis_guidance").cloned().unwrap_or_else(|| json!([])),
@@ -303,7 +301,7 @@ fn normalize_frame_row(row: &Value) -> Value {
         "targets": ["src/app/app_state/frame.rs", "src/app/ui"],
         "matching_flamegraphs": ["ui_render_frame_profile"],
         "has_profile_coverage": true,
-        "suspected_limiting_resource": "cpu",
+        "suspected_limiting_resource": "unknown",
         "signals": format!("p95 {p95_ms:.2} ms vs {budget_ms:.2} ms budget; p99 {p99_ms:.2} ms vs {p99_budget_ms:.2} ms budget"),
         "over_budget": valid.then_some(p95_ms > budget_ms || p99_ms > p99_budget_ms),
         "phases": row.get("phases").cloned().unwrap_or_else(|| json!([])),
@@ -542,6 +540,21 @@ mod tests {
             &HashMap::new(),
         );
         assert_eq!(row["family"], "search-dispatch");
+    }
+
+    #[test]
+    fn workflow_failures_have_an_honest_reason_without_an_invented_bottleneck() {
+        let row = normalize_latency_row(
+            json!({"mean_ms":167,"budget_probe_ns":167_000_000,
+            "threshold_ms":120,"measurement_status":"valid","budget_status":"fail"}),
+            &HashMap::new(),
+        );
+        let triage = build_triage(&[&row], &[]);
+        assert_eq!(triage[0]["reason"], "observed budget violation");
+        assert_eq!(triage[0]["suspected_limiting_resource"], "unknown");
+        let missing = normalize_latency_row(json!({}), &HashMap::new());
+        assert!(missing["mean_ms"].is_null());
+        assert!(missing["budget_ms"].is_null());
     }
 
     #[test]
