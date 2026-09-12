@@ -309,6 +309,11 @@ fn summarize_resources(events: Vec<Value>, status: &str, fallback_reason: Option
             "max_elapsed_ms": events.iter().map(|event| event.get("elapsed_ns").and_then(Value::as_f64).unwrap_or(0.0) / 1_000_000.0).fold(0.0, f64::max),
             "max_allocated_bytes": max_i64(&events, "allocated_bytes"),
             "max_peak_live_bytes": max_i64(&events, "peak_live_bytes"),
+            "max_live_bytes": max_i64(&events, "live_bytes"),
+            "max_baseline_live_bytes": max_i64(&events, "baseline_live_bytes"),
+            "max_live_growth_bytes": max_i64(&events, "live_growth_bytes"),
+            "peak_working_set_bytes": max_i64(&events, "peak_working_set_bytes"),
+            "peak_working_set_scope": "process_lifetime_high_water_not_operation_peak",
             "max_working_set_bytes": max_i64(&events, "working_set_bytes"),
             "max_manifest_size_bytes": max_i64(&events, "manifest_size_bytes"),
             "max_retained_file_chunks": max_i64(&events, "retained_file_chunks"),
@@ -344,7 +349,7 @@ fn summarize_resources(events: Vec<Value>, status: &str, fallback_reason: Option
 }
 
 fn resource_sample(event: &Value) -> Value {
-    json!({
+    let mut sample = json!({
         "workload_value": event.get("workload_value").cloned(),
         "workload_label": event.get("workload_label").cloned(),
         "setup_elapsed_ms": event.get("setup_elapsed_ns").and_then(Value::as_f64).map(|value| value / 1_000_000.0),
@@ -371,7 +376,12 @@ fn resource_sample(event: &Value) -> Value {
         },
         "status": event.get("status").and_then(Value::as_str).unwrap_or("ok"),
         "note": event.get("note").cloned(),
-    })
+    });
+    // Preserve the probe's resource counters, units and scope even as it evolves.
+    if let (Some(source), Some(target)) = (event.as_object(), sample.as_object_mut()) {
+        for (key, value) in source { target.entry(key).or_insert_with(|| value.clone()); }
+    }
+    sample
 }
 
 fn measurement_gap_scenarios() -> HashMap<&'static str, &'static str> {
@@ -424,6 +434,17 @@ mod tests {
         assert_eq!(payload["summary"]["synthetic"], json!(true));
         assert_eq!(payload["meta"]["fallback_reason"], json!("probe failed"));
         assert!(payload["summary"]["scenario_count"].as_u64().unwrap_or(0) > 0);
+    }
+
+    #[test]
+    fn retained_heap_scope_and_process_counters_survive_serialization() {
+        let sample = super::resource_sample(&json!({"elapsed_ns":10, "live_bytes":100,
+            "baseline_live_bytes":200, "live_growth_bytes":-100,
+            "measurement_scope":"prepared_operation", "process_resources":{"read_bytes":1024}}));
+        assert_eq!(sample["live_bytes"], 100);
+        assert_eq!(sample["live_growth_bytes"], -100);
+        assert_eq!(sample["measurement_scope"], "prepared_operation");
+        assert_eq!(sample["process_resources"]["read_bytes"], 1024);
     }
 
     #[test]

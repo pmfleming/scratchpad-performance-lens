@@ -32,6 +32,8 @@ pub struct CapacityReportSummary {
     pub ceilings_reached: usize,
     pub memory_bound_scenarios: usize,
     pub cpu_bound_scenarios: usize,
+    #[serde(default)]
+    pub unknown_resource_scenarios: usize,
     pub probe_status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback_reason: Option<String>,
@@ -113,4 +115,14 @@ pub struct CapacitySample {
     pub page_fault_count: Option<i64>,
     pub handle_count: Option<i64>,
     pub status: String,
+    #[serde(default)]
+    pub metrics: Value,
+    #[serde(default)]
+    pub memory_budget: Value,
+    #[serde(default)]
+    pub process_resources: Value,
+    #[serde(default)]
+    pub peak_working_set_bytes: Option<i64>,
+    #[serde(default)]
+    pub note: Option<String>,
 }

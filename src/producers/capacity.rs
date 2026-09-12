@@ -263,9 +263,11 @@ fn summarize_capacity(events: Vec<Value>, status: &str, fallback_reason: Option<
                 == Some("memory")
         })
         .count();
+    let cpu = scenarios.iter().filter(|row| row["suspected_limiting_resource"] == "cpu").count();
+    let unknown = scenarios.iter().filter(|row| row["suspected_limiting_resource"] == "unknown").count();
     let mut payload = json!({
         "meta": {"generated_from": "rust:capacity_report", "probe_command": probe_path("capacity_probe").to_string_lossy(), "scenario_count": scenarios.len(), "probe_status": status, "synthetic": synthetic},
-        "summary": {"scenario_count": scenarios.len(), "ceilings_reached": ceilings, "memory_bound_scenarios": memory, "cpu_bound_scenarios": scenarios.len() - memory, "probe_status": status, "synthetic": synthetic},
+        "summary": {"scenario_count": scenarios.len(), "ceilings_reached": ceilings, "memory_bound_scenarios": memory, "cpu_bound_scenarios": cpu, "unknown_resource_scenarios": unknown, "probe_status": status, "synthetic": synthetic},
         "scenarios": scenarios,
     });
     if let Some(reason) = fallback_reason {
@@ -424,38 +426,17 @@ fn aggregate_capacity_repetitions(events: Vec<Value>) -> Vec<Value> {
 }
 
 fn infer_limiting_resource(events: &[Value]) -> String {
-    let Some(first) = events.first() else {
-        return "cpu".to_string();
-    };
-    let Some(last) = events.last() else {
-        return "cpu".to_string();
-    };
-    let handle_growth = shared::safe_delta(
-        last.get("handle_count").and_then(Value::as_i64),
-        first.get("handle_count").and_then(Value::as_i64),
-    );
-    let working_set_growth = shared::safe_delta(
-        last.get("working_set_bytes").and_then(Value::as_i64),
-        first.get("working_set_bytes").and_then(Value::as_i64),
-    );
-    let page_fault_growth = shared::safe_delta(
-        last.get("page_fault_count").and_then(Value::as_i64),
-        first.get("page_fault_count").and_then(Value::as_i64),
-    );
-    if handle_growth.is_some_and(|value| value >= 256) {
-        "os-handles".to_string()
-    } else if page_fault_growth.is_some_and(|value| value >= 10_000)
-        || working_set_growth.is_some_and(|value| value >= 128 * shared::MB)
-    {
-        "memory".to_string()
-    } else {
-        "cpu".to_string()
-    }
+    // Growth and elapsed time do not establish saturation or causality. Only an
+    // explicit instrumented saturation observation can name a limiting resource.
+    events.iter().filter_map(|event| event["saturated_resource"].as_str())
+        .find(|resource| matches!(*resource, "cpu" | "memory" | "i/o" | "os-handles"))
+        .unwrap_or("unknown").to_owned()
 }
 
 fn diagnosis_guidance(limiting: &str, matching: &[String]) -> Vec<String> {
     let mut guidance = Vec::new();
     match limiting {
+        "unknown" => guidance.push("No saturation evidence: compare process CPU, RSS, I/O and queue counters before assigning a bottleneck.".into()),
         "memory" => guidance.push("Prefer allocation, working-set, or page-fault diagnostics before adding another CPU flamegraph.".to_string()),
         "os-handles" => guidance.push("Inspect handle counts, temp files, and other OS limits during the next stress run.".to_string()),
         _ if !matching.is_empty() => guidance.push(format!("Mapped CPU profile coverage: {}.", matching.join(", "))),
@@ -490,6 +471,11 @@ fn capacity_sample(event: &Value) -> Value {
         "elapsed_max_ms": event.get("elapsed_max_ns").and_then(Value::as_f64).unwrap_or(0.0) / 1_000_000.0,
         "repetition_count": event.get("repetition_count").and_then(Value::as_u64).unwrap_or(1),
         "measurement_scope": event.get("measurement_scope").cloned(),
+        "metrics": event.get("metrics").cloned(),
+        "memory_budget": event.get("memory_budget").cloned(),
+        "process_resources": event.get("process_resources").cloned(),
+        "peak_working_set_bytes": event.get("peak_working_set_bytes").cloned(),
+        "note": event.get("note").cloned(),
         "working_set_bytes": event.get("working_set_bytes").cloned(),
         "page_fault_count": event.get("page_fault_count").cloned(),
         "handle_count": event.get("handle_count").cloned(),
@@ -505,6 +491,17 @@ mod tests {
         DEFAULT_CAPACITY_THRESHOLD_MS, TEXT_LAYOUT_FAMILY,
     };
     use serde_json::{json, Value};
+
+    #[test]
+    fn missing_resource_counters_are_unknown_and_raw_counters_survive() {
+        assert_eq!(super::infer_limiting_resource(&[json!({"elapsed_ns":999})]), "unknown");
+        let sample = super::capacity_sample(&json!({"elapsed_ns":10,
+            "metrics":{"search_max_queue_depth":4}, "memory_budget":{"layout_bytes":100},
+            "process_resources":{"cpu_elapsed_ms":2}}));
+        let typed: crate::artifacts::capacity_report::CapacitySample = serde_json::from_value(sample).unwrap();
+        assert_eq!(typed.metrics["search_max_queue_depth"], 4);
+        assert_eq!(typed.process_resources["cpu_elapsed_ms"], 2);
+    }
 
     #[test]
     fn repeated_capacity_steps_use_median_elapsed_time() {
