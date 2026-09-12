@@ -7,43 +7,25 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 pub fn resource_profiles(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
-    let events = run_probe_events(
-        &config.project_root,
-        &[
-            "cargo",
-            "build",
-            "--release",
-            "--quiet",
-            "--bin",
-            "resource_probe",
-        ],
-        probe_path("resource_probe"),
-        "resource probe",
-    )
-    .and_then(|events| {
-        for expected in fallback_resource_events() {
-            anyhow::ensure!(
-                events
-                    .iter()
-                    .any(|event| event["scenario"] == expected["scenario"]),
-                "resource probe omitted expected scenario {}",
-                expected["scenario"]
-            );
-        }
-        Ok(events)
-    });
-    let (payload, failure) = match events {
-        Ok(events) if !events.is_empty() => {
-            let failed = events.iter().any(|event| event["status"] != "ok");
-            (
-                summarize_resources(events, if failed { "partial" } else { "completed" }, None),
-                failed.then(|| "resource probe contains failed samples".to_owned()),
+    let events =
+        super::resource_contracts::expected_scenarios(&config.project_root).and_then(|expected| {
+            run_probe_events(
+                &config.project_root,
+                &[
+                    "cargo",
+                    "build",
+                    "--release",
+                    "--quiet",
+                    "--bin",
+                    "resource_probe",
+                ],
+                probe_path("resource_probe"),
+                "resource probe",
             )
-        }
-        Ok(_) => {
-            let error = "No probe samples were recorded.".to_string();
-            (empty_resources(&error), Some(error))
-        }
+            .map(|events| (events, expected))
+        });
+    let (payload, failure) = match events {
+        Ok((events, expected)) => validated_resources(events, &expected),
         Err(error) => {
             let error = error.to_string();
             (empty_resources(&error), Some(error))
@@ -58,6 +40,38 @@ pub fn resource_profiles(config: &LensConfig, _options: MeasureOptions) -> Resul
     )
 }
 
+fn validated_resources(events: Vec<Value>, expected: &[String]) -> (Value, Option<String>) {
+    let missing = expected
+        .iter()
+        .filter(|id| !events.iter().any(|event| event["scenario"] == **id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let failed = events.iter().any(|event| event["status"] != "ok");
+    let failure = if !missing.is_empty() {
+        Some(format!(
+            "resource probe omitted expected scenarios: {}",
+            missing.join(", ")
+        ))
+    } else {
+        failed.then(|| "resource probe contains failed samples".to_owned())
+    };
+    // Valid samples from other scenarios remain evidence, even when a probe is incomplete.
+    let mut payload = summarize_resources(
+        events,
+        if failure.is_some() {
+            "partial"
+        } else {
+            "completed"
+        },
+        None,
+    );
+    payload["meta"]["missing_scenarios"] = json!(missing);
+    payload["meta"]["expected_scenario_count"] = json!(expected.len());
+    payload["meta"]["error"] = json!(failure);
+    (payload, failure)
+}
+
+#[cfg(test)]
 fn fallback_resource_events() -> Vec<Value> {
     let definitions = [
         (
@@ -74,7 +88,7 @@ fn fallback_resource_events() -> Vec<Value> {
             "bytes",
         ),
         (
-            "file_backed_open_first_visible_paint",
+            "large_file_first_visible_paint",
             "File-backed open and first visible paint",
             "file-load",
             "first-paint",
@@ -458,6 +472,28 @@ fn max_i64(events: &[Value], key: &str) -> Option<i64> {
 mod tests {
     use super::{fallback_resource_events, summarize_resources};
     use serde_json::json;
+
+    #[test]
+    fn missing_scenarios_do_not_discard_successful_resource_measurements() {
+        let events = vec![
+            json!({"scenario":"large_file_first_visible_paint", "status":"ok",
+            "elapsed_ns":1_000_000, "workload_value":1_073_741_824, "step_index":0}),
+        ];
+        let expected = vec!["large_file_first_visible_paint".to_owned()];
+        let (payload, failure) = super::validated_resources(events.clone(), &expected);
+        assert!(failure.is_none());
+        assert_eq!(payload["meta"]["probe_status"], "completed");
+        let (payload, failure) =
+            super::validated_resources(events, &[expected[0].clone(), "missing_operation".into()]);
+        assert!(failure.is_some());
+        assert_eq!(payload["meta"]["probe_status"], "partial");
+        assert_eq!(
+            payload["meta"]["missing_scenarios"],
+            json!(["missing_operation"])
+        );
+        assert_eq!(payload["scenarios"][0]["samples"][0]["elapsed_ms"], 1.0);
+        assert_ne!(payload["meta"]["synthetic"], true);
+    }
 
     #[test]
     fn fallback_payload_is_marked_synthetic() {

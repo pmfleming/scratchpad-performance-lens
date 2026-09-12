@@ -246,6 +246,7 @@ pub fn human_bytes(value: Option<i64>) -> String {
     }
 }
 
+#[cfg(test)]
 pub fn workload_label(value: i64, unit: &str) -> String {
     if unit == "bytes" {
         human_bytes(Some(value))

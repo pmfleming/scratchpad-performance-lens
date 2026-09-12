@@ -2,6 +2,29 @@
 use crate::shared;
 use serde_json::{json, Value};
 
+pub(super) fn expected_scenarios(root: &std::path::Path) -> anyhow::Result<Vec<String>> {
+    use anyhow::Context;
+    let declaration: Value = serde_json::from_slice(
+        &std::fs::read(root.join("benches/measurement_manifest.json"))
+            .context("missing project-owned measurement manifest")?,
+    )?;
+    let scenarios = declaration["probes"]["resource_probe"]
+        .as_array()
+        .context("missing resource_probe scenario declaration")?;
+    let mut names = std::collections::HashSet::new();
+    let mut expected = Vec::new();
+    for scenario in scenarios {
+        let name = scenario
+            .as_str()
+            .filter(|name| !name.is_empty())
+            .context("invalid resource scenario ID")?;
+        anyhow::ensure!(names.insert(name), "duplicate resource scenario ID: {name}");
+        expected.push(name.to_owned());
+    }
+    anyhow::ensure!(!expected.is_empty(), "empty resource scenario declaration");
+    Ok(expected)
+}
+
 pub(super) fn gap_evidence(scenario: &str, events: &[Value], synthetic: bool) -> Value {
     let (minimum, fields): (i64, &[&str]) = match scenario {
         "large_utf8_load_peak_memory" => (
@@ -103,6 +126,26 @@ pub(super) fn gap_evidence(scenario: &str, events: &[Value], synthetic: bool) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn resource_expectations_come_from_project_owned_declarations() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("benches")).unwrap();
+        let path = root.path().join("benches/measurement_manifest.json");
+        for (scenarios, valid) in [
+            (json!([]), false),
+            (json!(["renamed", "renamed"]), false),
+            (json!([null]), false),
+            (json!(["large_file_first_visible_paint"]), true),
+        ] {
+            std::fs::write(
+                &path,
+                json!({"probes":{"resource_probe":scenarios}}).to_string(),
+            )
+            .unwrap();
+            assert_eq!(expected_scenarios(root.path()).is_ok(), valid);
+        }
+    }
+
     #[test]
     fn retention_requires_a_snapshot_before_document_destruction() {
         let mut sample = json!({"workload_value":100000,"status":"ok","elapsed_ns":10,
