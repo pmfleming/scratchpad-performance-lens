@@ -31,6 +31,7 @@ pub fn slowspots(config: &LensConfig, options: MeasureOptions) -> Result<()> {
     let metadata = shared::load_benchmark_metadata(&config.project_root);
     let criterion_dir = criterion_dir(&config.project_root);
     let mut rows = Vec::new();
+    let mut invalid = Vec::new();
     for path in shared::criterion_estimate_paths(&criterion_dir) {
         let Some(name) = shared::benchmark_name_from_estimate_path(&criterion_dir, &path) else {
             continue;
@@ -40,7 +41,17 @@ pub fn slowspots(config: &LensConfig, options: MeasureOptions) -> Result<()> {
             eprintln!("Skipping stale or unmapped Criterion result: {name}");
             continue;
         };
-        let estimates = shared::read_json(&path).into_value_or(json!({}));
+        let estimates = match super::common::read_estimates(&config.project_root, &path, &name,
+            &["search_speed", "frame_budget", "promise_latency"]) {
+            Ok(estimates) => estimates,
+            Err(error) => {
+                invalid.push(format!("{name}: {error}"));
+                rows.push(json!({"name": name, "benchmark_key": key,
+                    "workload_family": meta["workload_family"], "measurement_status": "invalid",
+                    "error": error.to_string(), "mean_ns": null, "budget_probe_ns": null}));
+                continue;
+            }
+        }; 
         let mean_ns = shared::f64_field(&estimates, &["mean", "point_estimate"]);
         let std_dev_ns = shared::f64_field(&estimates, &["std_dev", "point_estimate"]);
         let approx_p95_ns = approx_p95_ns(mean_ns, std_dev_ns);
@@ -61,6 +72,8 @@ pub fn slowspots(config: &LensConfig, options: MeasureOptions) -> Result<()> {
         );
         let mut row = json!({
             "name": name,
+            "measurement_status": "valid",
+            "measurement_scope": shared::string_field(meta, "measurement_scope", "prepared_component"),
             "mean_ns": mean_ns,
             "std_dev_ns": std_dev_ns,
             "median_ns": median_ns,
@@ -105,6 +118,9 @@ pub fn slowspots(config: &LensConfig, options: MeasureOptions) -> Result<()> {
     )?;
     if let Some(error) = probe_failure {
         bail!("slowspots probe failed: {error}");
+    }
+    if payload.as_array().is_none_or(Vec::is_empty) || !invalid.is_empty() {
+        bail!("slowspot measurements incomplete or invalid: {}", invalid.join("; "));
     }
     if options.fail_on_slow
         && payload

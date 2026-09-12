@@ -24,6 +24,7 @@ pub fn search_speed(config: &LensConfig, options: MeasureOptions) -> Result<()> 
     let metadata = shared::load_benchmark_metadata(&config.project_root);
     let criterion_dir = criterion_dir(&config.project_root);
     let mut rows = Vec::new();
+    let mut invalid = Vec::new();
     for path in shared::criterion_estimate_paths(&criterion_dir) {
         let Some(name) = shared::benchmark_name_from_estimate_path(&criterion_dir, &path) else {
             continue;
@@ -35,8 +36,15 @@ pub fn search_speed(config: &LensConfig, options: MeasureOptions) -> Result<()> 
         if !shared::string_field(meta, "workload_family", "").starts_with("search") {
             continue;
         }
-        let estimates = shared::read_json(&path).into_value_or(json!({}));
-        rows.push(build_search_row(name, key, meta, &estimates));
+        match super::common::read_estimates(&config.project_root, &path, &name, &["search_speed"]) {
+            Ok(estimates) => rows.push(build_search_row(name, key, meta, &estimates)),
+            Err(error) => {
+                invalid.push(format!("{name}: {error}"));
+                rows.push(json!({"name": name, "benchmark_key": key,
+                    "workload_family": meta["workload_family"], "measurement_status": "invalid",
+                    "error": error.to_string(), "mean_ns": null, "budget_probe_ns": null}));
+            }
+        }
     }
     rows.sort_by(|left, right| {
         score_of(right)
@@ -53,6 +61,9 @@ pub fn search_speed(config: &LensConfig, options: MeasureOptions) -> Result<()> 
     )?;
     if let Some(error) = probe_failure {
         bail!("search probe failed: {error}");
+    }
+    if payload.as_array().is_none_or(Vec::is_empty) || !invalid.is_empty() {
+        bail!("search measurements incomplete or invalid: {}", invalid.join("; "));
     }
     if options.fail_on_slow
         && payload
@@ -87,6 +98,8 @@ fn build_search_row(name: String, key: String, meta: &Value, estimates: &Value) 
     );
     let mut row = json!({
         "name": name,
+        "measurement_status": "valid",
+        "measurement_scope": "prepared_search_component",
         "benchmark_key": key,
         "scenario_label": search_scenario_label(&key),
         "description": shared::string_field(meta, "description", &key),

@@ -15,7 +15,15 @@ pub(in crate::producers) fn run_benchmarks(
     if skip {
         return None;
     }
+    let started = crate::provenance::timestamp();
+    let context = crate::provenance::context(project_root);
+    let suites = super::criterion::suite_names(cargo_args);
+    // Invalidate prior run manifests before executing: partial/failing reruns cannot reuse them.
+    for suite in &suites {
+        let _ = std::fs::remove_file(criterion_dir(project_root).join(format!("splens-{suite}.json")));
+    }
     shared::run_progress_command(project_root, cargo_args, label)
+        .and_then(|()| super::criterion::record_run(project_root, &suites, started, context))
         .err()
         .map(|error| error.to_string())
 }

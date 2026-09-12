@@ -7,7 +7,13 @@ pub(in crate::producers) fn read_analysis(
     file: &str,
     default: Value,
 ) -> Value {
-    shared::read_json(&config.output_dir.join(file)).into_value_or(default)
+    let path = config.output_dir.join(file);
+    let status = crate::provenance::validity(&path, &crate::provenance::context(&config.project_root));
+    if status != "valid" {
+        eprintln!("Excluding {file}: {status} measurement provenance");
+        return default;
+    }
+    shared::read_json(&path).into_value_or(default)
 }
 
 pub(in crate::producers) fn array_value(value: &Value) -> Vec<Value> {

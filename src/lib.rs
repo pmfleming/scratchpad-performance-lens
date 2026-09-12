@@ -3,6 +3,7 @@ mod artifacts;
 mod cli;
 mod config;
 mod producers;
+mod provenance;
 mod shared;
 
 pub use cli::run_cli;

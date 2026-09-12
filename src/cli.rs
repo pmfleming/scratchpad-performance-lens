@@ -329,7 +329,13 @@ fn measure(args: MeasureArgs) -> Result<()> {
         {
             producer_options.skip_bench = true;
         }
-        match (producer.run)(&config, producer_options) {
+        let started = crate::provenance::timestamp();
+        let context = crate::provenance::context(&config.project_root);
+        let result = (producer.run)(&config, producer_options);
+        if config.output_dir.join(producer.artifact).exists() {
+            crate::provenance::record(&config, producer.artifact, started, &context, result.is_ok())?;
+        }
+        match result {
             Ok(()) => {
                 if !options.skip_bench {
                     completed_benchmarks.extend(producer.benchmarks.iter().copied());

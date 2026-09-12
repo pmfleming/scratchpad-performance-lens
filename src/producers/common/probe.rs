@@ -48,14 +48,34 @@ pub(in crate::producers) fn run_probe_events(
         .current_dir(project_root)
         .output()
         .with_context(|| label.to_string())?;
+    // Preserve even a crashed/truncated probe's evidence for diagnosis.
+    let archive = project_root.join("target/splens-probes");
+    std::fs::create_dir_all(&archive)?;
+    let run = format!("{}-{}", label.replace(' ', "-"), crate::provenance::timestamp());
+    std::fs::write(archive.join(format!("{run}.ndjson")), &output.stdout)?;
+    std::fs::write(archive.join(format!("{run}.stderr")), &output.stderr)?;
     if !output.status.success() {
         bail!("{}", output_text(&output));
     }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        .filter(Value::is_object)
-        .collect())
+    parse_events(&output.stdout)
+}
+
+fn parse_events(bytes: &[u8]) -> Result<Vec<Value>> {
+    let text = std::str::from_utf8(bytes).context("probe output is not UTF-8")?;
+    let mut events = Vec::new();
+    for (index, line) in text.lines().enumerate().filter(|(_, line)| !line.trim().is_empty()) {
+        let event: Value = serde_json::from_str(line).with_context(|| format!("invalid probe line {}", index + 1))?;
+        if !event.is_object() || event["scenario"].as_str().is_none()
+            || event["workload_value"].as_u64().is_none()
+            || event["step_index"].as_u64().is_none()
+            || event["elapsed_ns"].as_u64().is_none_or(|value| value == 0)
+            || !matches!(event["status"].as_str(), Some("ok" | "panic" | "error")) {
+            bail!("invalid required measurement fields on probe line {}", index + 1);
+        }
+        events.push(event);
+    }
+    if events.is_empty() { bail!("probe returned no measurements"); }
+    Ok(events)
 }
 
 pub(in crate::producers) fn write_probe_artifact(
@@ -70,6 +90,21 @@ pub(in crate::producers) fn write_probe_artifact(
         bail!("{error}");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_events;
+    #[test]
+    fn malformed_partial_or_missing_fields_never_silently_succeed() {
+        let valid = br#"{"scenario":"test","step_index":0,"workload_value":1,"elapsed_ns":10,"status":"ok"}"#;
+        assert_eq!(parse_events(valid).unwrap().len(), 1);
+        let mut truncated = valid.to_vec();
+        truncated.extend_from_slice(b"\n{truncated");
+        assert!(parse_events(&truncated).is_err());
+        assert!(parse_events(b"{}").is_err());
+        assert!(parse_events(b"").is_err());
+    }
 }
 
 pub(in crate::producers) fn output_text(output: &std::process::Output) -> String {

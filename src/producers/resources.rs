@@ -19,7 +19,13 @@ pub fn resource_profiles(config: &LensConfig, _options: MeasureOptions) -> Resul
         ],
         probe_path("resource_probe"),
         "resource probe",
-    );
+    ).and_then(|events| {
+        for expected in fallback_resource_events() {
+            anyhow::ensure!(events.iter().any(|event| event["scenario"] == expected["scenario"]),
+                "resource probe omitted expected scenario {}", expected["scenario"]);
+        }
+        Ok(events)
+    });
     let (payload, failure) = match events {
         Ok(events) if !events.is_empty() => (summarize_resources(events, "completed", None), None),
         Ok(_) => {

@@ -164,7 +164,14 @@ pub fn capacity_report(config: &LensConfig, _options: MeasureOptions) -> Result<
         ],
         probe_path("capacity_probe"),
         "capacity probe",
-    );
+    ).and_then(|events| {
+        for spec in CAPACITY_SCENARIOS {
+            anyhow::ensure!(events.iter().any(|event| event["scenario"] == spec.id
+                || (spec.id == "text_layout_ceiling" && event["scenario"] == "layout_bytes_ceiling")),
+                "capacity probe omitted expected scenario {}", spec.id);
+        }
+        Ok(events)
+    });
     let (payload, failure) = match events {
         Ok(events) if !events.is_empty() => (summarize_capacity(events, "completed", None), None),
         Ok(_) => {

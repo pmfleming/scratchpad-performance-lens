@@ -118,7 +118,8 @@ pub(super) fn source_status(config: &LensConfig) -> Vec<SourceArtifactStatus> {
                     })
                     .and_then(Value::as_str)
                     .map(ToString::to_string);
-                (true, "loaded", probe_status, None)
+                let validity = crate::provenance::validity(&path, &crate::provenance::context(&config.project_root));
+                (validity == "valid", if validity == "valid" { "loaded" } else { validity }, probe_status, None)
             }
             shared::JsonRead::Missing => (false, "missing", None, None),
             shared::JsonRead::Unparseable(error) => (false, "unparseable", None, Some(error)),
@@ -179,8 +180,8 @@ mod tests {
             .find(|row| row.id == "search_speed")
             .unwrap();
 
-        assert_eq!(slowspots.status, "loaded");
-        assert!(slowspots.available);
+        assert_eq!(slowspots.status, "unverified");
+        assert!(!slowspots.available);
         assert_eq!(frame_metrics.status, "unparseable");
         assert!(!frame_metrics.available);
         assert!(frame_metrics.error.is_some());

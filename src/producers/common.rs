@@ -1,6 +1,8 @@
 mod artifact;
 mod probe;
 mod stats;
+mod criterion;
+pub(super) use criterion::read_estimates;
 
 pub(super) use artifact::{array_value, read_analysis, scenarios_array, values_array};
 pub(super) use probe::{
