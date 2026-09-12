@@ -18,9 +18,12 @@ pub(super) fn review_row_matches(row: &Value, scenario: &ReviewScenario) -> bool
         .and_then(Value::as_str)
         .unwrap_or("");
     scenario.benchmark_keys.contains(&key) || scenario.families.contains(&family)
+        || row["promise_scenarios"].as_array().is_some_and(|ids| ids.iter().any(|id| id == scenario.id))
 }
 
 pub(super) fn over_budget_latency(row: &&Value) -> bool {
+    if row["measurement_status"].as_str().is_some_and(|status| status != "valid") { return false; }
+    if row["evidence_kind"] == "frame" { return super::frames::over_budget(row); }
     let budget_probe = budget_probe_ms(row);
     let threshold = row
         .get("threshold_ms")

@@ -5,6 +5,7 @@ use crate::artifacts::performance_review::CoverageAxes;
 use serde_json::Value;
 
 pub(super) fn valid_latency(row: &Value) -> bool {
+    if row["evidence_kind"] == "frame" { return super::frames::valid_frame(row); }
     let measured = super::super::common::budget_probe_ms(row);
     measured.is_some_and(|value| value.is_finite() && value > 0.0)
         && row["threshold_ms"].as_f64().is_some_and(|value| value > 0.0)
