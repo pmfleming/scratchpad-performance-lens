@@ -348,6 +348,8 @@ fn summarize_resources(events: Vec<Value>, status: &str, fallback_reason: Option
             "peak_working_set_scope": "process_lifetime_high_water_not_operation_peak",
             "max_working_set_bytes": max_i64(&events, "working_set_bytes"),
             "max_manifest_size_bytes": max_i64(&events, "manifest_size_bytes"),
+            "max_save_ms": events.iter().filter_map(|e| e["phase_elapsed_ns"]["save_ns"].as_f64()).reduce(f64::max).map(|ns| ns / 1_000_000.0),
+            "max_write_bytes_per_operation": events.iter().filter_map(|e| e["process_resources"]["write_bytes"].as_u64()).max(),
             "max_retained_file_chunks": max_i64(&events, "retained_file_chunks"),
             "file_chunk_cache_limit": max_i64(&events, "file_chunk_cache_limit"),
             "cache_bound_violations": events.iter().filter(|event| cache_bound_violated(event)).count(),
@@ -436,18 +438,58 @@ fn resource_sample(event: &Value) -> Value {
 
 fn measurement_gap_scenarios() -> HashMap<&'static str, &'static str> {
     HashMap::from([
-        ("large_utf8_load_peak_memory", "peak RSS / allocator high-water mark during very large UTF-8 load"),
-        ("file_backed_chunk_cache_tracking", "bounded retained-memory behavior after traversing every chunk of a large file"),
-        ("edited_buffer_search_preview_rendering", "edited-buffer search preview rendering with many matches and many pieces"),
-        ("provenance_retained_memory", "provenance-store retained memory after hundreds of thousands of edits and history-budget eviction"),
-        ("anchor_heavy_view_editing", "anchor-heavy editing with many views, selections, search results, and scroll anchors"),
-        ("fragmented_long_session_mutation", "fragmented-buffer paste/cut/undo/redo after long sessions"),
-        ("many_file_lazy_open_tracking", "large open batches should install path-backed shells and defer file content hydration"),
-        ("search_app_result_tracking", "app-level search result storage should avoid eager matched-text allocation"),
-        ("session_persist_cost", "session persistence broken down into snapshot cost, serialization cost, file I/O, and restore reconstruction"),
-        ("session_restore_cost", "session persistence broken down into snapshot cost, serialization cost, file I/O, and restore reconstruction"),
-        ("startup_visible_restore_cost", "session persistence broken down into snapshot cost, serialization cost, file I/O, and restore reconstruction"),
-        ("tab_strip_frame_rendering", "render cost for horizontal and vertical tab-strip virtualization at many-tab scale"),
+        (
+            "large_utf8_load_peak_memory",
+            "peak RSS / allocator high-water mark during very large UTF-8 load",
+        ),
+        (
+            "file_backed_chunk_cache_tracking",
+            "bounded retained-memory behavior after traversing every chunk of a large file",
+        ),
+        (
+            "edited_buffer_search_preview_rendering",
+            "edited-buffer search preview rendering with many matches and many pieces",
+        ),
+        (
+            "provenance_retained_memory",
+            "provenance-store retained memory after hundreds of thousands of edits and history-budget eviction",
+        ),
+        (
+            "anchor_heavy_view_editing",
+            "anchor-heavy editing with many views, selections, search results, and scroll anchors",
+        ),
+        (
+            "fragmented_long_session_mutation",
+            "fragmented-buffer paste/cut/undo/redo after long sessions",
+        ),
+        (
+            "many_file_lazy_open_tracking",
+            "large open batches should install path-backed shells and defer file content hydration",
+        ),
+        (
+            "search_app_result_tracking",
+            "app-level search result storage should avoid eager matched-text allocation",
+        ),
+        (
+            "session_persist_cost",
+            "session persistence broken down into snapshot cost, serialization cost, file I/O, and restore reconstruction",
+        ),
+        (
+            "large_dirty_buffer_save",
+            "one-character autosave time and write bytes for a 50 MiB dirty buffer with full undo history",
+        ),
+        (
+            "session_restore_cost",
+            "session persistence broken down into snapshot cost, serialization cost, file I/O, and restore reconstruction",
+        ),
+        (
+            "startup_visible_restore_cost",
+            "session persistence broken down into snapshot cost, serialization cost, file I/O, and restore reconstruction",
+        ),
+        (
+            "tab_strip_frame_rendering",
+            "render cost for horizontal and vertical tab-strip virtualization at many-tab scale",
+        ),
     ])
 }
 

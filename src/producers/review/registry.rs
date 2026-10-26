@@ -263,22 +263,33 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
             capacity_scenarios: &[],
             resource_scenarios: &[
                 "session_persist_cost",
+                "large_dirty_buffer_save",
                 "session_restore_cost",
                 "startup_visible_restore_cost",
             ],
             profile_ids: &[],
-            scale_targets: &[ScaleTarget {
-                id: "ten_thousand_tab_restore",
-                label: "10,000+ tab session restore",
-                minimum: 10_000,
-                unit: "tabs",
-                capacity_scenarios: &[],
-                resource_scenarios: &[
-                    "session_persist_cost",
-                    "session_restore_cost",
-                    "startup_visible_restore_cost",
-                ],
-            }],
+            scale_targets: &[
+                ScaleTarget {
+                    id: "large_dirty_buffer_autosave",
+                    label: "50 MiB dirty buffer with 16 MiB undo history",
+                    minimum: 50 * shared::MB,
+                    unit: "bytes",
+                    capacity_scenarios: &[],
+                    resource_scenarios: &["large_dirty_buffer_save"],
+                },
+                ScaleTarget {
+                    id: "ten_thousand_tab_restore",
+                    label: "10,000+ tab session restore",
+                    minimum: 10_000,
+                    unit: "tabs",
+                    capacity_scenarios: &[],
+                    resource_scenarios: &[
+                        "session_persist_cost",
+                        "session_restore_cost",
+                        "startup_visible_restore_cost",
+                    ],
+                },
+            ],
         },
     ]
 }

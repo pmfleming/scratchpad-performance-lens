@@ -58,6 +58,15 @@ pub(super) fn gap_evidence(scenario: &str, events: &[Value], synthetic: bool) ->
                 "manifest_serialize_ns",
             ],
         ),
+        "large_dirty_buffer_save" => (
+            50 * shared::MB,
+            &[
+                "save_ns",
+                "write_bytes",
+                "history_payload_bytes",
+                "history_entries",
+            ],
+        ),
         "session_restore_cost" => (
             10_000,
             &["manifest_read_parse_ns", "restore_reconstruction_ns"],
@@ -103,9 +112,22 @@ pub(super) fn gap_evidence(scenario: &str, events: &[Value], synthetic: bool) ->
         for field in fields {
             let value = event[*field]
                 .as_f64()
-                .or_else(|| event["phase_elapsed_ns"][*field].as_f64());
+                .or_else(|| event["phase_elapsed_ns"][*field].as_f64())
+                .or_else(|| event["process_resources"][*field].as_f64())
+                .or_else(|| event["workload_details"][*field].as_f64());
             if value.is_none_or(|value| value < 0.0 || (field.ends_with("_ns") && value == 0.0)) {
                 missing.push((*field).to_owned());
+            }
+        }
+        if scenario == "large_dirty_buffer_save" {
+            let details = &event["workload_details"];
+            if details["history_payload_bytes"].as_i64().unwrap_or(0) < 15 * shared::MB
+                || details["history_entries"].as_u64().unwrap_or(0) < 1024
+                || details["inserted_bytes"] != 1
+                || details["synchronous"] != "FULL"
+                || event["measurement_scope"] != "prepared_operation"
+            {
+                missing.push("prepared_single_character_save_with_full_history".into());
             }
         }
         if scenario == "file_backed_chunk_cache_tracking"
@@ -144,6 +166,23 @@ mod tests {
             .unwrap();
             assert_eq!(expected_scenarios(root.path()).is_ok(), valid);
         }
+    }
+
+    #[test]
+    fn large_save_requires_actual_write_counters_and_full_history() {
+        let mut sample = json!({"workload_value":50 * shared::MB,"status":"ok","elapsed_ns":10,
+            "measurement_scope":"prepared_operation", "phase_elapsed_ns":{"save_ns":9},
+            "workload_details":{"history_payload_bytes":16 * shared::MB,"history_entries":1024,
+                "inserted_bytes":1,"synchronous":"FULL"}});
+        let check = |s: &Value| {
+            gap_evidence("large_dirty_buffer_save", std::slice::from_ref(s), false)["closed"]
+                == true
+        };
+        assert!(!check(&sample));
+        sample["process_resources"] = json!({"write_bytes":4096});
+        assert!(check(&sample));
+        sample["workload_details"]["history_entries"] = json!(1);
+        assert!(!check(&sample));
     }
 
     #[test]

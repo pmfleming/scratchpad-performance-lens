@@ -172,6 +172,15 @@ pub(super) fn render_resources(payload: &Value) -> String {
                 shared::human_bytes(item.get("max_allocated_bytes").and_then(Value::as_i64)),
                 shared::human_bytes(item.get("max_working_set_bytes").and_then(Value::as_i64)),
             );
+            if let Some(save_ms) = item.get("max_save_ms").and_then(Value::as_f64) {
+                row.push_str(&format!(
+                    " | max_save={save_ms:.1} ms | max_write_bytes/save={}",
+                    shared::human_bytes(
+                        item.get("max_write_bytes_per_operation")
+                            .and_then(Value::as_i64)
+                    )
+                ));
+            }
             if let Some(setup_ms) = item.get("max_setup_elapsed_ms").and_then(Value::as_f64) {
                 if setup_ms > 0.0 {
                     row.push_str(&format!(" | setup={setup_ms:.1} ms"));
