@@ -4,6 +4,7 @@ mod cli;
 mod config;
 mod producers;
 mod provenance;
+mod session_tools;
 mod shared;
 
 pub use cli::run_cli;

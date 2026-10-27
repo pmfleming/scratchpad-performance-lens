@@ -68,6 +68,21 @@ cargo install --path .
 splens catalog --config splens.toml
 ```
 
+## Session diagnostics
+
+The Rust CLI also owns the session migration helpers formerly kept as Python
+scripts in Scratchpad:
+
+```console
+splens compare-session-baseline BASELINE_RUN CURRENT_RUN --require-all-promises
+splens measure-large-dirty-save --binary /absolute/path/to/resource_probe --output NEW_RUN_DIR --launches 3
+```
+
+These are opt-in diagnostics, not part of `measure all`. They compare archived
+reports or run an explicitly selected, already-built Scratchpad probe. See
+[Session diagnostics](docs/session-diagnostics.md) for archive formats, failure
+semantics, and migration examples.
+
 ## Artifact Contracts
 
 Generated schemas are written with:
@@ -196,6 +211,7 @@ statuses; they must not coerce those states to zero or passing.
 Included here:
 
 - performance and capacity report producers
+- archived session comparisons and independent dirty-save probe orchestration
 - overview code metrics producer
 - flamegraph index producer
 - telemetry payload helpers
