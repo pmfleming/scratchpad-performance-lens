@@ -263,18 +263,7 @@ fn measure(args: MeasureArgs) -> Result<()> {
         {
             producer_options.skip_bench = true;
         }
-        let started = crate::provenance::timestamp();
-        let context = crate::provenance::context(&config.project_root);
-        let result = (producer.run)(&config, producer_options);
-        if config.output_dir.join(producer.artifact).exists() {
-            crate::provenance::record(
-                &config,
-                producer.artifact,
-                started,
-                &context,
-                result.is_ok(),
-            )?;
-        }
+        let result = run_producer(&config, producer, producer_options);
         match result {
             Ok(()) => {
                 if !options.skip_bench {
@@ -295,6 +284,39 @@ fn measure(args: MeasureArgs) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn run_producer(
+    config: &LensConfig,
+    producer: &ProducerSpec,
+    options: MeasureOptions,
+) -> Result<()> {
+    // Remove both files before invocation: an early failure must never refresh old evidence.
+    let path = config.output_dir.join(producer.artifact);
+    for old in [&path, &crate::provenance::sidecar(&path)] {
+        match std::fs::remove_file(old) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let started = crate::provenance::timestamp();
+    crate::provenance::with_run_snapshot(&config.project_root, || {
+        let result = (producer.run)(config, options);
+        if path.exists() {
+            // The snapshot is lazy: benchmark code first requests it after Cargo exits;
+            // other probes first request it here. Reports reuse their read snapshot.
+            let context = crate::provenance::context(&config.project_root);
+            crate::provenance::record(
+                config,
+                producer.artifact,
+                started,
+                &context,
+                result.is_ok(),
+            )?;
+        }
+        result
+    })
 }
 
 fn selected_producers(selection: &str) -> Vec<&'static ProducerSpec> {
@@ -331,4 +353,66 @@ fn title_case(tool: &str) -> String {
         .map(crate::shared::capitalize)
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{run_producer, LensConfig, MeasureOptions, ProducerSpec};
+    use crate::provenance;
+    use anyhow::{bail, Result};
+
+    #[test]
+    fn early_failure_cannot_restamp_old_partial_and_new_output_binds_post_run_inputs() -> Result<()>
+    {
+        let root = tempfile::tempdir()?;
+        assert!(crate::shared::run_command(root.path(), &["git", "init"])?
+            .status
+            .success());
+        std::fs::write(root.path().join(".gitignore"), "target/\n")?;
+        std::fs::write(root.path().join("Cargo.lock"), "before")?;
+        let config = LensConfig {
+            project_name: "fixture".into(),
+            project_root: root.path().into(),
+            output_dir: root.path().join("target/analysis"),
+        };
+        std::fs::create_dir_all(&config.output_dir)?;
+        let path = config.output_dir.join("test.json");
+        let old_context = provenance::context(root.path());
+        std::fs::write(&path, r#"{"meta":{"probe_status":"partial"}}"#)?;
+        provenance::record(&config, "test.json", 0.0, &old_context, false)?;
+        let options = MeasureOptions {
+            skip_bench: true,
+            fail_on_slow: false,
+            index_only: false,
+        };
+        let early = ProducerSpec::new(
+            "test",
+            "test.json",
+            |_, _| bail!("typed decode failed"),
+            &[],
+        );
+        assert!(run_producer(&config, &early, options).is_err());
+        assert!(!path.exists());
+        assert!(!provenance::sidecar(&path).exists());
+        let fresh = ProducerSpec::new(
+            "test",
+            "test.json",
+            |config, _| {
+                std::fs::write(config.project_root.join("Cargo.lock"), "after")?;
+                std::fs::write(
+                    config.output_dir.join("test.json"),
+                    r#"{"meta":{"probe_status":"partial"}}"#,
+                )?;
+                bail!("fresh partial evidence")
+            },
+            &[],
+        );
+        assert!(run_producer(&config, &fresh, options).is_err());
+        assert_eq!(provenance::validity(&path, &old_context), "stale");
+        assert_eq!(
+            provenance::validity(&path, &provenance::context(root.path())),
+            "valid"
+        );
+        Ok(())
+    }
 }

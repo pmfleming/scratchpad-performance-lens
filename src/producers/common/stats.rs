@@ -151,8 +151,8 @@ pub(in crate::producers) fn over_threshold(row: &Value) -> bool {
 
 pub(in crate::producers) fn budget_probe_ms(row: &Value) -> Option<f64> {
     row.get("p99_ms")
-        .or_else(|| row.get("p95_ms"))
         .and_then(Value::as_f64)
+        .or_else(|| row.get("p95_ms").and_then(Value::as_f64))
         .or_else(|| {
             row.get("budget_probe_ns")
                 .and_then(Value::as_f64)
@@ -211,5 +211,15 @@ mod tests {
         });
         assert!(over_threshold(&row));
         assert_eq!(budget_probe_ms(&row), Some(130.0));
+        for p99 in [serde_json::Value::Null, serde_json::json!("invalid")] {
+            assert_eq!(
+                budget_probe_ms(&serde_json::json!({"p99_ms":p99,"p95_ms":150,"mean_ms":80})),
+                Some(150.0)
+            );
+        }
+        assert_eq!(
+            budget_probe_ms(&serde_json::json!({"p99_ms":0,"p95_ms":150})),
+            Some(0.0)
+        );
     }
 }

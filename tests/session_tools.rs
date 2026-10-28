@@ -69,6 +69,14 @@ fn both_entrypoints_compare_archives_and_enforce_opt_in_promise_gate() -> anyhow
         .output()?;
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("Session latency acceptance: FAIL"));
+    let tolerant = Command::new(env!("CARGO_BIN_EXE_splens"))
+        .arg("compare-session-baseline")
+        .arg(&baseline)
+        .arg(&current)
+        .args(["--max-regression-percent", "2"])
+        .output()?;
+    assert!(tolerant.status.success());
+    assert!(String::from_utf8_lossy(&tolerant.stdout).contains("Allowed latency regression: 2.00%"));
     Ok(())
 }
 

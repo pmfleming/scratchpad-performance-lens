@@ -169,11 +169,17 @@ remaining budget violations.
 - Every producer writes a `.json.provenance.json` sidecar binding its artifact
   contents to the measured checkout, toolchain, host, relevant environment,
   lens executable, and run time. Evidence expires after 24 hours. Missing,
-  changed, failed, or stale evidence does not prove a promise.
+  changed, failed, or stale evidence does not prove a promise. The selected
+  producer's previous artifact and sidecar are removed before invocation, so an
+  early failure cannot refresh old partial evidence. Each producer run shares a
+  lazy context snapshot, captured after any build/benchmark work; the next producer
+  gets a fresh snapshot because builds can change inputs such as `Cargo.lock`.
 - Scratchpad owns `benches/measurement_manifest.json`, listing expected Criterion
   suites and workload parameters. A fresh run must produce every declared row.
   `--skip-bench` requires matching, unexpired lens-generated Criterion manifests;
   arbitrary pre-existing Criterion caches are unverified, not zero-latency data.
+  Only manifest-listed entries are collected. Unlisted leftovers are ignored;
+  missing, modified or corrupt listed entries still fail validation.
 - Required operation IDs are evaluated individually. `available_count`,
   `valid_count`, `expected_count`, and `missing_evidence` explain coverage.
   Diagnostic profiles are optional and must actually be available to count.
@@ -194,7 +200,12 @@ remaining budget violations.
   scenarios fail the run but preserve valid samples in a partial artifact.
   Resource gaps close only with successful, correctly scoped measurements at
   the required workload and with all required metrics. Session phase timings
-  are numeric data, not just formatted labels.
+  are numeric data, not just formatted labels. Resource-backed scale targets use
+  contract-complete successful workloads, not an invented resource latency budget.
+  Resource rows expose `demonstrated_workload` and `scale_evidence_basis`; separate
+  authoritative latency measurements still gate the session promise. A fresh
+  capacity artifact with an incompatible schema fails review explicitly rather
+  than being silently interpreted as an empty report.
 - Frame p95 and p99 budgets both affect promise health. Histogram resolution,
   overflow and percentile method remain visible; headless work never implies
   display presentation. Speed-report triage counts unknown evidence separately.

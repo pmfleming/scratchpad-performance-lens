@@ -199,21 +199,10 @@ fn row_scenario_matches(row: &Value, scenario_ids: &[&str]) -> bool {
 }
 
 fn demonstrated_resource_workload(row: &Value) -> Option<i64> {
-    let threshold = row
-        .get("threshold_ms")?
-        .as_f64()
-        .filter(|value| *value > 0.0)?;
-    row.get("samples")?
-        .as_array()?
-        .iter()
-        .filter(|sample| {
-            sample["status"].as_str() == Some("ok")
-                && sample["elapsed_ms"]
-                    .as_f64()
-                    .is_some_and(|value| value > 0.0 && value <= threshold)
-        })
-        .filter_map(|sample| sample["workload_value"].as_i64())
-        .max()
+    super::super::resource_contracts::demonstrated_workload(
+        row["scenario"].as_str()?,
+        row["samples"].as_array()?,
+    )
 }
 
 fn max_resource_workload_value(row: &Value) -> Option<i64> {
@@ -233,8 +222,8 @@ fn max_resource_workload_value(row: &Value) -> Option<i64> {
         .filter_map(|sample| {
             sample
                 .get("workload_value")
-                .or_else(|| sample.get("result_value"))
                 .and_then(Value::as_i64)
+                .or_else(|| sample.get("result_value").and_then(Value::as_i64))
         });
     direct.chain(samples).max()
 }

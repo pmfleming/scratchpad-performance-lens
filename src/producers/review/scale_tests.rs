@@ -44,12 +44,67 @@ fn failed_attempt_above_target_is_not_success_or_headroom() {
 }
 
 #[test]
-fn failed_resource_sample_does_not_demonstrate_restore_scale() {
+fn session_promise_uses_real_resource_output_and_separate_latency_budgets() {
+    use crate::artifacts::performance_review::PromiseHealth;
+    use serde_json::json;
     let scenario = review_scenarios()
         .into_iter()
         .find(|s| s.id == "session_restore")
         .unwrap();
-    let resources = serde_json::json!({"scenario": "session_restore_cost", "threshold_ms": 100,
-        "samples": [{"workload_value": 10000, "elapsed_ms": 1, "status": "panic"}]});
-    assert!(!scale_checks(&scenario, &[], &[resources], false, false)[0].met);
+    for (case, expected) in [
+        ("valid", PromiseHealth::Pass),
+        ("panic", PromiseHealth::Fail),
+        ("missing_metric", PromiseHealth::AtRisk),
+        ("undersized", PromiseHealth::AtRisk),
+        ("incomplete_history", PromiseHealth::AtRisk),
+        ("slow", PromiseHealth::Fail),
+    ] {
+        let mut events: Vec<_> = scenario.resource_scenarios.iter().map(|id| json!({
+            "scenario":id,"status":"ok","elapsed_ns":1_000_000,"measurement_scope":"prepared_operation",
+            "workload_value":if *id == "large_dirty_buffer_save" {50 * crate::shared::MB} else {10_000},
+            "allocated_bytes":1,"manifest_size_bytes":1,
+            "phase_elapsed_ns":{"snapshot_capture_ns":1,"file_write_ns":1,"manifest_serialize_ns":1,
+                "manifest_read_parse_ns":1,"restore_reconstruction_ns":1,"startup_load_ns":1,"first_paint_ns":1,"save_ns":1},
+            "process_resources":{"write_bytes":1},
+            "workload_details":{"history_payload_bytes":16 * crate::shared::MB,"history_entries":1024,"inserted_bytes":1,"synchronous":"FULL"}
+        })).collect();
+        match case {
+            "panic" => events[2]["status"] = json!("panic"),
+            "missing_metric" => {
+                events[2]["phase_elapsed_ns"]["manifest_read_parse_ns"] = json!(null)
+            }
+            "undersized" => events[2]["workload_value"] = json!(9999),
+            "incomplete_history" => {
+                events[1]["workload_details"]["history_payload_bytes"] = json!(0)
+            }
+            _ => {}
+        }
+        let resources = super::super::resources::summarize_resources(events, "completed");
+        let latency: Vec<_> = scenario
+            .benchmark_keys
+            .iter()
+            .map(|key| {
+                json!({
+                    "benchmark_key":key,"threshold_ms":1,"threshold_authoritative":true,
+                    "measurement_scope":"prepared_operation","measurement_status":"valid",
+                    "budget_probe_ns":if case == "slow" {2_000_000} else {1000},
+                    "budget_status":if case == "slow" {"fail"} else {"pass"},
+                })
+            })
+            .collect();
+        let row = super::build_review_scenario(
+            &scenario,
+            &latency,
+            &[],
+            resources["scenarios"].as_array().unwrap(),
+            &[],
+            false,
+            false,
+        );
+        assert_eq!(row.promise_health, expected, "{case}");
+        if case == "valid" {
+            assert!(row.scale_checks.iter().all(|check| check.met));
+            assert_eq!(row.scale_checks[1].last_successful_workload, Some(10_000));
+        }
+    }
 }

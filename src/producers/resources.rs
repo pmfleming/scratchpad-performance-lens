@@ -1,6 +1,8 @@
 use super::common::{probe_path, run_probe_events, write_probe_artifact};
 use super::render::render_resources;
-use super::resource_contracts::{cache_bound_held, expected_scenarios, gap_evidence};
+use super::resource_contracts::{
+    cache_bound_held, demonstrated_workload, expected_scenarios, gap_evidence,
+};
 use crate::cli::MeasureOptions;
 use crate::config::LensConfig;
 use crate::shared;
@@ -88,7 +90,7 @@ fn empty_resources(reason: &str) -> Value {
     })
 }
 
-fn summarize_resources(events: Vec<Value>, status: &str) -> Value {
+pub(super) fn summarize_resources(events: Vec<Value>, status: &str) -> Value {
     let probe_command = events
         .first()
         .and_then(|event| event["probe_executable"].as_str())
@@ -154,6 +156,8 @@ fn resource_scenario(scenario: &str, mut events: Vec<Value>, gap: Option<&str>) 
         "measurement_gap": gap,
         "closes_measurement_gap": evidence["closed"],
         "gap_evidence": evidence,
+        "demonstrated_workload": demonstrated_workload(scenario, &events),
+        "scale_evidence_basis": "successful_resource_contract_not_latency_budget",
         "sample_count": events.len(),
         "max_setup_elapsed_ms": max_i64(&events, "setup_elapsed_ns").map(|value| value as f64 / 1_000_000.0),
         "max_elapsed_ms": events.iter().map(|event| event["elapsed_ns"].as_f64().unwrap_or(0.0) / 1_000_000.0).fold(0.0, f64::max),

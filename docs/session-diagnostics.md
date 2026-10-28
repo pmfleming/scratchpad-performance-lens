@@ -15,6 +15,7 @@ artifacts or claim fresh provenance for archived evidence.
 ```console
 splens compare-session-baseline BASELINE_RUN CURRENT_RUN
 splens compare-session-baseline BASELINE_RUN CURRENT_RUN --require-all-promises
+splens compare-session-baseline BASELINE_RUN CURRENT_RUN --max-regression-percent 5
 ```
 
 Each directory must contain:
@@ -26,16 +27,23 @@ Each directory must contain:
 This matches archives made by Scratchpad's `scripts/check-session-migration.sh`.
 A failing combined marker never falls back to a successful performance marker.
 
-For the `Session Persistence Restore` scenario, the following rows are required:
+Scenarios match by stable `id` (`session_restore` for the session promise), so
+renaming display titles does not change identity. Title matching is supported
+only when both archives lack IDs entirely; mixed, missing or duplicate IDs are
+errors. For the session scenario, the following rows are required:
 
 - `session_persist_latency/10000`
 - `session_restore_latency/10000`
 - `session_restore_background_completion/10000`
 
-Acceptance preserves the original policy: each current measurement must be
-`valid`, any authoritative budget must be `pass`, and neither the mean nor the
-mean confidence interval upper bound may exceed its baseline value. A
-nonauthoritative budget does not invent a budget failure. The command prints
+By default acceptance preserves the original strict policy: each current
+measurement must be `valid`, any authoritative budget must be `pass`, and neither
+the mean nor the mean confidence interval upper bound may exceed its baseline
+value. Strict zero tolerance is noise-sensitive even for unchanged code.
+`--max-regression-percent` explicitly allows a finite 0–100% increase in both
+metrics (default 0); it does not waive authoritative budgets or promise gates.
+The selected tolerance is printed and is a policy choice, not a statistical
+significance test. A nonauthoritative budget does not invent a budget failure. The command prints
 individual comparisons and all scenario promise-health transitions. Exit status
 is nonzero on session regression; `--require-all-promises` additionally requires
 every current scenario's promise health to be `pass`.

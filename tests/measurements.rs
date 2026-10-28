@@ -56,7 +56,7 @@ fn probes_use_cargo_executables_with_environment_or_configured_target_directorie
 }
 
 #[test]
-fn corrupt_criterion_is_invalid_not_zero_and_fail_on_slow_is_nonzero() -> anyhow::Result<()> {
+fn unverified_criterion_cannot_supply_evidence_or_pass_fail_on_slow() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
     let estimates = root
         .path()
@@ -80,8 +80,9 @@ fn corrupt_criterion_is_invalid_not_zero_and_fail_on_slow_is_nonzero() -> anyhow
     let rows: Value = serde_json::from_slice(&std::fs::read(
         root.path().join("target/analysis/search_speed.json"),
     )?)?;
-    assert_eq!(rows[0]["measurement_status"], "invalid");
-    assert!(rows[0]["mean_ns"].is_null());
+    assert_eq!(rows, json!([]));
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("no current verified Criterion run manifest"));
     let provenance: Value = serde_json::from_slice(&std::fs::read(
         root.path()
             .join("target/analysis/search_speed.json.provenance.json"),

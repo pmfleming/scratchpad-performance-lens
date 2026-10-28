@@ -135,7 +135,7 @@ pub(super) fn payload_synthetic(payload: &Value) -> bool {
         .unwrap_or(false)
 }
 
-pub(super) fn source_status(config: &LensConfig) -> Vec<SourceArtifactStatus> {
+pub(super) fn source_status(config: &LensConfig, context: &Value) -> Vec<SourceArtifactStatus> {
     [
         ("slowspots", "slowspots.json"),
         ("frame_metrics", "frame_metrics.json"),
@@ -161,10 +161,7 @@ pub(super) fn source_status(config: &LensConfig) -> Vec<SourceArtifactStatus> {
                     })
                     .and_then(Value::as_str)
                     .map(ToString::to_string);
-                let validity = crate::provenance::validity(
-                    &path,
-                    &crate::provenance::context(&config.project_root),
-                );
+                let validity = crate::provenance::validity(&path, context);
                 (
                     validity == "valid",
                     if validity == "valid" {
@@ -237,7 +234,7 @@ mod tests {
             output_dir: dir.path().to_path_buf(),
         };
 
-        let statuses = source_status(&config);
+        let statuses = source_status(&config, &crate::provenance::context(&config.project_root));
         for (id, status, has_error) in [
             ("slowspots", "unverified", false),
             ("frame_metrics", "unparseable", true),

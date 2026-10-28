@@ -17,12 +17,20 @@ pub(crate) struct CompareSessionBaselineArgs {
     current: PathBuf,
     #[arg(long)]
     require_all_promises: bool,
+    /// Allowed increase in mean and CI upper bound (policy tolerance, not a significance test).
+    #[arg(long, default_value_t = 0.0)]
+    max_regression_percent: f64,
 }
 
 pub(crate) fn compare_session_baseline(args: CompareSessionBaselineArgs) -> Result<()> {
     let baseline = read_run(&args.baseline)?;
     let current = read_run(&args.current)?;
-    let (report, accepted) = compare(&baseline, &current, args.require_all_promises)?;
+    let (report, accepted) = compare(
+        &baseline,
+        &current,
+        args.require_all_promises,
+        args.max_regression_percent,
+    )?;
     println!("{report}");
     ensure!(accepted, "session baseline acceptance failed");
     Ok(())
@@ -73,26 +81,51 @@ fn positive(value: &Value) -> Result<f64> {
     Ok(value)
 }
 
-fn session_rows<'a>(scenarios: &BTreeMap<&str, &'a Value>) -> Result<BTreeMap<&'a str, &'a Value>> {
+fn session_rows<'a>(
+    scenarios: &BTreeMap<&str, &'a Value>,
+    session_key: &str,
+) -> Result<BTreeMap<&'a str, &'a Value>> {
     index(
         &scenarios
-            .get(SESSION)
+            .get(session_key)
             .context("missing Session Persistence Restore scenario")?["evidence"]["latency"],
         "name",
     )
 }
 
-fn compare(baseline: &Value, current: &Value, require_all: bool) -> Result<(String, bool)> {
-    let before = index(&baseline["scenarios"], "title").context("baseline scenarios")?;
-    let after = index(&current["scenarios"], "title").context("current scenarios")?;
+fn compare(
+    baseline: &Value,
+    current: &Value,
+    require_all: bool,
+    tolerance: f64,
+) -> Result<(String, bool)> {
+    ensure!(
+        tolerance.is_finite() && (0.0..=100.0).contains(&tolerance),
+        "max regression percent must be finite and between 0 and 100"
+    );
+    // Legacy archives contain only titles. Never fall back when any ID is present:
+    // mixed/missing/duplicate IDs are invalid rather than a way to bypass identity checks.
+    let has_ids = [baseline, current].into_iter().any(|report| {
+        report["scenarios"]
+            .as_array()
+            .is_some_and(|rows| rows.iter().any(|row| row.get("id").is_some()))
+    });
+    let (key, session_key) = if has_ids {
+        ("id", "session_restore")
+    } else {
+        ("title", SESSION)
+    };
+    let before = index(&baseline["scenarios"], key).context("baseline scenarios")?;
+    let after = index(&current["scenarios"], key).context("current scenarios")?;
     // A disappearing promise must not make --require-all-promises pass.
     ensure!(
         before.keys().eq(after.keys()),
         "baseline/current scenario sets differ"
     );
-    let old_rows = session_rows(&before).context("baseline session latency")?;
-    let new_rows = session_rows(&after).context("current session latency")?;
-    let mut lines = Vec::new();
+    let old_rows = session_rows(&before, session_key).context("baseline session latency")?;
+    let new_rows = session_rows(&after, session_key).context("current session latency")?;
+    let mut lines = vec![format!("Allowed latency regression: {tolerance:.2}% (policy tolerance, not statistical significance)")];
+    let factor = 1.0 + tolerance / 100.0;
     let mut session_pass = true;
     for &name in BENCHMARKS {
         let old = old_rows
@@ -111,8 +144,8 @@ fn compare(baseline: &Value, current: &Value, require_all: bool) -> Result<(Stri
             .with_context(|| format!("{name}: missing threshold authority"))?;
         let passed = new["measurement_status"] == "valid"
             && (!authoritative || new["budget_status"] == "pass")
-            && new_mean <= old_mean
-            && new_upper <= old_upper;
+            && new_mean / old_mean <= factor
+            && new_upper / old_upper <= factor;
         session_pass &= passed;
         lines.push(format!(
             "{} {name}: {:.3} -> {:.3} ms ({:.3}x baseline)",
@@ -123,8 +156,9 @@ fn compare(baseline: &Value, current: &Value, require_all: bool) -> Result<(Stri
         ));
     }
     let mut all_pass = true;
-    for (title, scenario) in after {
-        let old_health = before[title]["promise_health"]
+    for (id, scenario) in after {
+        let title = scenario["title"].as_str().unwrap_or(id);
+        let old_health = before[id]["promise_health"]
             .as_str()
             .context("missing baseline promise health")?;
         let health = scenario["promise_health"]
@@ -146,10 +180,18 @@ fn compare(baseline: &Value, current: &Value, require_all: bool) -> Result<(Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{compare, read_run, BENCHMARKS, SESSION};
+    use super::{read_run, BENCHMARKS, SESSION};
     use serde_json::json;
     use serde_json::Value;
     use std::fs;
+
+    fn compare(
+        baseline: &Value,
+        current: &Value,
+        require_all: bool,
+    ) -> anyhow::Result<(String, bool)> {
+        super::compare(baseline, current, require_all, 0.0)
+    }
 
     fn review() -> Value {
         json!({"scenarios": [{"title": SESSION, "promise_health": "pass", "evidence": {
@@ -211,6 +253,33 @@ mod tests {
             assert!(compare(&baseline, &current, true).is_err(), "{pointer}");
             assert!(compare(&current, &baseline, true).is_err(), "{pointer}");
         }
+    }
+
+    #[test]
+    fn stable_ids_survive_renames_and_explicit_tolerance_never_waives_budgets() -> anyhow::Result<()>
+    {
+        let mut baseline = review();
+        baseline["scenarios"][0]["id"] = json!("session_restore");
+        baseline["scenarios"][1]["id"] = json!("other");
+        let mut current = baseline.clone();
+        current["scenarios"][0]["title"] = json!("Renamed Session Promise");
+        assert!(super::compare(&baseline, &current, true, 0.0)?.1);
+        current["scenarios"][0]["evidence"]["latency"][0]["mean_ns"] = json!(102);
+        current["scenarios"][0]["evidence"]["latency"][0]["mean_confidence_interval_ns"]
+            ["upper_bound"] = json!(112);
+        assert!(!super::compare(&baseline, &current, true, 0.0)?.1);
+        assert!(super::compare(&baseline, &current, true, 3.0)?.1);
+        current["scenarios"][0]["evidence"]["latency"][0]["budget_status"] = json!("uncertain");
+        assert!(!super::compare(&baseline, &current, true, 3.0)?.1);
+        for invalid in [f64::NAN, f64::INFINITY, -1.0, 101.0] {
+            assert!(super::compare(&baseline, &baseline, true, invalid).is_err());
+        }
+        for id in [json!(null), json!("other")] {
+            current["scenarios"][0]["id"] = id;
+            assert!(super::compare(&baseline, &current, true, 3.0).is_err());
+        }
+        assert!(super::compare(&review(), &baseline, true, 0.0).is_err());
+        Ok(())
     }
 
     #[test]

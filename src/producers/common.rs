@@ -8,7 +8,7 @@ pub(super) use criterion::{
 };
 pub(super) use frames::{frame_over_budget, valid_frame};
 
-pub(super) use artifact::{read_analysis, scenarios_array, values_array};
+pub(super) use artifact::{scenarios_array, values_array, AnalysisInputs};
 pub(super) use probe::{
     output_text, probe_path, run_probe_events, run_probe_object, write_probe_artifact,
 };

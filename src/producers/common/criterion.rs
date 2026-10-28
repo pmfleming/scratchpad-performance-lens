@@ -2,7 +2,7 @@ use super::stats::over_threshold;
 use crate::{provenance, shared};
 use anyhow::{bail, ensure, Context, Result};
 use serde_json::{json, Value};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 pub(in crate::producers) fn run_benchmarks(
@@ -19,7 +19,6 @@ pub(in crate::producers) fn run_benchmarks(
         return None;
     }
     let started = provenance::timestamp();
-    let context = provenance::context(project_root);
     let suites = suite_names(cargo_args);
     // Invalidate prior run manifests before executing: partial/failing reruns cannot reuse them.
     let directory = criterion_dir(project_root);
@@ -27,7 +26,14 @@ pub(in crate::producers) fn run_benchmarks(
         let _ = std::fs::remove_file(directory.join(format!("splens-{suite}.json")));
     }
     shared::run_progress_command(project_root, cargo_args, label)
-        .and_then(|()| record_run(project_root, &suites, started, context))
+        .and_then(|()| {
+            record_run(
+                project_root,
+                &suites,
+                started,
+                provenance::context(project_root),
+            )
+        })
         .err()
         .map(|error| error.to_string())
 }
@@ -44,18 +50,45 @@ pub(in crate::producers) fn collect_benchmarks(
 ) -> (Vec<Value>, Vec<String>) {
     let metadata = shared::load_benchmark_metadata(root);
     let directory = criterion_dir(root);
+    let manifests = load_manifests(&directory, suites, &provenance::context(root));
+    if manifests.is_empty() || manifests.len() != suites.len() {
+        return (
+            Vec::new(),
+            vec![
+                "no current verified Criterion run manifest for one or more requested suites"
+                    .into(),
+            ],
+        );
+    }
+    let paths: HashMap<_, _> = shared::criterion_estimate_paths(&directory)
+        .into_iter()
+        .filter_map(|path| {
+            Some((
+                shared::benchmark_name_from_estimate_path(&directory, &path)?,
+                path,
+            ))
+        })
+        .collect();
+    let names: BTreeSet<_> = manifests
+        .iter()
+        .filter_map(|manifest| manifest["entries"].as_object())
+        .flat_map(|entries| entries.keys())
+        .collect();
     let mut rows = Vec::new();
     let mut invalid = Vec::new();
-    for path in shared::criterion_estimate_paths(&directory) {
-        let Some(name) = shared::benchmark_name_from_estimate_path(&directory, &path) else {
-            continue;
-        };
-        let key = shared::benchmark_key(&name);
+    // The manifest is the inventory, not old Criterion directories. Missing or corrupt
+    // listed entries still fail; unlisted leftovers cannot poison a complete new run.
+    for name in names {
+        let key = shared::benchmark_key(name);
         let Some(meta) = metadata.get(key).filter(|meta| include(meta)) else {
             continue;
         };
-        let row = match read_estimates(root, &path, &name, suites) {
-            Ok(estimates) => build(&name, key, meta, &estimates),
+        let estimates = paths
+            .get(name)
+            .context("manifest-listed Criterion measurement is missing")
+            .and_then(|path| read_estimates(path, name, &manifests));
+        let row = match estimates {
+            Ok(estimates) => build(name, key, meta, &estimates),
             Err(error) => {
                 invalid.push(format!("{name}: {error}"));
                 json!({"name": name, "benchmark_key": key,
@@ -213,13 +246,9 @@ fn record_run(root: &Path, suites: &[&str], started: f64, context: Value) -> Res
     Ok(())
 }
 
-fn read_estimates(root: &Path, path: &Path, name: &str, suites: &[&str]) -> Result<Value> {
-    let bytes = std::fs::read(path)?;
-    let mut estimates: Value = serde_json::from_slice(&bytes).context("invalid Criterion JSON")?;
-    validate_estimates(&estimates)?;
-    let current = provenance::context(root);
-    let directory = criterion_dir(root);
-    let measured_at = suites
+fn load_manifests(directory: &Path, suites: &[&str], current: &Value) -> Vec<Value> {
+    let now = provenance::timestamp();
+    suites
         .iter()
         .filter_map(|suite| {
             let shared::JsonRead::Loaded(manifest) =
@@ -228,10 +257,23 @@ fn read_estimates(root: &Path, path: &Path, name: &str, suites: &[&str]) -> Resu
                 return None;
             };
             let finished = manifest["finished_at"].as_f64()?;
-            (manifest["context"] == current
-                && (0.0..=86400.0).contains(&(provenance::timestamp() - finished))
-                && manifest["entries"][name] == provenance::fingerprint(&bytes))
-            .then_some(finished)
+            (manifest["context"] == *current && (0.0..=86400.0).contains(&(now - finished)))
+                .then_some(manifest)
+        })
+        .collect()
+}
+
+fn read_estimates(path: &Path, name: &str, manifests: &[Value]) -> Result<Value> {
+    let bytes = std::fs::read(path)?;
+    let mut estimates: Value = serde_json::from_slice(&bytes).context("invalid Criterion JSON")?;
+    validate_estimates(&estimates)?;
+    let fingerprint = provenance::fingerprint(&bytes);
+    let measured_at = manifests
+        .iter()
+        .filter_map(|manifest| {
+            (manifest["entries"][name] == fingerprint)
+                .then(|| manifest["finished_at"].as_f64())
+                .flatten()
         })
         .max_by(f64::total_cmp)
         .context(format!("unverified or stale Criterion measurement: {name}"))?;
@@ -278,9 +320,59 @@ fn annotate_budget(row: &mut Value, estimates: &Value, threshold: Option<f64>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{annotate_budget, read_estimates, record_run, validate_estimates};
+    use super::{annotate_budget, record_run, validate_estimates};
     use crate::provenance;
     use serde_json::json;
+
+    fn read_estimates(
+        root: &std::path::Path,
+        path: &std::path::Path,
+        name: &str,
+        suites: &[&str],
+    ) -> anyhow::Result<serde_json::Value> {
+        let manifests = super::load_manifests(
+            &super::criterion_dir(root),
+            suites,
+            &provenance::context(root),
+        );
+        super::read_estimates(path, name, &manifests)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn benchmark_manifest_uses_post_command_context() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        assert!(crate::shared::run_command(root.path(), &["git", "init"])?
+            .status
+            .success());
+        std::fs::write(root.path().join(".gitignore"), "target/\n")?;
+        std::fs::write(root.path().join("Cargo.lock"), "before")?;
+        std::fs::create_dir(root.path().join("benches"))?;
+        std::fs::write(
+            root.path().join("benches/measurement_manifest.json"),
+            json!({"suites":{"fixture":{"custom":[32]}}}).to_string(),
+        )?;
+        let directory = super::criterion_dir(root.path());
+        let path = directory.join("custom/32/new/estimates.json");
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        let script = format!("printf after > Cargo.lock; printf '%s' '{{\"mean\":{{\"point_estimate\":10}},\"median\":{{\"point_estimate\":10}},\"std_dev\":{{\"point_estimate\":0}}}}' > '{}'", path.display());
+        let before = provenance::context(root.path());
+        let failure = provenance::with_run_snapshot(root.path(), || {
+            super::run_benchmarks(
+                root.path(),
+                false,
+                &["sh", "-c", &script, "--bench", "fixture"],
+                "fixture benchmark",
+            )
+        });
+        assert_eq!(failure, None);
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(directory.join("splens-fixture.json"))?)?;
+        assert_ne!(manifest["context"], before);
+        assert_eq!(manifest["context"], provenance::context(root.path()));
+        assert!(read_estimates(root.path(), &path, "custom/32", &["fixture"]).is_ok());
+        Ok(())
+    }
 
     #[test]
     fn estimate_and_budget_boundaries_preserve_uncertainty() {
@@ -361,7 +453,40 @@ mod tests {
             .is_number());
         let manifest_path = directory.join("splens-fixture.json");
         let original = std::fs::read(&manifest_path)?;
-        std::fs::copy(&manifest_path, directory.join("splens-search_speed.json"))?;
+        // A removed/renamed parameter must not poison the new run; listed files must.
+        let obsolete = directory.join("custom/64/new");
+        std::fs::create_dir_all(&obsolete)?;
+        std::fs::write(obsolete.join("estimates.json"), "{obsolete corrupt output")?;
+        let collect = || {
+            super::collect_benchmarks(
+                root.path(),
+                &suites,
+                |_| true,
+                |name, _, _, _| json!({"name":name}),
+            )
+        };
+        let (rows, errors) = collect();
+        assert_eq!(rows, vec![json!({"name":"custom/32"})]);
+        assert!(errors.is_empty());
+        let measured = std::fs::read(&path)?;
+        std::fs::remove_file(&path)?;
+        let (rows, errors) = collect();
+        assert_eq!(rows[0]["measurement_status"], "invalid");
+        assert_eq!(errors.len(), 1);
+        std::fs::write(&path, measured)?;
+        let (_, missing_suite) = super::collect_benchmarks(
+            root.path(),
+            &["fixture", "absent"],
+            |_| true,
+            |_, _, _, _| json!({}),
+        );
+        assert_eq!(missing_suite.len(), 1);
+        for suite in ["search_speed", "frame_budget", "promise_latency"] {
+            std::fs::copy(
+                &manifest_path,
+                directory.join(format!("splens-{suite}.json")),
+            )?;
+        }
         let config = crate::config::LensConfig {
             project_name: "fixture".into(),
             project_root: root.path().into(),
@@ -398,6 +523,9 @@ mod tests {
         changed.push(b' '); // Still valid JSON, but no longer the recorded content.
         std::fs::write(&path, changed)?;
         assert!(read_estimates(root.path(), &path, "custom/32", &suites).is_err());
+        assert_eq!(collect().1.len(), 1);
+        std::fs::write(&path, "{truncated")?;
+        assert_eq!(collect().0[0]["measurement_status"], "invalid");
         Ok(())
     }
 }

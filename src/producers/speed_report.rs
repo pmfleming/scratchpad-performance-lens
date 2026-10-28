@@ -1,4 +1,4 @@
-use super::common::{budget_probe_ms, read_analysis, scenarios_array, values_array};
+use super::common::{budget_probe_ms, scenarios_array, values_array, AnalysisInputs};
 use super::render::render_speed_report;
 use crate::cli::MeasureOptions;
 use crate::config::LensConfig;
@@ -7,17 +7,14 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
-    let slowspots = read_analysis(config, "slowspots.json", json!([]));
-    let search = read_analysis(config, "search_speed.json", json!([]));
-    let workflows = read_analysis(
-        config,
-        "search_workflow_metrics.json",
-        json!({"scenarios": []}),
-    );
-    let flamegraphs = read_analysis(config, "flamegraphs.json", json!([]));
-    let capacity = read_analysis(config, "capacity_report.json", json!({"scenarios": []}));
-    let resources = read_analysis(config, "resource_profiles.json", json!({"scenarios": []}));
-    let frame_metrics = read_analysis(config, "frame_metrics.json", json!({"scenarios": []}));
+    let inputs = AnalysisInputs::new(config);
+    let slowspots = inputs.read("slowspots.json", json!([]));
+    let search = inputs.read("search_speed.json", json!([]));
+    let workflows = inputs.read("search_workflow_metrics.json", json!({"scenarios": []}));
+    let flamegraphs = inputs.read("flamegraphs.json", json!([]));
+    let capacity = inputs.read("capacity_report.json", json!({"scenarios": []}));
+    let resources = inputs.read("resource_profiles.json", json!({"scenarios": []}));
+    let frame_metrics = inputs.read("frame_metrics.json", json!({"scenarios": []}));
 
     let capacity_lookup = scenarios_array(&capacity)
         .iter()
@@ -95,7 +92,6 @@ pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) ->
     let flamegraph_rows = flamegraph_coverage_rows(values_array(&flamegraphs), &latency_rows);
     let triage = build_triage(&latency_rows, &capacity_rows);
     let resource_rows = scenarios_array(&resources);
-    let context = crate::provenance::context(&config.project_root);
     let source_status: Vec<_> = [
         "slowspots.json",
         "search_speed.json",
@@ -108,7 +104,7 @@ pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) ->
     .into_iter()
     .map(|file| {
         json!({"file":file,"required":file != "flamegraphs.json",
-                "status":crate::provenance::validity(&config.output_dir.join(file), &context)})
+                "status":crate::provenance::validity(&config.output_dir.join(file), &inputs.context)})
     })
     .collect();
     let complete_sources = source_status

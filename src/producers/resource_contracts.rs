@@ -110,6 +110,18 @@ pub(super) fn gap_evidence(scenario: &str, events: &[Value], synthetic: bool) ->
         "closed":missing.is_empty(), "minimum_workload":minimum,"required_metrics":fields,"missing_evidence":missing})
 }
 
+// Resource probes prove completed work and measurement completeness, not a latency budget.
+// Latency budgets are evaluated separately from authoritative benchmark evidence.
+pub(super) fn demonstrated_workload(scenario: &str, samples: &[Value]) -> Option<i64> {
+    samples
+        .iter()
+        .filter(|sample| {
+            gap_evidence(scenario, std::slice::from_ref(sample), false)["closed"] == true
+        })
+        .filter_map(|sample| sample["workload_value"].as_i64())
+        .max()
+}
+
 fn sample_requirements<'a>(event: &Value, fields: &'a [&str]) -> Vec<&'a str> {
     let mut missing = Vec::new();
     if event["status"] != "ok" {

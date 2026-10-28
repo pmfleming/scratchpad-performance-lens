@@ -2,6 +2,7 @@
 use crate::{config::LensConfig, shared};
 use anyhow::Result;
 use serde_json::{json, Value};
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -44,7 +45,49 @@ fn executable_fingerprint() -> Option<&'static str> {
     .as_deref()
 }
 
+struct RunSnapshot {
+    root: PathBuf,
+    value: Option<Value>,
+}
+
+thread_local! {
+    // Producers execute synchronously. A scoped cache avoids process-global stale
+    // contexts and keeps concurrent tests/projects isolated.
+    static RUN_SNAPSHOT: RefCell<Option<RunSnapshot>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn with_run_snapshot<T>(root: &Path, run: impl FnOnce() -> T) -> T {
+    struct Restore(Option<RunSnapshot>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            RUN_SNAPSHOT.with(|slot| {
+                slot.replace(self.0.take());
+            });
+        }
+    }
+    let _restore = Restore(RUN_SNAPSHOT.with(|slot| {
+        slot.replace(Some(RunSnapshot {
+            root: root.to_owned(),
+            value: None,
+        }))
+    }));
+    run()
+}
+
 pub fn context(root: &Path) -> Value {
+    RUN_SNAPSHOT.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        match slot.as_mut().filter(|snapshot| snapshot.root == root) {
+            Some(snapshot) => snapshot
+                .value
+                .get_or_insert_with(|| compute_context(root))
+                .clone(),
+            None => compute_context(root),
+        }
+    })
+}
+
+fn compute_context(root: &Path) -> Value {
     let files = Command::new("git")
         .args(["ls-files", "-c", "-o", "--exclude-standard", "-z"])
         .current_dir(root)
@@ -152,6 +195,34 @@ mod tests {
     use super::{record, timestamp, validity};
     use crate::config::LensConfig;
     use serde_json::json;
+    #[test]
+    fn snapshots_are_lazy_scoped_and_project_specific() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let other = tempfile::tempdir()?;
+        assert!(crate::shared::run_command(root.path(), &["git", "init"])?
+            .status
+            .success());
+        let path = root.path().join("Cargo.lock");
+        let before = super::with_run_snapshot(root.path(), || -> anyhow::Result<_> {
+            super::RUN_SNAPSHOT
+                .with(|slot| assert!(slot.borrow().as_ref().unwrap().value.is_none()));
+            std::fs::write(&path, "created by build")?;
+            let captured = super::context(root.path());
+            assert_eq!(captured, super::context(root.path()));
+            std::fs::write(&path, "changed after snapshot")?;
+            assert_eq!(captured, super::context(root.path()));
+            assert_ne!(captured, super::context(other.path()));
+            super::with_run_snapshot(other.path(), || {
+                assert_ne!(captured, super::context(other.path()))
+            });
+            assert_eq!(captured, super::context(root.path()));
+            Ok(captured)
+        })?;
+        assert_ne!(before, super::context(root.path()));
+        super::RUN_SNAPSHOT.with(|slot| assert!(slot.borrow().is_none()));
+        Ok(())
+    }
+
     #[test]
     fn validity_requires_success_matching_context_and_unchanged_content() {
         let dir = tempfile::tempdir().unwrap();

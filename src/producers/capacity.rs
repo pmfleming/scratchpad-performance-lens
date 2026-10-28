@@ -344,8 +344,8 @@ fn capacity_scenario_summary(scenario: String, events: Vec<Value>) -> Value {
         .filter_map(|event| {
             event
                 .get("peak_working_set_bytes")
-                .or_else(|| event.get("working_set_bytes"))
                 .and_then(Value::as_i64)
+                .or_else(|| event.get("working_set_bytes").and_then(Value::as_i64))
         })
         .max();
     let scenario_label = first
@@ -510,9 +510,11 @@ mod tests {
             (3, "ok", 10, "not_reached", Some(false)),
         ] {
             let events = (0..count).map(|repeat_index| json!({"scenario":"tab_count_ceiling", "step_index":0,
-                "repeat_index":repeat_index,"workload_value":10000,"elapsed_ns":elapsed,"status":status})).collect();
+                "repeat_index":repeat_index,"workload_value":10000,"elapsed_ns":elapsed,"status":status,"working_set_bytes":123})).collect();
             let payload = summarize_capacity(events, "completed");
             let row = &payload["scenarios"][0];
+            assert!(row["samples"][0]["peak_working_set_bytes"].is_null());
+            assert_eq!(row["peak_working_set_bytes"], 123);
             assert_eq!(row["failure_mode"], mode);
             assert_eq!(row["ceiling_reached"], json!(reached));
             assert_eq!(

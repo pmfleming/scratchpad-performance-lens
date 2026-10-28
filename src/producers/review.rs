@@ -5,7 +5,7 @@ mod registry;
 #[cfg(test)]
 mod scale_tests;
 
-use super::common::{read_analysis, scenarios_array, valid_frame, values_array};
+use super::common::{scenarios_array, valid_frame, values_array, AnalysisInputs};
 use super::flamegraphs::fallback_flamegraphs;
 use super::render::render_performance_review;
 use crate::artifacts::capacity_report::{CapacityReportArtifact, CapacityScenario};
@@ -17,7 +17,7 @@ use crate::artifacts::performance_review::{
 use crate::cli::MeasureOptions;
 use crate::config::LensConfig;
 use crate::shared;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use evidence::{
     mean_ms, over_budget_latency, payload_synthetic, resource_contract_failed, review_row_matches,
     source_status, unique_rows,
@@ -26,28 +26,22 @@ use health::{promise_health, scale_checks, scenario_gaps, scenario_opportunities
 use registry::{probe_classes, promised_scale_payload, review_scenarios, ReviewScenario};
 use serde_json::{json, Value};
 pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
-    let slowspots = read_analysis(config, "slowspots.json", json!([]));
-    let search = read_analysis(config, "search_speed.json", json!([]));
-    let capacity = serde_json::from_value::<CapacityReportArtifact>(read_analysis(
-        config,
+    let inputs = AnalysisInputs::new(config);
+    let slowspots = inputs.read("slowspots.json", json!([]));
+    let search = inputs.read("search_speed.json", json!([]));
+    let capacity = serde_json::from_value::<CapacityReportArtifact>(inputs.read(
         "capacity_report.json",
-        json!({"scenarios": []}),
+        serde_json::to_value(CapacityReportArtifact::default())?,
     ))
-    .unwrap_or_default();
-    let resources = read_analysis(config, "resource_profiles.json", json!({"scenarios": []}));
-    let flamegraphs = read_analysis(
-        config,
+    .context("capacity_report.json has an incompatible capacity schema")?;
+    let resources = inputs.read("resource_profiles.json", json!({"scenarios": []}));
+    let flamegraphs = inputs.read(
         "flamegraphs.json",
         fallback_flamegraphs(&config.output_dir.join("flamegraphs")),
     );
-    let speed_report = read_analysis(config, "speed_efficiency_report.json", json!({}));
-
-    let frame_metrics = read_analysis(config, "frame_metrics.json", json!({"scenarios": []}));
-    let workflows = read_analysis(
-        config,
-        "search_workflow_metrics.json",
-        json!({"scenarios": []}),
-    );
+    let speed_report = inputs.read("speed_efficiency_report.json", json!({}));
+    let frame_metrics = inputs.read("frame_metrics.json", json!({"scenarios": []}));
+    let workflows = inputs.read("search_workflow_metrics.json", json!({"scenarios": []}));
     let latency_rows = unique_rows(
         values_array(&slowspots)
             .iter()
@@ -101,7 +95,7 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
     let artifact = PerformanceReviewArtifact {
         meta: PerformanceReviewMeta {
             generated_from: "rust:performance_review".to_string(),
-            source_artifacts: source_status(config),
+            source_artifacts: source_status(config, &inputs.context),
             scenario_model: "scenario-first performance coverage".to_string(),
             probe_classes: probe_classes(),
         },
@@ -377,8 +371,8 @@ fn build_review_scenario(
             .filter_map(|row| row.peak_working_set_bytes)
             .chain(resource_rows.iter().filter_map(|row| {
                 row.get("peak_working_set_bytes")
-                    .or_else(|| row.get("max_working_set_bytes"))
                     .and_then(Value::as_i64)
+                    .or_else(|| row.get("max_working_set_bytes").and_then(Value::as_i64))
             }))
             .max(),
         evidence: ScenarioEvidence {
@@ -401,6 +395,38 @@ mod tests {
     };
     use crate::shared;
     use serde_json::json;
+
+    #[test]
+    fn fresh_but_incompatible_capacity_is_not_silently_missing() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let config = crate::config::LensConfig {
+            project_name: "fixture".into(),
+            project_root: root.path().into(),
+            output_dir: root.path().into(),
+        };
+        let path = root.path().join("capacity_report.json");
+        std::fs::write(&path, r#"{"scenarios":[{"scenario":"tab_count_ceiling"}]}"#)?;
+        crate::provenance::record(
+            &config,
+            "capacity_report.json",
+            0.0,
+            &crate::provenance::context(root.path()),
+            true,
+        )?;
+        let options = crate::cli::MeasureOptions {
+            skip_bench: true,
+            fail_on_slow: false,
+            index_only: false,
+        };
+        let error = super::performance_review(&config, options).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("capacity_report.json has an incompatible capacity schema"));
+        assert!(!root.path().join("performance_review.json").exists());
+        std::fs::remove_file(path)?;
+        super::performance_review(&config, options)?;
+        Ok(())
+    }
 
     #[test]
     fn either_frame_tail_budget_changes_promise_health_and_keeps_scope() {
