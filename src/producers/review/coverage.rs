@@ -6,7 +6,7 @@ use serde_json::Value;
 
 pub(super) fn valid_latency(row: &Value) -> bool {
     if row["evidence_kind"] == "frame" {
-        return super::frames::valid_frame(row);
+        return super::super::common::valid_frame(row);
     }
     let measured = super::super::common::budget_probe_ms(row);
     measured.is_some_and(|value| value.is_finite() && value > 0.0)
@@ -114,7 +114,7 @@ pub(super) fn axes(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{coverage_axis, valid_latency, valid_resource};
     use serde_json::json;
     #[test]
     fn required_operations_cannot_be_satisfied_by_a_sibling_or_unbudgeted_row() {

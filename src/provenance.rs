@@ -33,7 +33,7 @@ fn command(root: &Path, program: &str, args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
-fn executable_fingerprint() -> &'static Option<String> {
+fn executable_fingerprint() -> Option<&'static str> {
     static HASH: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     HASH.get_or_init(|| {
         std::env::current_exe()
@@ -41,6 +41,7 @@ fn executable_fingerprint() -> &'static Option<String> {
             .and_then(|path| std::fs::read(path).ok())
             .map(|bytes| fingerprint(&bytes))
     })
+    .as_deref()
 }
 
 pub fn context(root: &Path) -> Value {
@@ -148,7 +149,9 @@ pub fn validity(path: &Path, current_context: &Value) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{record, timestamp, validity};
+    use crate::config::LensConfig;
+    use serde_json::json;
     #[test]
     fn validity_requires_success_matching_context_and_unchanged_content() {
         let dir = tempfile::tempdir().unwrap();

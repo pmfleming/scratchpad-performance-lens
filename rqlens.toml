@@ -1,0 +1,12 @@
+project_name = "scratchpad-performance-lens"
+project_root = "."
+output_dir = "target/quality-review/current"
+fingerprint_inputs = ["metadata"]
+
+[rust]
+identity_resolution = "auto"
+
+[verification]
+workspace = true
+all_targets = true
+locked = true

@@ -97,47 +97,12 @@ pub(super) fn gap_evidence(scenario: &str, events: &[Value], synthetic: bool) ->
         missing.push(format!("workload_at_least_{minimum}"));
     }
     for event in events {
-        if event["status"] != "ok" {
-            missing.push("successful_samples".into());
-        }
-        if event["elapsed_ns"].as_u64().is_none_or(|value| value == 0) {
-            missing.push("elapsed_ns".into());
-        }
-        if !matches!(
-            event["measurement_scope"].as_str(),
-            Some("prepared_operation" | "scenario_including_fixture_work")
-        ) {
-            missing.push("measurement_scope".into());
-        }
-        for field in fields {
-            let value = event[*field]
-                .as_f64()
-                .or_else(|| event["phase_elapsed_ns"][*field].as_f64())
-                .or_else(|| event["process_resources"][*field].as_f64())
-                .or_else(|| event["workload_details"][*field].as_f64());
-            if value.is_none_or(|value| value < 0.0 || (field.ends_with("_ns") && value == 0.0)) {
-                missing.push((*field).to_owned());
-            }
-        }
-        if scenario == "large_dirty_buffer_save" {
-            let details = &event["workload_details"];
-            if details["history_payload_bytes"].as_i64().unwrap_or(0) < 15 * shared::MB
-                || details["history_entries"].as_u64().unwrap_or(0) < 1024
-                || details["inserted_bytes"] != 1
-                || details["synchronous"] != "FULL"
-                || event["measurement_scope"] != "prepared_operation"
-            {
-                missing.push("prepared_single_character_save_with_full_history".into());
-            }
-        }
-        if scenario == "file_backed_chunk_cache_tracking"
-            && event["retained_file_chunks"]
-                .as_u64()
-                .zip(event["file_chunk_cache_limit"].as_u64())
-                .is_some_and(|(retained, limit)| retained > limit)
-        {
-            missing.push("cache_bound_compliance".into());
-        }
+        missing.extend(
+            sample_requirements(event, fields)
+                .into_iter()
+                .map(str::to_owned),
+        );
+        missing.extend(scenario_requirement(scenario, event).map(str::to_owned));
     }
     missing.sort();
     missing.dedup();
@@ -145,9 +110,64 @@ pub(super) fn gap_evidence(scenario: &str, events: &[Value], synthetic: bool) ->
         "closed":missing.is_empty(), "minimum_workload":minimum,"required_metrics":fields,"missing_evidence":missing})
 }
 
+fn sample_requirements<'a>(event: &Value, fields: &'a [&str]) -> Vec<&'a str> {
+    let mut missing = Vec::new();
+    if event["status"] != "ok" {
+        missing.push("successful_samples");
+    }
+    if event["elapsed_ns"].as_u64().is_none_or(|value| value == 0) {
+        missing.push("elapsed_ns");
+    }
+    if !matches!(
+        event["measurement_scope"].as_str(),
+        Some("prepared_operation" | "scenario_including_fixture_work")
+    ) {
+        missing.push("measurement_scope");
+    }
+    missing.extend(fields.iter().copied().filter(|field| {
+        let value = [
+            event,
+            &event["phase_elapsed_ns"],
+            &event["process_resources"],
+            &event["workload_details"],
+        ]
+        .into_iter()
+        .find_map(|source| source[*field].as_f64());
+        value.is_none_or(|value| value < 0.0 || (field.ends_with("_ns") && value == 0.0))
+    }));
+    missing
+}
+
+fn scenario_requirement(scenario: &str, event: &Value) -> Option<&'static str> {
+    match scenario {
+        "large_dirty_buffer_save" if !full_history_save(event) => {
+            Some("prepared_single_character_save_with_full_history")
+        }
+        "file_backed_chunk_cache_tracking" if cache_bound_held(event) == Some(false) => {
+            Some("cache_bound_compliance")
+        }
+        _ => None,
+    }
+}
+
+fn full_history_save(event: &Value) -> bool {
+    let details = &event["workload_details"];
+    details["history_payload_bytes"].as_i64().unwrap_or(0) >= 15 * shared::MB
+        && details["history_entries"].as_u64().unwrap_or(0) >= 1024
+        && details["inserted_bytes"] == 1
+        && details["synchronous"] == "FULL"
+        && event["measurement_scope"] == "prepared_operation"
+}
+
+pub(super) fn cache_bound_held(event: &Value) -> Option<bool> {
+    Some(event["retained_file_chunks"].as_i64()? <= event["file_chunk_cache_limit"].as_i64()?)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{expected_scenarios, gap_evidence};
+    use crate::shared;
+    use serde_json::{json, Value};
     #[test]
     fn resource_expectations_come_from_project_owned_declarations() {
         let root = tempfile::tempdir().unwrap();

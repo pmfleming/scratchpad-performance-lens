@@ -184,8 +184,9 @@ pub fn run_command(project_root: &Path, args: &[&str]) -> Result<std::process::O
 
 pub fn run_progress_command(project_root: &Path, args: &[&str], label: &str) -> Result<()> {
     eprintln!("{label}");
-    let status = Command::new(args[0])
-        .args(&args[1..])
+    let (program, rest) = args.split_first().context("empty command")?;
+    let status = Command::new(program)
+        .args(rest)
         .current_dir(project_root)
         .stdin(Stdio::null())
         .status()
@@ -246,12 +247,11 @@ pub fn human_bytes(value: Option<i64>) -> String {
     }
 }
 
-#[cfg(test)]
-pub fn workload_label(value: i64, unit: &str) -> String {
-    if unit == "bytes" {
-        human_bytes(Some(value))
-    } else {
-        format!("{value} {unit}")
+pub fn capitalize(value: &str) -> String {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+        None => String::new(),
     }
 }
 
@@ -340,69 +340,45 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn builtin_metadata_thresholds_are_not_authoritative() {
-        let dir = tempfile::tempdir().unwrap();
+    fn only_repository_thresholds_are_authoritative_and_metadata_defaults_survive(
+    ) -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
         let metadata = load_benchmark_metadata(dir.path());
-        let file_load = metadata.get("file_load").unwrap();
-        assert_eq!(file_load["metadata_source"], json!("builtin_fallback"));
-        assert_eq!(file_load["threshold_authoritative"], json!(false));
-        assert_eq!(file_load["stale_budget_risk"], json!(true));
-        assert_eq!(authoritative_threshold_ms(file_load), None);
-    }
-
-    #[test]
-    fn repository_metadata_thresholds_are_authoritative() {
-        let dir = tempfile::tempdir().unwrap();
+        let fallback = &metadata["file_load"];
+        assert_eq!(fallback["metadata_source"], "builtin_fallback");
+        assert_eq!(fallback["stale_budget_risk"], true);
+        assert_eq!(authoritative_threshold_ms(fallback), None);
         let benches = dir.path().join("benches");
-        std::fs::create_dir_all(&benches).unwrap();
-        std::fs::write(
-            benches.join("search_benchmark_targets.json"),
-            r#"{
-                "search_current_files_completion": {
-                    "threshold_ms": 80.0,
-                    "workload_family": "search",
-                    "targets": ["src/app/services/search.rs"]
-                }
-            }"#,
-        )
-        .unwrap();
-
-        let metadata = load_benchmark_metadata(dir.path());
-        let row = metadata.get("search_current_files_completion").unwrap();
-        assert_eq!(
-            row["metadata_source"],
-            json!("benches/search_benchmark_targets.json")
-        );
-        assert_eq!(row["threshold_authoritative"], json!(true));
-        assert_eq!(row["stale_budget_risk"], json!(false));
-        assert_eq!(authoritative_threshold_ms(row), Some(80.0));
-    }
-
-    #[test]
-    fn repository_metadata_without_threshold_is_not_budget_authoritative() {
-        let dir = tempfile::tempdir().unwrap();
-        let benches = dir.path().join("benches");
-        std::fs::create_dir_all(&benches).unwrap();
-        std::fs::write(
-            benches.join("search_benchmark_targets.json"),
-            r#"{
-                "search_without_budget": {
-                    "workload_family": "search",
-                    "targets": ["src/app/services/search.rs"]
-                }
-            }"#,
-        )
-        .unwrap();
-
-        let metadata = load_benchmark_metadata(dir.path());
-        let row = metadata.get("search_without_budget").unwrap();
-        assert_eq!(
-            row["metadata_source"],
-            json!("benches/search_benchmark_targets.json")
-        );
-        assert_eq!(row["threshold_source"], json!("missing"));
-        assert_eq!(row["threshold_authoritative"], json!(false));
-        assert_eq!(row["stale_budget_risk"], json!(true));
-        assert_eq!(authoritative_threshold_ms(row), None);
+        std::fs::create_dir(&benches)?;
+        for file in ["benchmark_targets.json", "search_benchmark_targets.json"] {
+            let source = format!("benches/{file}");
+            std::fs::write(
+                benches.join(file),
+                json!({
+                    "with_budget":{"threshold_ms":80,"family":"custom"},
+                    "without_budget":{},"invalid":null,
+                })
+                .to_string(),
+            )?;
+            let metadata = load_benchmark_metadata(dir.path());
+            for (key, threshold) in [("with_budget", Some(80.0)), ("without_budget", None)] {
+                let row = &metadata[key];
+                assert_eq!(row["metadata_source"], source);
+                assert_eq!(
+                    row["threshold_source"],
+                    if threshold.is_some() {
+                        &source
+                    } else {
+                        "missing"
+                    }
+                );
+                assert_eq!(row["stale_budget_risk"], threshold.is_none());
+                assert_eq!(authoritative_threshold_ms(row), threshold);
+                assert_eq!(row["targets"], json!([]));
+            }
+            assert_eq!(metadata["with_budget"]["workload_family"], "custom");
+            assert!(!metadata.contains_key("invalid"));
+        }
+        Ok(())
     }
 }

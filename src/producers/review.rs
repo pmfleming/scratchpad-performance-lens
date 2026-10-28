@@ -1,12 +1,11 @@
 mod coverage;
 mod evidence;
-pub(super) mod frames;
 mod health;
 mod registry;
 #[cfg(test)]
 mod scale_tests;
 
-use super::common::{array_value, read_analysis, scenarios_array};
+use super::common::{read_analysis, scenarios_array, valid_frame, values_array};
 use super::flamegraphs::fallback_flamegraphs;
 use super::render::render_performance_review;
 use crate::artifacts::capacity_report::{CapacityReportArtifact, CapacityScenario};
@@ -50,16 +49,16 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
         json!({"scenarios": []}),
     );
     let latency_rows = unique_rows(
-        [
-            array_value(&slowspots),
-            array_value(&search),
-            frames::frame_rows(&frame_metrics),
-            scenarios_array(&workflows).to_vec(),
-        ]
-        .concat(),
+        values_array(&slowspots)
+            .iter()
+            .chain(values_array(&search))
+            .chain(scenarios_array(&workflows))
+            .cloned()
+            .chain(frame_rows(&frame_metrics))
+            .collect(),
     );
     let capacity_rows = capacity.scenarios;
-    let resource_rows = scenarios_array(&resources).to_vec();
+    let resource_rows = scenarios_array(&resources);
     let capacity_synthetic = capacity.meta.synthetic;
     let resources_synthetic = payload_synthetic(&resources);
     let scenarios = review_scenarios();
@@ -70,8 +69,8 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
                 scenario,
                 &latency_rows,
                 &capacity_rows,
-                &resource_rows,
-                array_value(&flamegraphs),
+                resource_rows,
+                values_array(&flamegraphs),
                 capacity_synthetic,
                 resources_synthetic,
             )
@@ -128,7 +127,7 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
             latency_rows: latency_rows.len(),
             capacity_rows: capacity_rows.len(),
             resource_rows: resource_rows.len(),
-            flamegraph_rows: array_value(&flamegraphs).len(),
+            flamegraph_rows: values_array(&flamegraphs).len(),
             promise_health: PromiseHealthSummary {
                 pass: scenario_payload
                     .iter()
@@ -176,12 +175,44 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
         render_performance_review(&payload),
     )
 }
+// Only this report needs presentation aliases for raw frame evidence.
+fn frame_rows(payload: &Value) -> Vec<Value> {
+    scenarios_array(payload)
+        .iter()
+        .cloned()
+        .map(|mut row| {
+            let id = row["scenario_id"].as_str().unwrap_or("").to_owned();
+            let key = shared::benchmark_key(&id);
+            row["name"] = json!(id);
+            row["benchmark_key"] = json!(key);
+            row["evidence_kind"] = json!("frame");
+            row["threshold_ms"] = row["budget_ms"].clone();
+            row["threshold_authoritative"] = json!(true);
+            row["measurement_status"] = json!(if valid_frame(&row) {
+                "valid"
+            } else {
+                "invalid"
+            });
+            // Wheel-scroll is not the same family as component scroll benchmarks.
+            if matches!(
+                key,
+                "ui_render_frame_120hz"
+                    | "editor_scroll_frame_120hz"
+                    | "editor_scroll_event_to_tessellation"
+            ) {
+                row["promise_scenarios"] = json!(["large_files"]);
+            }
+            row
+        })
+        .collect()
+}
+
 fn build_review_scenario(
     scenario: &ReviewScenario,
     latency: &[Value],
     capacity: &[CapacityScenario],
     resources: &[Value],
-    flamegraphs: Vec<Value>,
+    flamegraphs: &[Value],
     capacity_synthetic: bool,
     resources_synthetic: bool,
 ) -> PerformanceReviewScenario {
@@ -205,12 +236,13 @@ fn build_review_scenario(
         .cloned()
         .collect();
     let profile_rows: Vec<_> = flamegraphs
-        .into_iter()
+        .iter()
         .filter(|row| {
             row.get("id")
                 .and_then(Value::as_str)
                 .is_some_and(|id| scenario.profile_ids.contains(&id))
         })
+        .cloned()
         .collect();
     let axes = coverage::axes(
         scenario,
@@ -362,7 +394,7 @@ fn build_review_scenario(
 }
 #[cfg(test)]
 mod tests {
-    use super::{build_review_scenario, review_scenarios};
+    use super::{build_review_scenario, frame_rows, review_scenarios};
     use crate::artifacts::capacity_report::{CapacitySample, CapacityScenario};
     use crate::artifacts::performance_review::{
         CeilingStatus, CoverageStatus, PromiseHealth, ScaleCheckStatus,
@@ -390,6 +422,30 @@ mod tests {
     }
 
     #[test]
+    fn either_frame_tail_budget_changes_promise_health_and_keeps_scope() {
+        let scenario = review_scenarios()
+            .into_iter()
+            .find(|s| s.id == "large_files")
+            .unwrap();
+        for (p95, p99, missed) in [(7.0, 10.0, false), (9.0, 10.0, true), (7.0, 20.0, true)] {
+            let payload = json!({"scenarios":[{"scenario_id":"editor_scroll_event_to_tessellation/4194304",
+                "measurement_scope":"end_to_end_event_to_tessellation", "present_included":false,
+                "p95_ms":p95,"p99_ms":p99,"budget_ms":8.33,"p99_budget_ms":12,"frame_count":240}]});
+            let row = build_review_scenario(
+                &scenario,
+                &frame_rows(&payload),
+                &[],
+                &[],
+                &[],
+                false,
+                false,
+            );
+            assert_eq!(row.promise_health == PromiseHealth::Fail, missed);
+            assert_eq!(row.evidence.latency[0]["present_included"], false);
+        }
+    }
+
+    #[test]
     fn promise_health_fails_even_when_coverage_is_complete() {
         let scenario = review_scenarios()
             .into_iter()
@@ -412,7 +468,7 @@ mod tests {
                 "scenario": "large_utf8_load_peak_memory",
                 "samples": [{"workload_value": shared::GB}],
             })],
-            vec![json!({"id": "scroll_stress_profile", "available": true})],
+            &[json!({"id": "scroll_stress_profile", "available": true})],
             false,
             false,
         );
@@ -436,7 +492,7 @@ mod tests {
                 "samples": [{"workload_value": 10_000}],
             }))],
             &[],
-            vec![],
+            &[],
             true,
             false,
         );
@@ -469,7 +525,7 @@ mod tests {
                 "scenario": "many_file_resource_tracking",
                 "samples": [{"workload_value": 10_000}],
             })],
-            vec![json!({"id": "search_all_tabs_profile", "available": true})],
+            &[json!({"id": "search_all_tabs_profile", "available": true})],
             false,
             false,
         );
@@ -517,7 +573,7 @@ mod tests {
                 "scenario": "many_file_resource_tracking",
                 "samples": [{"workload_value": 10_000}],
             })],
-            vec![json!({"id": "search_all_tabs_profile", "available": true})],
+            &[json!({"id": "search_all_tabs_profile", "available": true})],
             false,
             false,
         );

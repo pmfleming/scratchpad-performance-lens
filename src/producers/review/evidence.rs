@@ -32,7 +32,7 @@ pub(super) fn over_budget_latency(row: &&Value) -> bool {
         return false;
     }
     if row["evidence_kind"] == "frame" {
-        return super::frames::over_budget(row);
+        return super::super::common::frame_over_budget(row);
     }
     if let Some(status) = row["budget_status"].as_str() {
         return status == "fail";

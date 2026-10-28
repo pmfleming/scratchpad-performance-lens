@@ -35,7 +35,7 @@ pub fn frame_metrics(config: &LensConfig, _options: MeasureOptions) -> Result<()
     annotate_frame_scenarios(&mut payload);
     if !payload["scenarios"]
         .as_array()
-        .is_some_and(|rows| !rows.is_empty() && rows.iter().all(super::review::frames::valid_frame))
+        .is_some_and(|rows| !rows.is_empty() && rows.iter().all(super::common::valid_frame))
     {
         payload["meta"]["probe_status"] = json!("failed");
         payload["meta"]["error"] =

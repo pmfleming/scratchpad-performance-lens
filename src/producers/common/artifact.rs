@@ -17,10 +17,6 @@ pub(in crate::producers) fn read_analysis(
     shared::read_json(&path).into_value_or(default)
 }
 
-pub(in crate::producers) fn array_value(value: &Value) -> Vec<Value> {
-    value.as_array().cloned().unwrap_or_default()
-}
-
 pub(in crate::producers) fn values_array(value: &Value) -> &[Value] {
     value.as_array().map(Vec::as_slice).unwrap_or(&[])
 }

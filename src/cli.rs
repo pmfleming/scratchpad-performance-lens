@@ -1,12 +1,5 @@
 use crate::app_package;
-use crate::artifacts::capacity_report::{
-    CapacityReportArtifact, SCHEMA_FILE as CAPACITY_REPORT_SCHEMA_FILE,
-    SCHEMA_ID as CAPACITY_REPORT_SCHEMA_ID,
-};
-use crate::artifacts::performance_review::{
-    PerformanceReviewArtifact, SCHEMA_FILE as PERFORMANCE_REVIEW_SCHEMA_FILE,
-    SCHEMA_ID as PERFORMANCE_REVIEW_SCHEMA_ID,
-};
+use crate::artifacts;
 use crate::config::LensConfig;
 use crate::producers;
 use anyhow::{bail, Result};
@@ -18,85 +11,69 @@ use std::path::PathBuf;
 type ProducerRun = fn(&LensConfig, MeasureOptions) -> Result<()>;
 
 const PRODUCERS: &[ProducerSpec] = &[
-    ProducerSpec::standard(
+    ProducerSpec::new(
         "slowspots",
         "slowspots.json",
         producers::slowspots,
         &["search_speed", "frame_budget", "promise_latency"],
-        true,
-        false,
     ),
-    ProducerSpec::standard(
+    ProducerSpec::new(
         "frame-metrics",
         "frame_metrics.json",
         producers::frame_metrics,
         &[],
-        false,
-        false,
     ),
-    ProducerSpec::standard(
+    ProducerSpec::new(
         "search",
         "search_speed.json",
         producers::search_speed,
         &["search_speed"],
-        true,
-        false,
     ),
-    ProducerSpec::standard(
+    ProducerSpec::new(
         "search-workflows",
         "search_workflow_metrics.json",
         producers::search_workflows,
         &[],
-        false,
-        false,
     ),
-    ProducerSpec::standard(
+    ProducerSpec::new(
         "capacity",
         "capacity_report.json",
         producers::capacity_report,
         &[],
-        false,
-        false,
     ),
-    ProducerSpec::standard(
+    ProducerSpec::new(
         "resources",
         "resource_profiles.json",
         producers::resource_profiles,
         &[],
-        false,
-        false,
     ),
-    ProducerSpec::extra(
-        "flamegraphs",
-        "flamegraphs.json",
-        producers::flamegraphs,
-        &[],
-        false,
-        true,
-    ),
-    ProducerSpec::standard(
+    ProducerSpec {
+        standard_run: false,
+        supports_index_only: true,
+        ..ProducerSpec::new(
+            "flamegraphs",
+            "flamegraphs.json",
+            producers::flamegraphs,
+            &[],
+        )
+    },
+    ProducerSpec::new(
         "speed-report",
         "speed_efficiency_report.json",
         producers::speed_efficiency_report,
         &[],
-        false,
-        false,
     ),
-    ProducerSpec::standard(
+    ProducerSpec::new(
         "performance-review",
         "performance_review.json",
         producers::performance_review,
         &[],
-        false,
-        false,
     ),
-    ProducerSpec::standard(
+    ProducerSpec::new(
         "project-code",
         "project_code_metrics.json",
         producers::project_code_metrics,
         &[],
-        false,
-        false,
     ),
 ];
 
@@ -107,18 +84,15 @@ struct ProducerSpec {
     run: ProducerRun,
     benchmarks: &'static [&'static str],
     standard_run: bool,
-    supports_fail_on_slow: bool,
     supports_index_only: bool,
 }
 
 impl ProducerSpec {
-    const fn standard(
+    const fn new(
         tool: &'static str,
         artifact: &'static str,
         run: ProducerRun,
         benchmarks: &'static [&'static str],
-        supports_fail_on_slow: bool,
-        supports_index_only: bool,
     ) -> Self {
         Self {
             tool,
@@ -126,27 +100,7 @@ impl ProducerSpec {
             run,
             benchmarks,
             standard_run: true,
-            supports_fail_on_slow,
-            supports_index_only,
-        }
-    }
-
-    const fn extra(
-        tool: &'static str,
-        artifact: &'static str,
-        run: ProducerRun,
-        benchmarks: &'static [&'static str],
-        supports_fail_on_slow: bool,
-        supports_index_only: bool,
-    ) -> Self {
-        Self {
-            tool,
-            artifact,
-            run,
-            benchmarks,
-            standard_run: false,
-            supports_fail_on_slow,
-            supports_index_only,
+            supports_index_only: false,
         }
     }
 }
@@ -278,46 +232,8 @@ fn telemetry(args: ConfigArgs) -> Result<()> {
 
 fn schema(args: SchemaArgs) -> Result<()> {
     match args.command {
-        SchemaCommand::Export(args) => export_schemas(args),
+        SchemaCommand::Export(args) => artifacts::export_schemas(&args.output),
     }
-}
-
-fn export_schemas(args: SchemaExportArgs) -> Result<()> {
-    std::fs::create_dir_all(&args.output)?;
-    let schemas = [
-        (
-            PERFORMANCE_REVIEW_SCHEMA_ID,
-            PERFORMANCE_REVIEW_SCHEMA_FILE,
-            "performance_review.json",
-            serde_json::to_value(schemars::schema_for!(PerformanceReviewArtifact))?,
-        ),
-        (
-            CAPACITY_REPORT_SCHEMA_ID,
-            CAPACITY_REPORT_SCHEMA_FILE,
-            "capacity_report.json",
-            serde_json::to_value(schemars::schema_for!(CapacityReportArtifact))?,
-        ),
-    ];
-    for (_, file, _, schema) in &schemas {
-        std::fs::write(
-            args.output.join(file),
-            format!("{}\n", serde_json::to_string_pretty(schema)?),
-        )?;
-    }
-    let index = json!({
-        "version": 1,
-        "schemas": schemas.iter().map(|(id, file, artifact, _)| json!({
-            "id": id,
-            "file": file,
-            "artifact": artifact,
-        })).collect::<Vec<_>>(),
-    });
-    std::fs::write(
-        args.output.join("index.json"),
-        format!("{}\n", serde_json::to_string_pretty(&index)?),
-    )?;
-    println!("Wrote schemas to {}", args.output.display());
-    Ok(())
 }
 
 fn measure(args: MeasureArgs) -> Result<()> {
@@ -396,7 +312,7 @@ fn validate_measure_options(selected: &[&ProducerSpec], options: MeasureOptions)
     if options.fail_on_slow
         && !selected
             .iter()
-            .any(|producer| producer.supports_fail_on_slow)
+            .any(|producer| !producer.benchmarks.is_empty())
     {
         bail!("--fail-on-slow only applies to slowspots and search");
     }
@@ -408,13 +324,7 @@ fn validate_measure_options(selected: &[&ProducerSpec], options: MeasureOptions)
 
 fn title_case(tool: &str) -> String {
     tool.split('-')
-        .map(|part| {
-            let mut chars = part.chars();
-            match chars.next() {
-                Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
-                None => String::new(),
-            }
-        })
+        .map(crate::shared::capitalize)
         .collect::<Vec<_>>()
         .join(" ")
 }

@@ -182,14 +182,6 @@ pub(in crate::producers) fn ns_per_kb(total_bytes: Option<i64>, mean_ns: f64) ->
     Some(mean_ns / (total_bytes as f64 / 1024.0))
 }
 
-pub(in crate::producers) fn capitalize(value: &str) -> String {
-    let mut chars = value.chars();
-    match chars.next() {
-        Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
-        None => String::new(),
-    }
-}
-
 pub(in crate::producers) fn over_threshold(row: &Value) -> bool {
     if let Some(status) = row["budget_status"].as_str() {
         return status == "fail";

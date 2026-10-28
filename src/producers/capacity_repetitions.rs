@@ -50,9 +50,8 @@ fn aggregate_step(repetitions: Vec<Value>) -> Value {
         .copied()
         .unwrap_or(first)
         .clone();
-    let successful_events: Vec<_> = successful.iter().map(|event| (*event).clone()).collect();
     for key in ["elapsed_ns", "setup_elapsed_ns", "background_completion_ns"] {
-        result[key] = median(&successful_events, key);
+        result[key] = median(&successful, key);
     }
     result["elapsed_min_ns"] = successful
         .first()
@@ -84,11 +83,11 @@ fn aggregate_step(repetitions: Vec<Value>) -> Value {
     result["successful_repetition_count"] = json!(successful.len());
     result["expected_repetition_count"] = json!(expected);
     result["statistical_claim"] = json!("successful-trial median; no population tail guarantee");
-    result["raw_repetitions"] = json!(repetitions);
+    result["raw_repetitions"] = Value::Array(repetitions);
     result
 }
 
-fn median(events: &[Value], key: &str) -> Value {
+fn median(events: &[&Value], key: &str) -> Value {
     let mut values: Vec<_> = events
         .iter()
         .filter_map(|event| event[key].as_u64())
@@ -107,7 +106,8 @@ fn median(events: &[Value], key: &str) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::aggregate;
+    use serde_json::{json, Value};
     fn sample(index: usize, elapsed: u64, status: &str, peak: u64) -> Value {
         json!({"repeat_index":index,"step_index":0,"elapsed_ns":elapsed,"status":status,
             "workload_value":100,"workload_unit":"tabs","measurement_scope":"prepared_operation",

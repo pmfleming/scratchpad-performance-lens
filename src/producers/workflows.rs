@@ -117,7 +117,8 @@ pub fn search_workflows(config: &LensConfig, _: MeasureOptions) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{valid_trials, valid_workflows};
+    use serde_json::json;
     #[test]
     fn console_exposes_workflow_failures_and_unknown_measurements() {
         let text = super::super::render::render_search_workflows(&json!({"scenarios":[{

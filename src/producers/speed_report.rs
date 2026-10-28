@@ -1,4 +1,4 @@
-use super::common::{array_value, budget_probe_ms, read_analysis, scenarios_array};
+use super::common::{budget_probe_ms, read_analysis, scenarios_array, values_array};
 use super::render::render_speed_report;
 use crate::cli::MeasureOptions;
 use crate::config::LensConfig;
@@ -19,59 +19,46 @@ pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) ->
     let resources = read_analysis(config, "resource_profiles.json", json!({"scenarios": []}));
     let frame_metrics = read_analysis(config, "frame_metrics.json", json!({"scenarios": []}));
 
-    let mut capacity_lookup = HashMap::new();
-    for row in scenarios_array(&capacity) {
-        if let Some(id) = row.get("scenario").and_then(Value::as_str) {
-            capacity_lookup.insert(id.to_string(), row.clone());
-        }
-    }
-
-    let mut search_dispatch = Vec::new();
-    let mut search_rows = Vec::new();
-    for row in array_value(&search)
-        .into_iter()
-        .chain(scenarios_array(&workflows).iter().cloned())
-    {
-        let normalized = normalize_latency_row(row, &capacity_lookup);
-        if normalized.get("family").and_then(Value::as_str) == Some("search-dispatch") {
-            search_dispatch.push(normalized);
-        } else {
-            search_rows.push(normalized);
-        }
-    }
-    let mut editor_rows = Vec::new();
-    let editor_families = [
-        "file-load",
-        "scroll",
-        "viewport",
-        "snapshot",
-        "edit-paste",
-        "anchor-maintenance",
-        "session-persistence",
-        "control-char-encoding",
-    ];
-    for row in array_value(&slowspots) {
-        if row
-            .get("workload_family")
-            .and_then(Value::as_str)
-            .is_some_and(|family| editor_families.contains(&family))
-        {
-            editor_rows.push(normalize_latency_row(row, &capacity_lookup));
-        }
-    }
-    for row in scenarios_array(&frame_metrics) {
-        editor_rows.push(normalize_frame_row(row));
-    }
-    let mut tabs_rows = Vec::new();
-    for row in array_value(&slowspots) {
-        if row
-            .get("workload_family")
-            .and_then(Value::as_str)
-            .is_some_and(|family| ["tab-management", "split-layout"].contains(&family))
-        {
-            tabs_rows.push(normalize_latency_row(row, &capacity_lookup));
-        }
-    }
+    let capacity_lookup = scenarios_array(&capacity)
+        .iter()
+        .filter_map(|row| Some((row["scenario"].as_str()?, row)))
+        .collect();
+    let (mut search_dispatch, mut search_rows): (Vec<_>, Vec<_>) = values_array(&search)
+        .iter()
+        .chain(scenarios_array(&workflows))
+        .map(|row| normalize_latency_row(row, &capacity_lookup))
+        .partition(|row| row["family"] == "search-dispatch");
+    let (mut tabs_rows, mut editor_rows): (Vec<_>, Vec<_>) = values_array(&slowspots)
+        .iter()
+        .filter(|row| {
+            matches!(
+                row["workload_family"].as_str(),
+                Some(
+                    "file-load"
+                        | "scroll"
+                        | "viewport"
+                        | "snapshot"
+                        | "edit-paste"
+                        | "anchor-maintenance"
+                        | "session-persistence"
+                        | "control-char-encoding"
+                        | "tab-management"
+                        | "split-layout"
+                )
+            )
+        })
+        .map(|row| normalize_latency_row(row, &capacity_lookup))
+        .partition(|row| {
+            matches!(
+                row["family"].as_str(),
+                Some("tab-management" | "split-layout")
+            )
+        });
+    editor_rows.extend(
+        scenarios_array(&frame_metrics)
+            .iter()
+            .map(normalize_frame_row),
+    );
     let capacity_rows: Vec<_> = scenarios_array(&capacity)
         .iter()
         .map(|row| {
@@ -81,10 +68,10 @@ pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) ->
             )
         })
         .collect();
-    let available_profiles: HashSet<_> = array_value(&flamegraphs)
-        .into_iter()
+    let available_profiles: HashSet<_> = values_array(&flamegraphs)
+        .iter()
         .filter(|row| row["available"] == true)
-        .filter_map(|row| row["id"].as_str().map(str::to_owned))
+        .filter_map(|row| row["id"].as_str())
         .collect();
     for row in search_dispatch
         .iter_mut()
@@ -105,9 +92,9 @@ pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) ->
         .chain(&editor_rows)
         .chain(&tabs_rows)
         .collect();
-    let flamegraph_rows = flamegraph_coverage_rows(array_value(&flamegraphs), &latency_rows);
+    let flamegraph_rows = flamegraph_coverage_rows(values_array(&flamegraphs), &latency_rows);
     let triage = build_triage(&latency_rows, &capacity_rows);
-    let resource_rows = scenarios_array(&resources).to_vec();
+    let resource_rows = scenarios_array(&resources);
     let context = crate::provenance::context(&config.project_root);
     let source_status: Vec<_> = [
         "slowspots.json",
@@ -174,7 +161,7 @@ pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) ->
     )
 }
 
-fn normalize_latency_row(row: Value, capacity_lookup: &HashMap<String, Value>) -> Value {
+fn normalize_latency_row(row: &Value, capacity_lookup: &HashMap<&str, &Value>) -> Value {
     let family = if row["measurement_scope"] == "query_command_to_dispatch" {
         "search-dispatch"
     } else {
@@ -197,7 +184,7 @@ fn normalize_latency_row(row: Value, capacity_lookup: &HashMap<String, Value>) -
             .and_then(Value::as_f64)
             .map(|ns| ns / 1_000_000.0)
     });
-    let budget_probe_ms = budget_probe_ms(&row).or(mean_ms);
+    let budget_probe_ms = budget_probe_ms(row).or(mean_ms);
     let budget_ms = row
         .get("threshold_ms")
         .or_else(|| row.get("budget_ms"))
@@ -265,7 +252,7 @@ fn normalize_capacity_row(row: &Value, synthetic: bool) -> Value {
 }
 
 fn normalize_frame_row(row: &Value) -> Value {
-    let valid = super::review::frames::valid_frame(row);
+    let valid = super::common::valid_frame(row);
     let budget_ms = row.get("budget_ms").and_then(Value::as_f64).unwrap_or(8.33);
     let p99_budget_ms = row
         .get("p99_budget_ms")
@@ -308,21 +295,16 @@ fn normalize_frame_row(row: &Value) -> Value {
     })
 }
 
-fn flamegraph_coverage_rows(flamegraphs: Vec<Value>, latency_rows: &[&Value]) -> Vec<Value> {
-    let covered_keys: HashSet<String> = latency_rows
+fn flamegraph_coverage_rows(flamegraphs: &[Value], latency_rows: &[&Value]) -> Vec<Value> {
+    let covered_keys: HashSet<_> = latency_rows
         .iter()
         .filter_map(|row| row.get("scenario_id").and_then(Value::as_str))
-        .map(|id| shared::benchmark_key(id).to_string())
+        .map(shared::benchmark_key)
         .collect();
     flamegraphs
-        .into_iter()
+        .iter()
         .map(|item| {
-            let covered: Vec<_> = item
-                .get("benchmark_keys")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default()
-                .into_iter()
+            let covered: Vec<_> = values_array(&item["benchmark_keys"]).iter()
                 .filter(|key| key.as_str().is_some_and(|key| covered_keys.contains(key)))
                 .collect();
             json!({
@@ -519,7 +501,13 @@ fn methodology_notes() -> Vec<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        build_triage, normalize_capacity_row, normalize_latency_row, speed_efficiency_report,
+        triage_summary,
+    };
+    use crate::{cli::MeasureOptions, config::LensConfig, provenance};
+    use serde_json::{json, Value};
+    use std::collections::HashMap;
     #[test]
     fn synthetic_and_unknown_capacity_are_not_reported_as_ok() {
         let row = normalize_capacity_row(
@@ -531,38 +519,102 @@ mod tests {
         let summary = triage_summary(&[&json!({"over_budget":null})], &[row]);
         assert_eq!(summary["ok"], 0);
         assert_eq!(summary["unknown"], 2);
-    }
-    #[test]
-    fn production_dispatch_is_reported_in_its_own_section() {
-        let row = normalize_latency_row(
-            json!({"workload_family":"search",
-            "measurement_scope":"query_command_to_dispatch", "mean_ms":280}),
+        let missing = normalize_latency_row(
+            &json!({"mean_ns":1,"measurement_status":"valid"}),
             &HashMap::new(),
         );
-        assert_eq!(row["family"], "search-dispatch");
+        assert!(missing["over_budget"].is_null());
     }
 
     #[test]
-    fn workflow_failures_have_an_honest_reason_without_an_invented_bottleneck() {
+    fn fresh_sources_flow_through_sections_profiles_triage_and_rendering() -> anyhow::Result<()> {
         let row = normalize_latency_row(
-            json!({"mean_ms":167,"budget_probe_ns":167_000_000,
+            &json!({"mean_ms":167,"budget_probe_ns":167_000_000,
             "threshold_ms":120,"measurement_status":"valid","budget_status":"fail"}),
             &HashMap::new(),
         );
         let triage = build_triage(&[&row], &[]);
         assert_eq!(triage[0]["reason"], "observed budget violation");
         assert_eq!(triage[0]["suspected_limiting_resource"], "unknown");
-        let missing = normalize_latency_row(json!({}), &HashMap::new());
-        assert!(missing["mean_ms"].is_null());
-        assert!(missing["budget_ms"].is_null());
-    }
-
-    #[test]
-    fn missing_budgets_remain_unknown_in_latency_normalization() {
-        let row = normalize_latency_row(
-            json!({"mean_ns":1,"measurement_status":"valid"}),
-            &HashMap::new(),
+        let root = tempfile::tempdir()?;
+        let config = LensConfig {
+            project_name: "fixture".into(),
+            project_root: root.path().into(),
+            output_dir: root.path().join("analysis"),
+        };
+        std::fs::create_dir(&config.output_dir)?;
+        let context = provenance::context(root.path());
+        let sources = [
+            (
+                "slowspots.json",
+                json!([
+                    {"name":"load/32","workload_family":"file-load","mean_ns":200_000_000,"threshold_ms":100,"measurement_status":"valid","budget_status":"fail","matching_flamegraphs":["missing"]},
+                    {"name":"tabs/32","workload_family":"tab-management","measurement_status":"valid","budget_status":"pass"}
+                ]),
+            ),
+            (
+                "search_speed.json",
+                json!([{"name":"dispatch/32","workload_family":"search","measurement_scope":"query_command_to_dispatch","mean_ms":280,"threshold_ms":50,"measurement_status":"valid","budget_status":"fail","matching_flamegraphs":["ui_render_frame_profile"]}]),
+            ),
+            (
+                "search_workflow_metrics.json",
+                json!({"scenarios":[{"name":"search/32","workload_family":"search","measurement_status":"valid","budget_status":"pass"}]}),
+            ),
+            (
+                "frame_metrics.json",
+                json!({"scenarios":[{"scenario_id":"scroll","frame_count":240,"measurement_scope":"event_to_tessellation","p95_ms":9,"p99_ms":15,"budget_ms":8.33,"p99_budget_ms":12}]}),
+            ),
+            (
+                "capacity_report.json",
+                json!({"scenarios":[{"scenario":"tab_count_ceiling","ceiling_reached":true,"failure_mode":"unusable_latency","last_successful_label":"32 tabs","first_failure_label":"64 tabs","workload_family":"tab-management","diagnosis_guidance":["inspect counters"]}]}),
+            ),
+            (
+                "resource_profiles.json",
+                json!({"scenarios":[{"scenario":"memory","samples":[]}]}),
+            ),
+            (
+                "flamegraphs.json",
+                json!([{"id":"ui_render_frame_profile","available":true,"benchmark_keys":["dispatch","unused"]},{"id":"missing","available":false}]),
+            ),
+        ];
+        for (file, payload) in sources {
+            std::fs::write(config.output_dir.join(file), payload.to_string())?;
+            provenance::record(&config, file, provenance::timestamp(), &context, true)?;
+        }
+        let options = MeasureOptions {
+            skip_bench: true,
+            fail_on_slow: false,
+            index_only: false,
+        };
+        speed_efficiency_report(&config, options)?;
+        let path = config.output_dir.join("speed_efficiency_report.json");
+        let report: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+        assert_eq!(report["summary"]["measurement_status"], "valid");
+        assert_eq!(report["summary"]["over_budget_latency"], 3);
+        assert_eq!(report["summary"]["coverage_gaps"], 1);
+        assert_eq!(
+            report["sections"]["search_dispatch"][0]["family"],
+            "search-dispatch"
         );
-        assert!(row["over_budget"].is_null());
+        assert_eq!(
+            report["sections"]["tabs_and_splits"][0]["last_known_failure_ceiling"],
+            "32 tabs"
+        );
+        assert_eq!(
+            report["sections"]["flamegraph_coverage"][0]["covered_scenarios"],
+            json!(["dispatch"])
+        );
+        assert_eq!(
+            report["triage_summary"],
+            json!({"critical":4,"ok":2,"unknown":0,"watch":0})
+        );
+        assert_eq!(report["triage"].as_array().unwrap().len(), 4);
+        // A changed artifact must be excluded, not silently treated as fresh.
+        std::fs::write(config.output_dir.join("slowspots.json"), "[]")?;
+        speed_efficiency_report(&config, options)?;
+        let stale: Value = serde_json::from_slice(&std::fs::read(path)?)?;
+        assert_eq!(stale["summary"]["measurement_status"], "incomplete");
+        assert_eq!(stale["summary"]["tabs_and_splits_scenarios"], 0);
+        Ok(())
     }
 }

@@ -1,7 +1,7 @@
 use super::common::{
-    benchmark_parameter, capitalize, criterion_dir, dispersion_lower_ns, dispersion_upper_ns,
-    ns_per_kb, over_threshold, parameter_label, run_benchmarks, score_of, search_signals,
-    stability_label, string_value, throughput_mb_s, variance_ratio,
+    benchmark_parameter, criterion_dir, dispersion_lower_ns, dispersion_upper_ns, ns_per_kb,
+    over_threshold, parameter_label, run_benchmarks, score_of, search_signals, stability_label,
+    string_value, throughput_mb_s, variance_ratio,
 };
 use super::render::render_search;
 use crate::cli::MeasureOptions;
@@ -187,7 +187,7 @@ fn search_scenario_label(key: &str) -> String {
     key.trim_start_matches("search_")
         .replace('_', " ")
         .split_whitespace()
-        .map(capitalize)
+        .map(shared::capitalize)
         .collect::<Vec<_>>()
         .join(" ")
 }
