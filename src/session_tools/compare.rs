@@ -73,6 +73,15 @@ fn positive(value: &Value) -> Result<f64> {
     Ok(value)
 }
 
+fn session_rows<'a>(scenarios: &BTreeMap<&str, &'a Value>) -> Result<BTreeMap<&'a str, &'a Value>> {
+    index(
+        &scenarios
+            .get(SESSION)
+            .context("missing Session Persistence Restore scenario")?["evidence"]["latency"],
+        "name",
+    )
+}
+
 fn compare(baseline: &Value, current: &Value, require_all: bool) -> Result<(String, bool)> {
     let before = index(&baseline["scenarios"], "title").context("baseline scenarios")?;
     let after = index(&current["scenarios"], "title").context("current scenarios")?;
@@ -81,16 +90,8 @@ fn compare(baseline: &Value, current: &Value, require_all: bool) -> Result<(Stri
         before.keys().eq(after.keys()),
         "baseline/current scenario sets differ"
     );
-    let session_rows = |scenarios: &BTreeMap<&str, &Value>| -> Result<Value> {
-        Ok(scenarios
-            .get(SESSION)
-            .context("missing Session Persistence Restore scenario")?["evidence"]["latency"]
-            .clone())
-    };
-    let old_rows = session_rows(&before)?;
-    let new_rows = session_rows(&after)?;
-    let old_rows = index(&old_rows, "name").context("baseline session latency")?;
-    let new_rows = index(&new_rows, "name").context("current session latency")?;
+    let old_rows = session_rows(&before).context("baseline session latency")?;
+    let new_rows = session_rows(&after).context("current session latency")?;
     let mut lines = Vec::new();
     let mut session_pass = true;
     for &name in BENCHMARKS {
@@ -145,8 +146,10 @@ fn compare(baseline: &Value, current: &Value, require_all: bool) -> Result<(Stri
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{compare, read_run, BENCHMARKS, SESSION};
     use serde_json::json;
+    use serde_json::Value;
+    use std::fs;
 
     fn review() -> Value {
         json!({"scenarios": [{"title": SESSION, "promise_health": "pass", "evidence": {
@@ -159,37 +162,31 @@ mod tests {
     }
 
     #[test]
-    fn equal_and_improved_measurements_pass() {
-        let baseline = review();
-        assert!(compare(&baseline, &baseline, true).unwrap().1);
-        let mut current = review();
-        current["scenarios"][0]["evidence"]["latency"][0]["mean_ns"] = json!(90);
-        assert!(compare(&baseline, &current, true).unwrap().1);
-    }
-
-    #[test]
-    fn regression_invalid_measurement_and_authoritative_budget_fail() {
-        for (field, value) in [
-            ("mean_ns", json!(101)),
-            ("mean_confidence_interval_ns", json!({"upper_bound": 111})),
-            ("measurement_status", json!("invalid")),
-            ("budget_status", json!("uncertain")),
+    fn acceptance_matrix_preserves_latency_budget_and_promise_policy() -> anyhow::Result<()> {
+        for (field, value, accepted) in [
+            ("mean_ns", json!(100), true),
+            ("mean_ns", json!(90), true),
+            ("mean_ns", json!(101), false),
+            (
+                "mean_confidence_interval_ns",
+                json!({"upper_bound": 111}),
+                false,
+            ),
+            ("measurement_status", json!("invalid"), false),
+            ("budget_status", json!("uncertain"), false),
         ] {
             let mut current = review();
             current["scenarios"][0]["evidence"]["latency"][0][field] = value;
-            assert!(!compare(&review(), &current, false).unwrap().1);
+            assert_eq!(compare(&review(), &current, true)?.1, accepted, "{field}");
         }
-    }
-
-    #[test]
-    fn nonauthoritative_budgets_and_optional_all_promise_gate_match_legacy_policy() {
         let mut current = review();
         let row = &mut current["scenarios"][0]["evidence"]["latency"][0];
         row["threshold_authoritative"] = json!(false);
         row["budget_status"] = json!("unmeasured");
         current["scenarios"][1]["promise_health"] = json!("at_risk");
-        assert!(compare(&review(), &current, false).unwrap().1);
-        assert!(!compare(&review(), &current, true).unwrap().1);
+        assert!(compare(&review(), &current, false)?.1);
+        assert!(!compare(&review(), &current, true)?.1);
+        Ok(())
     }
 
     #[test]
@@ -200,41 +197,39 @@ mod tests {
             assert!(compare(&review(), &current, false).is_err());
             assert!(compare(&current, &review(), false).is_err());
         }
-        let mut missing = review();
-        missing["scenarios"][0]["evidence"]["latency"]
-            .as_array_mut()
-            .unwrap()
-            .pop();
-        assert!(compare(&review(), &missing, false).is_err());
-        let mut duplicate = review();
-        let row = duplicate["scenarios"][0]["evidence"]["latency"][0].clone();
-        duplicate["scenarios"][0]["evidence"]["latency"]
-            .as_array_mut()
-            .unwrap()
-            .push(row);
-        assert!(compare(&review(), &duplicate, false).is_err());
-        let mut missing_scenario = review();
-        missing_scenario["scenarios"].as_array_mut().unwrap().pop();
-        assert!(compare(&review(), &missing_scenario, true).is_err());
+        let baseline = review();
+        for (pointer, value) in [
+            (
+                "/scenarios/0/evidence/latency",
+                json!([baseline["scenarios"][0]["evidence"]["latency"][0]]),
+            ),
+            ("/scenarios/0/evidence/latency/1/name", json!(BENCHMARKS[0])),
+            ("/scenarios", json!([baseline["scenarios"][0]])),
+        ] {
+            let mut current = review();
+            *current.pointer_mut(pointer).unwrap() = value;
+            assert!(compare(&baseline, &current, true).is_err(), "{pointer}");
+            assert!(compare(&current, &baseline, true).is_err(), "{pointer}");
+        }
     }
 
     #[test]
-    fn archive_markers_support_legacy_but_never_mask_a_failed_combined_run() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::create_dir(dir.path().join("performance")).unwrap();
-        fs::write(
-            dir.path().join("performance/performance_review.json"),
-            review().to_string(),
-        )
-        .unwrap();
+    fn archive_markers_support_legacy_but_never_mask_a_failed_combined_run() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        fs::create_dir(dir.path().join("performance"))?;
+        let report = dir.path().join("performance/performance_review.json");
+        fs::write(&report, review().to_string())?;
         assert!(read_run(dir.path()).is_err());
-        fs::write(dir.path().join("performance.exit"), "0\n").unwrap();
-        assert!(read_run(dir.path()).is_ok());
-        fs::write(dir.path().join("check.exit"), "1\n").unwrap();
+        for (marker, status, accepted) in [
+            ("performance.exit", "0\n", true),
+            ("check.exit", "1\n", false),
+            ("check.exit", "0\n", true),
+        ] {
+            fs::write(dir.path().join(marker), status)?;
+            assert_eq!(read_run(dir.path()).is_ok(), accepted);
+        }
+        fs::write(&report, "{")?;
         assert!(read_run(dir.path()).is_err());
-        fs::write(dir.path().join("check.exit"), "0\n").unwrap();
-        assert!(read_run(dir.path()).is_ok());
-        fs::write(dir.path().join("performance/performance_review.json"), "{").unwrap();
-        assert!(read_run(dir.path()).is_err());
+        Ok(())
     }
 }

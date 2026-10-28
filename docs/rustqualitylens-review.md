@@ -114,3 +114,92 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 
 If the LLVM tools are outside PATH, set `LLVM_COV` and `LLVM_PROFDATA` explicitly.
 The RQLens binary can instead be built from the local checkout with Cargo.
+
+## Follow-up review: baseline `1c5bdad`
+
+This is a fresh comparison against `1c5bdad2c81c990c3cfdda49b7bdeab0b1b9b17e`,
+not a reuse of the older measurements above. The baseline includes session-tool
+and measurement tests that were not present in that older report. Evidence is in
+`target/quality-review/round2-before/` and `target/quality-review/current/`.
+Both runs used the same local `target/campaign-tool-build/debug/rqlens` binary,
+SHA-256 `622b2c793a574781cd40a190a457f58af4b8c222ee5efce04c4e77488c50929a`.
+The tool checkout was at `aa0d6dc358d1717b0cdba446cc771136bf3c3461`; this is
+checkout provenance, not a claim that the existing binary was built from it.
+
+| Measurement | Before | After |
+| --- | ---: | ---: |
+| Production function cognitive complexity, sum | 474 | 458 |
+| Production function cyclomatic complexity, sum | 890 | 881 |
+| Production function Halstead effort, sum, rounded | 4,713,939 | 4,504,569 |
+| Maximum function cognitive complexity | 14 | 13 |
+| Maximum function cyclomatic complexity | 25 | 22 |
+| Rust source lines, including blanks and tests | 8,897 | 8,865 |
+| RQLens source nonblank lines | 8,452 | 8,429 |
+| Duplicated lines | 450 | 284 |
+| Explicit `.clone()` / `.cloned()` calls | 115 | 85 |
+| Escape-hatch records | 2 | 0 |
+| Executed tests | 68 | 61 |
+| Test/helper function lines, summed spans | 1,748 | 1,747 |
+| LLVM line coverage | 89.09% | 92.01% |
+| Covered executable lines | 5,874 | 6,026 |
+| LLVM function coverage | 85.39% | 87.81% |
+| LLVM region coverage | 87.38% | 90.71% |
+| Module dependency edges, summed outbound counts | 159 | 156 |
+| Mean module locality score | 96.42 | 96.42 |
+| Mean observed-reuse leverage score | 33.18 | 32.50 |
+
+### Findings addressed
+
+- **Duplicated benchmark orchestration:** Criterion collection, invalid-row
+  construction, budget/provenance annotation and post-publication failure checks
+  now have one implementation in `common/criterion.rs`. Search and slowspots
+  retain their own presentation and sorting. Their entrypoint cognitive scores
+  fall 11 → 1 and 9 → 1; production-wide sums above include the extracted helpers.
+- **Ownership:** moved benchmark execution out of statistical helpers, eliminating
+  the stats/criterion dependency cycle. Cargo target-directory resolution lives
+  in `shared.rs`; probe archiving no longer derives a target path from a Criterion
+  directory. Resolve that directory once when invalidating benchmark manifests.
+  Internal Criterion helpers are private rather than exposed to every producer.
+- **Avoidable copies:** telemetry borrows tabs, modern buffers, views and JSON
+  fields; only legacy buffers require an owned compatibility projection. Baseline
+  comparisons borrow latency rows, and realistic-frame rows move into their
+  destination. Removed the allocating, single-use sort-key helper and the JSON
+  round-trip capacity fixture builder.
+- **Input robustness:** search-workload multiplication is checked; overflow becomes
+  unknown rather than panicking/wrapping. Malformed realistic-frame rows remain
+  visible for validation instead of panicking during annotation. Diagnostic-line
+  parsing remains streaming, preserves valid prefixes and retains the newest 500
+  objects while counting all valid objects.
+- **Test value:** added isolated legacy/modern/corrupt session coverage, bounded
+  diagnostics, overflow and malformed frame cases. The existing Criterion manifest
+  fixture now runs both producers with passing and failing CLI-budget policies.
+  Boundary matrices replace repeated setup. The CLI dirty-save test now owns
+  independent-process, SHA-256, stderr, summary and no-overwrite assertions formerly
+  duplicated in a unit test; timeout/failure unit tests remain distinct.
+
+### Trade-offs and validation
+
+Test count falls appreciably, but test/helper code volume is essentially flat
+(one line smaller): the savings funded new behavior coverage, not just deletion.
+All-function cyclomatic complexity rises 1,031 → 1,096, largely from explicit
+fallible test setup and additional boundary cases. All-function cognitive
+complexity falls 518 → 516 and effort falls 5,847,420 → 5,829,917.
+
+Architecture scores do not show a universal improvement. Locality is unchanged;
+observed-reuse leverage decreases as accidental consumers of stats and Criterion
+internals disappear. The concrete improvement is fewer dependencies and removal
+of the cycle, not a claimed leverage-score win. The largest remaining effort
+hotspots are JSON report construction in `speed_report.rs` and `review.rs`.
+
+No artifact schemas or measurement-budget policy were intentionally changed.
+Shared benchmark errors now consistently include the producer label; unmapped
+Criterion results are skipped silently by both collectors. This pass does not
+remove the remaining production `expect` for compile-time embedded metadata.
+
+Formatting, strict workspace/all-target Clippy, tests, doctests and rustdoc pass.
+RQLens verification reports six passed gates, eight project-policy warnings,
+fourteen skipped optional checks and no error-level failures. Hotspot, clone,
+coverage, locality and leverage inputs are complete. Coverage includes test code;
+branch coverage remains unavailable. Fixture probes are not full Scratchpad
+benchmark or GUI validation. See the reproduction commands above; the same
+`cargo-llvm-cov` and matching LLVM tools are required for both snapshots.

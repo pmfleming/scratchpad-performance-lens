@@ -48,10 +48,7 @@ pub(in crate::producers) fn run_probe_events(
         .output()
         .with_context(|| label.to_string())?;
     // Preserve even a crashed/truncated probe's evidence for diagnosis.
-    let archive = super::stats::criterion_dir(project_root)
-        .parent()
-        .context("Criterion directory has no target parent")?
-        .join("splens-probes");
+    let archive = shared::cargo_target_directory(project_root).join("splens-probes");
     std::fs::create_dir_all(&archive)?;
     let run = format!(
         "{}-{}",

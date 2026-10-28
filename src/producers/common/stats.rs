@@ -1,56 +1,5 @@
 use crate::shared;
 use serde_json::Value;
-use std::path::{Path, PathBuf};
-
-pub(in crate::producers) fn run_benchmarks(
-    project_root: &Path,
-    skip: bool,
-    cargo_args: &[&str],
-    label: &str,
-) -> Option<String> {
-    if !project_root.is_dir() {
-        let root = project_root.display();
-        return Some(format!("project root does not exist: {root}"));
-    }
-    if skip {
-        return None;
-    }
-    let started = crate::provenance::timestamp();
-    let context = crate::provenance::context(project_root);
-    let suites = super::criterion::suite_names(cargo_args);
-    // Invalidate prior run manifests before executing: partial/failing reruns cannot reuse them.
-    for suite in &suites {
-        let _ =
-            std::fs::remove_file(criterion_dir(project_root).join(format!("splens-{suite}.json")));
-    }
-    shared::run_progress_command(project_root, cargo_args, label)
-        .and_then(|()| super::criterion::record_run(project_root, &suites, started, context))
-        .err()
-        .map(|error| error.to_string())
-}
-
-pub(in crate::producers) fn criterion_dir(project_root: &Path) -> PathBuf {
-    // Cargo resolves workspace roots, environment overrides and .cargo/config.toml.
-    let target = shared::run_command(
-        project_root,
-        &["cargo", "metadata", "--no-deps", "--format-version", "1"],
-    )
-    .ok()
-    .filter(|output| output.status.success())
-    .and_then(|output| serde_json::from_slice::<Value>(&output.stdout).ok())
-    .and_then(|meta| meta["target_directory"].as_str().map(PathBuf::from))
-    .unwrap_or_else(|| {
-        let path = std::env::var_os("CARGO_TARGET_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("target"));
-        if path.is_absolute() {
-            path
-        } else {
-            project_root.join(path)
-        }
-    });
-    target.join("criterion")
-}
 
 pub(in crate::producers) fn estimate_optional(value: &Value, path: &[&str]) -> Option<f64> {
     let result = shared::f64_field(value, path);
@@ -222,13 +171,6 @@ pub(in crate::producers) fn score_of(row: &Value) -> f64 {
     row.get("score").and_then(Value::as_f64).unwrap_or(0.0)
 }
 
-pub(in crate::producers) fn string_value(row: &Value, key: &str) -> String {
-    row.get(key)
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -236,17 +178,28 @@ mod tests {
     };
 
     #[test]
-    fn stability_labels_follow_variance_thresholds() {
-        assert_eq!(stability_label(100.0, 5.0), "stable");
-        assert_eq!(stability_label(100.0, 15.0), "watch");
-        assert_eq!(stability_label(100.0, 25.0), "high-variance");
-        assert_eq!(stability_label(0.0, 25.0), "unknown");
-    }
-
-    #[test]
-    fn latency_score_increases_with_variance() {
+    fn latency_and_throughput_boundaries() {
+        for (mean, deviation, label) in [
+            (100.0, 5.0, "stable"),
+            (100.0, 10.0, "watch"),
+            (100.0, 20.0, "high-variance"),
+            (0.0, 25.0, "unknown"),
+        ] {
+            assert_eq!(stability_label(mean, deviation), label);
+        }
         assert!(latency_score(1_000_000.0, 500_000.0) > latency_score(1_000_000.0, 0.0));
         assert_eq!(latency_score(0.0, 50.0), 0.0);
+        assert_eq!(throughput_mb_s(Some(1024 * 1024), 1e9), Some(1.0));
+        assert_eq!(ns_per_kb(Some(1024), 2048.0), Some(2048.0));
+        for (bytes, mean) in [
+            (None, 1.0),
+            (Some(0), 1.0),
+            (Some(-1), 1.0),
+            (Some(1024), 0.0),
+        ] {
+            assert_eq!(throughput_mb_s(bytes, mean), None);
+            assert_eq!(ns_per_kb(bytes, mean), None);
+        }
     }
 
     #[test]
@@ -258,16 +211,5 @@ mod tests {
         });
         assert!(over_threshold(&row));
         assert_eq!(budget_probe_ms(&row), Some(130.0));
-    }
-
-    #[test]
-    fn throughput_and_cost_guard_zero_inputs() {
-        assert_eq!(
-            throughput_mb_s(Some(1024 * 1024), 1_000_000_000.0),
-            Some(1.0)
-        );
-        assert_eq!(throughput_mb_s(Some(0), 1_000_000_000.0), None);
-        assert_eq!(ns_per_kb(Some(1024), 2048.0), Some(2048.0));
-        assert_eq!(ns_per_kb(Some(0), 2048.0), None);
     }
 }

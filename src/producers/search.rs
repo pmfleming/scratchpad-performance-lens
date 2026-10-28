@@ -1,13 +1,13 @@
 use super::common::{
-    benchmark_parameter, criterion_dir, dispersion_lower_ns, dispersion_upper_ns, ns_per_kb,
-    over_threshold, parameter_label, run_benchmarks, score_of, search_signals, stability_label,
-    string_value, throughput_mb_s, variance_ratio,
+    annotate_measurement, benchmark_parameter, collect_benchmarks, dispersion_lower_ns,
+    dispersion_upper_ns, ns_per_kb, parameter_label, run_benchmarks, score_of, search_signals,
+    stability_label, throughput_mb_s, validate_measurements, variance_ratio,
 };
 use super::render::render_search;
 use crate::cli::MeasureOptions;
 use crate::config::LensConfig;
 use crate::shared;
-use anyhow::{bail, Result};
+use anyhow::Result;
 use serde_json::{json, Value};
 pub fn search_speed(config: &LensConfig, options: MeasureOptions) -> Result<()> {
     let probe_failure = run_benchmarks(
@@ -21,35 +21,23 @@ pub fn search_speed(config: &LensConfig, options: MeasureOptions) -> Result<()> 
         eprintln!("Falling back to existing Criterion search results.");
     }
 
-    let metadata = shared::load_benchmark_metadata(&config.project_root);
-    let criterion_dir = criterion_dir(&config.project_root);
-    let mut rows = Vec::new();
-    let mut invalid = Vec::new();
-    for path in shared::criterion_estimate_paths(&criterion_dir) {
-        let Some(name) = shared::benchmark_name_from_estimate_path(&criterion_dir, &path) else {
-            continue;
-        };
-        let key = shared::benchmark_key(&name).to_string();
-        let Some(meta) = metadata.get(&key) else {
-            continue;
-        };
-        if !shared::string_field(meta, "workload_family", "").starts_with("search") {
-            continue;
-        }
-        match super::common::read_estimates(&config.project_root, &path, &name, &["search_speed"]) {
-            Ok(estimates) => rows.push(build_search_row(name, key, meta, &estimates)),
-            Err(error) => {
-                invalid.push(format!("{name}: {error}"));
-                rows.push(json!({"name": name, "benchmark_key": key,
-                    "workload_family": meta["workload_family"], "measurement_status": "invalid",
-                    "error": error.to_string(), "mean_ns": null, "budget_probe_ns": null}));
-            }
-        }
-    }
+    let (mut rows, invalid) = collect_benchmarks(
+        &config.project_root,
+        &["search_speed"],
+        |meta| {
+            meta["workload_family"]
+                .as_str()
+                .is_some_and(|family| family.starts_with("search"))
+        },
+        build_search_row,
+    );
     rows.sort_by(|left, right| {
-        score_of(right)
-            .total_cmp(&score_of(left))
-            .then_with(|| string_value(left, "name").cmp(&string_value(right, "name")))
+        score_of(right).total_cmp(&score_of(left)).then_with(|| {
+            left["name"]
+                .as_str()
+                .unwrap_or("")
+                .cmp(right["name"].as_str().unwrap_or(""))
+        })
     });
     let payload = Value::Array(rows);
     let cli = render_search(&payload);
@@ -59,27 +47,17 @@ pub fn search_speed(config: &LensConfig, options: MeasureOptions) -> Result<()> 
         "search-speed",
         cli,
     )?;
-    if let Some(error) = probe_failure {
-        bail!("search probe failed: {error}");
-    }
-    if payload.as_array().is_none_or(Vec::is_empty) || !invalid.is_empty() {
-        bail!(
-            "search measurements incomplete or invalid: {}",
-            invalid.join("; ")
-        );
-    }
-    if options.fail_on_slow
-        && payload
-            .as_array()
-            .is_some_and(|rows| rows.iter().any(over_threshold))
-    {
-        bail!("one or more search benchmarks exceeded threshold");
-    }
-    Ok(())
+    validate_measurements(
+        &payload,
+        &invalid,
+        probe_failure,
+        options.fail_on_slow,
+        "search",
+    )
 }
 
-fn build_search_row(name: String, key: String, meta: &Value, estimates: &Value) -> Value {
-    let parameter_value = benchmark_parameter(&name);
+fn build_search_row(name: &str, key: &str, meta: &Value, estimates: &Value) -> Value {
+    let parameter_value = benchmark_parameter(name);
     let parameter_unit = shared::string_field(meta, "parameter_unit", "value");
     let (item_count, bytes_per_item, total_bytes) =
         search_workload(meta, parameter_value, &parameter_unit);
@@ -96,7 +74,7 @@ fn build_search_row(name: String, key: String, meta: &Value, estimates: &Value) 
     let ns_per_kb = ns_per_kb(processed_bytes, mean_ns);
     let threshold_ms = shared::authoritative_threshold_ms(meta);
     let latency_kind = shared::string_field(meta, "latency_kind", "completion");
-    let matching = shared::matching_flamegraph_ids(&key);
+    let matching = shared::matching_flamegraph_ids(key);
     let signals = search_signals(
         mean_ns,
         std_dev_ns,
@@ -109,8 +87,8 @@ fn build_search_row(name: String, key: String, meta: &Value, estimates: &Value) 
         "measurement_status": "valid",
         "measurement_scope": shared::string_field(meta, "measurement_scope", "unknown"),
         "benchmark_key": key,
-        "scenario_label": search_scenario_label(&key),
-        "description": shared::string_field(meta, "description", &key),
+        "scenario_label": search_scenario_label(key),
+        "description": shared::string_field(meta, "description", key),
         "mode": shared::string_field(meta, "mode", "unknown"),
         "latency_kind": latency_kind,
         "scaling_axis": shared::string_field(meta, "scaling_axis", "aggregate_size"),
@@ -147,15 +125,7 @@ fn build_search_row(name: String, key: String, meta: &Value, estimates: &Value) 
         "measurement_role": "change_validation",
         "measurement_question": "Did this search path stay inside its latency budget?",
     });
-    row["measurement_finished_at"] = estimates["measurement_finished_at"].clone();
-    super::common::annotate_budget(&mut row, estimates, threshold_ms);
-    row["threshold_authoritative"] = json!(threshold_ms.is_some());
-    row["threshold_source"] = json!(meta.get("threshold_source"));
-    row["metadata_source"] = json!(meta.get("metadata_source"));
-    row["stale_budget_risk"] = json!(meta
-        .get("stale_budget_risk")
-        .and_then(Value::as_bool)
-        .unwrap_or(false));
+    annotate_measurement(&mut row, estimates, meta);
     row
 }
 
@@ -169,7 +139,7 @@ fn search_workload(
         (
             fixed_count.or(Some(1)),
             parameter_value,
-            parameter_value.map(|value| value * fixed_count.unwrap_or(1)),
+            parameter_value.and_then(|value| value.checked_mul(fixed_count.unwrap_or(1))),
         )
     } else {
         let bytes_per_item = meta.get("bytes_per_item").and_then(Value::as_i64);
@@ -178,7 +148,7 @@ fn search_workload(
             bytes_per_item,
             parameter_value
                 .zip(bytes_per_item)
-                .map(|(items, bytes)| items * bytes),
+                .and_then(|(items, bytes)| items.checked_mul(bytes)),
         )
     }
 }
@@ -197,13 +167,19 @@ mod tests {
     #[test]
     fn first_target_throughput_does_not_claim_unscanned_targets() {
         let row = super::build_search_row(
-            "first/32".into(),
-            "first".into(),
+            "first/32",
+            "first",
             &serde_json::json!({"parameter_unit":"files","bytes_per_item":16384,"processed_item_count":1}),
             &serde_json::json!({"mean":{"point_estimate":1_000_000}}),
         );
         assert_eq!(row["total_bytes"], 32 * 16384);
         assert_eq!(row["processed_bytes"], 16384);
         assert_eq!(row["throughput_mb_s"], 15.625);
+        for unit in ["bytes", "files"] {
+            let meta = serde_json::json!({"fixed_item_count":2,"bytes_per_item":2});
+            assert_eq!(super::search_workload(&meta, Some(i64::MAX), unit).2, None);
+            assert_eq!(super::search_workload(&meta, Some(32), unit).2, Some(64));
+            assert_eq!(super::search_workload(&meta, None, unit).2, None);
+        }
     }
 }

@@ -91,22 +91,21 @@ fn add_realistic_frame_metrics(payload: &mut Value, config: &LensConfig) {
     payload["meta"]["realistic_probe"] = status;
 }
 
-fn append_realistic_scenarios(payload: &mut Value, realistic: Value) {
+fn append_realistic_scenarios(payload: &mut Value, mut realistic: Value) {
     let Some(base_scenarios) = payload.get_mut("scenarios").and_then(Value::as_array_mut) else {
         return;
     };
-    for mut scenario in realistic
-        .get("scenarios")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-    {
-        scenario["probe_binary"] = json!(REALISTIC_FRAME_PROBE);
-        scenario.as_object_mut().map(|object| {
+    let Some(scenarios) = realistic.get_mut("scenarios").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for mut scenario in scenarios.drain(..) {
+        if let Some(object) = scenario.as_object_mut() {
+            object.insert("probe_binary".into(), json!(REALISTIC_FRAME_PROBE));
             object
-                .entry("measurement_scope".to_string())
-                .or_insert_with(|| json!("unknown"))
-        });
+                .entry("measurement_scope")
+                .or_insert_with(|| json!("unknown"));
+        }
+        // Preserve malformed rows so validation fails instead of hiding bad evidence.
         base_scenarios.push(scenario);
     }
 }
@@ -215,84 +214,66 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn annotates_existing_frame_probe_as_theoretical_cpu_path() {
-        let mut payload = json!({
-            "meta": {},
-            "scenarios": [{
-                "scenario_id": "ui_render_frame_120hz",
-                "p99_ms": 1.0
-            }]
-        });
-
-        annotate_frame_scenarios(&mut payload);
-        let row = &payload["scenarios"][0];
-
-        assert_eq!(row["measurement_scope"], json!("measured_frame_path_cpu"));
-        assert_eq!(
-            row["metric_role"],
-            json!("theoretical_frame_production_capacity")
+    fn frame_annotation_preserves_explicit_scope_and_invalid_evidence() {
+        let mut payload = json!({"scenarios":[{"p99_ms":1.0}]});
+        append_realistic_scenarios(
+            &mut payload,
+            json!({"scenarios":[
+                {"p99_ms":6.25}, {"p99_ms":0, "measurement_scope":"end_to_end", "present_included":true}, 42
+            ]}),
         );
-        assert_eq!(row["present_included"], json!(false));
-        assert_eq!(row["theoretical_fps_p99"], json!(1000.0));
-        assert_eq!(row["refresh_budget_utilization"]["120_hz"], json!(0.12));
+        annotate_frame_scenarios(&mut payload);
+        let rows = &payload["scenarios"];
+        assert_eq!(rows[0]["measurement_scope"], "measured_frame_path_cpu");
+        assert_eq!(
+            rows[0]["metric_role"],
+            "theoretical_frame_production_capacity"
+        );
+        assert_eq!(rows[0]["present_included"], false);
+        assert_eq!(rows[0]["theoretical_fps_p99"], 1000.0);
+        assert_eq!(rows[0]["refresh_budget_utilization"]["120_hz"], 0.12);
+        assert_eq!(rows[1]["probe_binary"], "realistic_frame_metrics");
+        assert_eq!(rows[1]["measurement_scope"], "unknown");
+        assert_eq!(
+            rows[1]["metric_role"],
+            "render_preparation_scope_unspecified"
+        );
+        assert_eq!(rows[1]["refresh_budget_utilization"]["240_hz"], 1.5);
+        assert_eq!(rows[2]["measurement_scope"], "end_to_end");
+        assert_eq!(rows[2]["present_included"], true);
+        assert!(rows[2]["theoretical_fps_p99"].is_null());
+        assert_eq!(rows[3], 42);
+        for invalid in [json!(null), json!({"scenarios":false})] {
+            append_realistic_scenarios(&mut payload, invalid.clone());
+            let mut invalid = invalid;
+            append_realistic_scenarios(&mut invalid, json!({"scenarios":[]}));
+            annotate_frame_scenarios(&mut invalid);
+        }
+        assert_eq!(payload["scenarios"].as_array().unwrap().len(), 4);
     }
 
     #[test]
-    fn appends_realistic_probe_scenarios_with_end_to_end_scope() {
-        let mut payload = json!({"meta": {}, "scenarios": []});
-        let realistic = json!({
-            "scenarios": [{
-                "scenario_id": "scroll_real_window_end_to_end",
-                "p99_ms": 6.25
-            }]
-        });
-
-        append_realistic_scenarios(&mut payload, realistic);
-        annotate_frame_scenarios(&mut payload);
-        let row = &payload["scenarios"][0];
-
-        assert_eq!(row["probe_binary"], json!("realistic_frame_metrics"));
-        assert_eq!(row["measurement_scope"], json!("unknown"));
-        assert_eq!(
-            row["metric_role"],
-            json!("render_preparation_scope_unspecified")
-        );
-        assert_eq!(row["refresh_budget_utilization"]["240_hz"], json!(1.5));
-    }
-
-    #[test]
-    fn detects_explicit_or_implicit_realistic_probe_targets() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("Cargo.toml"),
-            r#"
-                [package]
-                name = "scratchpad"
-                version = "0.1.0"
-                edition = "2021"
-
-                [[bin]]
-                name = "realistic_frame_metrics"
-                path = "tools/realistic_frame_metrics.rs"
-            "#,
-        )
-        .unwrap();
-        assert!(probe_target_present(dir.path(), "realistic_frame_metrics"));
-
-        let implicit = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(implicit.path().join("src").join("bin")).unwrap();
-        std::fs::write(
-            implicit
-                .path()
-                .join("src")
-                .join("bin")
-                .join("realistic_frame_metrics.rs"),
-            "fn main() {}",
-        )
-        .unwrap();
-        assert!(probe_target_present(
-            implicit.path(),
-            "realistic_frame_metrics"
-        ));
+    fn probe_discovery_handles_missing_malformed_explicit_and_implicit_targets(
+    ) -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        assert!(!probe_target_present(dir.path(), "realistic_frame_metrics"));
+        for (manifest, found) in [
+            ("{", false),
+            ("[package]\nname='fixture'", false),
+            (
+                "[[bin]]\nname='realistic_frame_metrics'\npath='tools/probe.rs'",
+                true,
+            ),
+        ] {
+            std::fs::write(dir.path().join("Cargo.toml"), manifest)?;
+            assert_eq!(
+                probe_target_present(dir.path(), "realistic_frame_metrics"),
+                found
+            );
+        }
+        std::fs::create_dir_all(dir.path().join("src/bin"))?;
+        std::fs::write(dir.path().join("src/bin/implicit.rs"), "fn main() {}")?;
+        assert!(probe_target_present(dir.path(), "implicit"));
+        Ok(())
     }
 }

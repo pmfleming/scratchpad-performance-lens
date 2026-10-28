@@ -400,26 +400,7 @@ mod tests {
         CeilingStatus, CoverageStatus, PromiseHealth, ScaleCheckStatus,
     };
     use crate::shared;
-    use serde_json::{json, Value};
-
-    fn capacity(mut value: Value) -> CapacityScenario {
-        if let Some(samples) = value.get_mut("samples").and_then(Value::as_array_mut) {
-            for sample in samples {
-                let mut complete = serde_json::to_value(CapacitySample::default()).unwrap();
-                complete
-                    .as_object_mut()
-                    .unwrap()
-                    .extend(sample.as_object().unwrap().clone());
-                *sample = complete;
-            }
-        }
-        let mut complete = serde_json::to_value(CapacityScenario::default()).unwrap();
-        complete
-            .as_object_mut()
-            .unwrap()
-            .extend(value.as_object().unwrap().clone());
-        serde_json::from_value(complete).unwrap()
-    }
+    use serde_json::json;
 
     #[test]
     fn either_frame_tail_budget_changes_promise_health_and_keeps_scope() {
@@ -459,11 +440,15 @@ mod tests {
                 "threshold_ms": 100.0,
                 "budget_probe_ns": 125_000_000.0,
             })],
-            &[capacity(json!({
-                "scenario": "large_file_background_index_ceiling",
-                "ceiling_reached": false,
-                "samples": [{"workload_value": shared::GB}],
-            }))],
+            &[CapacityScenario {
+                scenario: "large_file_background_index_ceiling".into(),
+                ceiling_reached: Some(false),
+                samples: vec![CapacitySample {
+                    workload_value: Some(shared::GB),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
             &[json!({
                 "scenario": "large_utf8_load_peak_memory",
                 "samples": [{"workload_value": shared::GB}],
@@ -486,11 +471,14 @@ mod tests {
         let row = build_review_scenario(
             &scenario,
             &[],
-            &[capacity(json!({
-                "scenario": "tab_count_ceiling",
-                "ceiling_reached": null,
-                "samples": [{"workload_value": 10_000}],
-            }))],
+            &[CapacityScenario {
+                scenario: "tab_count_ceiling".into(),
+                samples: vec![CapacitySample {
+                    workload_value: Some(10_000),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
             &[],
             &[],
             true,
@@ -502,92 +490,72 @@ mod tests {
     }
 
     #[test]
-    fn partial_scale_evidence_does_not_prove_all_operations() {
+    fn partial_scale_evidence_and_other_operations_cannot_hide_early_failure() {
         let scenario = review_scenarios()
             .into_iter()
-            .find(|scenario| scenario.id == "many_files")
+            .find(|s| s.id == "many_files")
             .unwrap();
-        let row = build_review_scenario(
-            &scenario,
-            &[json!({
-                "benchmark_key": "search_current_completion_aggregate_size",
-                "workload_family": "search",
-                "threshold_ms": 100.0,
-                "budget_probe_ns": 80_000_000.0,
-            })],
-            &[capacity(json!({
-                "scenario": "many_file_first_visible_ceiling",
-                "ceiling_reached": true,
-                "first_failure_workload": 50_000,
-                "last_successful_workload": 10_000,
-            }))],
-            &[json!({
-                "scenario": "many_file_resource_tracking",
-                "samples": [{"workload_value": 10_000}],
-            })],
-            &[json!({"id": "search_all_tabs_profile", "available": true})],
-            false,
-            false,
-        );
-        assert_eq!(row.coverage_status, CoverageStatus::Thin);
-        assert_eq!(row.promise_health, PromiseHealth::AtRisk);
-        assert_eq!(row.ceilings_reached, 1);
-        assert_eq!(row.scale_failures, 0);
-        assert!(!row.scale_checks[0].met);
-        assert_eq!(
-            row.scale_checks[0].ceiling_status,
-            CeilingStatus::FailedAfterPromise
-        );
-        assert_eq!(row.scale_checks[0].headroom_workload, None);
-    }
-
-    #[test]
-    fn ceiling_hit_before_promised_scale_fails_even_with_other_scale_evidence() {
-        let scenario = review_scenarios()
-            .into_iter()
-            .find(|scenario| scenario.id == "many_files")
-            .unwrap();
-        let row = build_review_scenario(
-            &scenario,
-            &[json!({
-                "benchmark_key": "search_current_completion_aggregate_size",
-                "workload_family": "search",
-                "threshold_ms": 100.0,
-                "budget_probe_ns": 80_000_000.0,
-            })],
-            &[
-                capacity(json!({
-                    "scenario": "many_file_first_visible_ceiling",
-                    "ceiling_reached": true,
-                    "first_failure_workload": 5_000,
-                    "last_successful_workload": 1_000,
-                })),
-                capacity(json!({
-                    "scenario": "search_target_count_ceiling",
-                    "ceiling_reached": false,
-                    "last_successful_workload": 10_000,
-                    "samples": [{"workload_value": 10_000}],
-                })),
-            ],
-            &[json!({
-                "scenario": "many_file_resource_tracking",
-                "samples": [{"workload_value": 10_000}],
-            })],
-            &[json!({"id": "search_all_tabs_profile", "available": true})],
-            false,
-            false,
-        );
-        assert_eq!(row.coverage_status, CoverageStatus::Thin);
-        assert_eq!(row.promise_health, PromiseHealth::Fail);
-        assert_eq!(row.scale_failures, 1);
-        assert!(!row.scale_checks[0].met);
-        assert_eq!(
-            row.scale_checks[0].ceiling_status,
-            CeilingStatus::FailedBeforePromise
-        );
-        assert_eq!(
-            row.scale_checks[0].failed_capacity_scenarios,
-            ["many_file_first_visible_ceiling"]
-        );
+        for early in [false, true] {
+            let mut capacities = vec![CapacityScenario {
+                scenario: "many_file_first_visible_ceiling".into(),
+                ceiling_reached: Some(true),
+                first_failure_workload: Some(if early { 5_000 } else { 50_000 }),
+                last_successful_workload: Some(if early { 1_000 } else { 10_000 }),
+                ..Default::default()
+            }];
+            if early {
+                capacities.push(CapacityScenario {
+                    scenario: "search_target_count_ceiling".into(),
+                    ceiling_reached: Some(false),
+                    last_successful_workload: Some(10_000),
+                    samples: vec![CapacitySample {
+                        workload_value: Some(10_000),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                });
+            }
+            let row = build_review_scenario(
+                &scenario,
+                &[
+                    json!({"benchmark_key":"search_current_completion_aggregate_size", "workload_family":"search", "threshold_ms":100.0, "budget_probe_ns":80_000_000.0}),
+                ],
+                &capacities,
+                &[
+                    json!({"scenario":"many_file_resource_tracking", "samples":[{"workload_value":10_000}]}),
+                ],
+                &[json!({"id":"search_all_tabs_profile", "available":true})],
+                false,
+                false,
+            );
+            assert_eq!(row.coverage_status, CoverageStatus::Thin);
+            assert_eq!(
+                row.promise_health,
+                if early {
+                    PromiseHealth::Fail
+                } else {
+                    PromiseHealth::AtRisk
+                }
+            );
+            assert_eq!(row.ceilings_reached, 1);
+            assert_eq!(row.scale_failures, usize::from(early));
+            let check = &row.scale_checks[0];
+            assert!(!check.met);
+            assert_eq!(check.headroom_workload, None);
+            assert_eq!(
+                check.ceiling_status,
+                if early {
+                    CeilingStatus::FailedBeforePromise
+                } else {
+                    CeilingStatus::FailedAfterPromise
+                }
+            );
+            if early {
+                assert_eq!(
+                    check.failed_capacity_scenarios,
+                    ["many_file_first_visible_ceiling"]
+                );
+            }
+        }
     }
 }

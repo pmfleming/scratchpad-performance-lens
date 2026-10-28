@@ -1,11 +1,107 @@
-use super::stats::criterion_dir;
+use super::stats::over_threshold;
 use crate::{provenance, shared};
 use anyhow::{bail, ensure, Context, Result};
 use serde_json::{json, Value};
 use std::collections::{BTreeSet, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-pub(super) fn suite_names<'a>(args: &'a [&'a str]) -> Vec<&'a str> {
+pub(in crate::producers) fn run_benchmarks(
+    project_root: &Path,
+    skip: bool,
+    cargo_args: &[&str],
+    label: &str,
+) -> Option<String> {
+    if !project_root.is_dir() {
+        let root = project_root.display();
+        return Some(format!("project root does not exist: {root}"));
+    }
+    if skip {
+        return None;
+    }
+    let started = provenance::timestamp();
+    let context = provenance::context(project_root);
+    let suites = suite_names(cargo_args);
+    // Invalidate prior run manifests before executing: partial/failing reruns cannot reuse them.
+    let directory = criterion_dir(project_root);
+    for suite in &suites {
+        let _ = std::fs::remove_file(directory.join(format!("splens-{suite}.json")));
+    }
+    shared::run_progress_command(project_root, cargo_args, label)
+        .and_then(|()| record_run(project_root, &suites, started, context))
+        .err()
+        .map(|error| error.to_string())
+}
+
+fn criterion_dir(project_root: &Path) -> PathBuf {
+    shared::cargo_target_directory(project_root).join("criterion")
+}
+
+pub(in crate::producers) fn collect_benchmarks(
+    root: &Path,
+    suites: &[&str],
+    include: impl Fn(&Value) -> bool,
+    build: fn(&str, &str, &Value, &Value) -> Value,
+) -> (Vec<Value>, Vec<String>) {
+    let metadata = shared::load_benchmark_metadata(root);
+    let directory = criterion_dir(root);
+    let mut rows = Vec::new();
+    let mut invalid = Vec::new();
+    for path in shared::criterion_estimate_paths(&directory) {
+        let Some(name) = shared::benchmark_name_from_estimate_path(&directory, &path) else {
+            continue;
+        };
+        let key = shared::benchmark_key(&name);
+        let Some(meta) = metadata.get(key).filter(|meta| include(meta)) else {
+            continue;
+        };
+        let row = match read_estimates(root, &path, &name, suites) {
+            Ok(estimates) => build(&name, key, meta, &estimates),
+            Err(error) => {
+                invalid.push(format!("{name}: {error}"));
+                json!({"name": name, "benchmark_key": key,
+                    "workload_family": meta["workload_family"], "measurement_status": "invalid",
+                    "error": error.to_string(), "mean_ns": null, "budget_probe_ns": null})
+            }
+        };
+        rows.push(row);
+    }
+    (rows, invalid)
+}
+
+// Validate after publication so failed runs still expose their incomplete evidence.
+pub(in crate::producers) fn validate_measurements(
+    payload: &Value,
+    invalid: &[String],
+    probe_failure: Option<String>,
+    fail_on_slow: bool,
+    label: &str,
+) -> Result<()> {
+    if let Some(error) = probe_failure {
+        bail!("{label} probe failed: {error}");
+    }
+    ensure!(
+        payload.as_array().is_some_and(|rows| !rows.is_empty()) && invalid.is_empty(),
+        "{label} measurements incomplete or invalid: {}",
+        invalid.join("; ")
+    );
+    ensure!(
+        !fail_on_slow || !super::values_array(payload).iter().any(over_threshold),
+        "one or more {label} benchmarks exceeded threshold"
+    );
+    Ok(())
+}
+
+pub(in crate::producers) fn annotate_measurement(row: &mut Value, estimates: &Value, meta: &Value) {
+    let threshold = shared::authoritative_threshold_ms(meta);
+    annotate_budget(row, estimates, threshold);
+    row["measurement_finished_at"] = json!(estimates["measurement_finished_at"]);
+    row["threshold_authoritative"] = json!(threshold.is_some());
+    row["threshold_source"] = json!(meta["threshold_source"]);
+    row["metadata_source"] = json!(meta["metadata_source"]);
+    row["stale_budget_risk"] = json!(meta["stale_budget_risk"].as_bool().unwrap_or(false));
+}
+
+fn suite_names<'a>(args: &'a [&'a str]) -> Vec<&'a str> {
     args.windows(2)
         .filter(|pair| pair[0] == "--bench")
         .map(|pair| pair[1])
@@ -83,7 +179,7 @@ fn validate_run(
     Ok(())
 }
 
-pub(super) fn record_run(root: &Path, suites: &[&str], started: f64, context: Value) -> Result<()> {
+fn record_run(root: &Path, suites: &[&str], started: f64, context: Value) -> Result<()> {
     let directory = criterion_dir(root);
     let mut entries = serde_json::Map::new();
     for path in shared::criterion_estimate_paths(&directory) {
@@ -117,12 +213,7 @@ pub(super) fn record_run(root: &Path, suites: &[&str], started: f64, context: Va
     Ok(())
 }
 
-pub(in crate::producers) fn read_estimates(
-    root: &Path,
-    path: &Path,
-    name: &str,
-    suites: &[&str],
-) -> Result<Value> {
+fn read_estimates(root: &Path, path: &Path, name: &str, suites: &[&str]) -> Result<Value> {
     let bytes = std::fs::read(path)?;
     let mut estimates: Value = serde_json::from_slice(&bytes).context("invalid Criterion JSON")?;
     validate_estimates(&estimates)?;
@@ -160,11 +251,7 @@ fn validate_estimates(value: &Value) -> Result<()> {
     Ok(())
 }
 
-pub(in crate::producers) fn annotate_budget(
-    row: &mut Value,
-    estimates: &Value,
-    threshold: Option<f64>,
-) {
+fn annotate_budget(row: &mut Value, estimates: &Value, threshold: Option<f64>) {
     let interval = &estimates["mean"]["confidence_interval"];
     let bounds = interval["lower_bound"]
         .as_f64()
@@ -234,7 +321,7 @@ mod tests {
         let context = provenance::context(root.path());
         assert!(record_run(root.path(), &suites, 0.0, context.clone()).is_err());
         std::fs::create_dir_all(path.parent().unwrap())?;
-        std::fs::write(&path, json!({"mean":{"point_estimate":10},"median":{"point_estimate":10},"std_dev":{"point_estimate":0}}).to_string())?;
+        std::fs::write(&path, json!({"mean":{"point_estimate":10,"confidence_interval":{"lower_bound":9,"upper_bound":11,"confidence_level":0.95}},"median":{"point_estimate":10},"std_dev":{"point_estimate":0}}).to_string())?;
         assert!(record_run(
             root.path(),
             &suites,
@@ -264,13 +351,37 @@ mod tests {
             std::fs::write(&targets, metadata.to_string())?;
             assert!(record_run(root.path(), &suites, 0.0, context.clone()).is_err());
         }
-        std::fs::write(&targets, "{}")?;
+        std::fs::write(
+            &targets,
+            json!({"custom":{"workload_family":"search","threshold_ms":0.000008}}).to_string(),
+        )?;
         record_run(root.path(), &suites, 0.0, context.clone())?;
         assert!(read_estimates(root.path(), &path, "custom/32", &suites)?
             ["measurement_finished_at"]
             .is_number());
         let manifest_path = directory.join("splens-fixture.json");
         let original = std::fs::read(&manifest_path)?;
+        std::fs::copy(&manifest_path, directory.join("splens-search_speed.json"))?;
+        let config = crate::config::LensConfig {
+            project_name: "fixture".into(),
+            project_root: root.path().into(),
+            output_dir: root.path().join("analysis"),
+        };
+        for fail_on_slow in [false, true] {
+            let options = crate::cli::MeasureOptions {
+                skip_bench: true,
+                fail_on_slow,
+                index_only: false,
+            };
+            assert_eq!(
+                crate::producers::search_speed(&config, options).is_err(),
+                fail_on_slow
+            );
+            assert_eq!(
+                crate::producers::slowspots(&config, options).is_err(),
+                fail_on_slow
+            );
+        }
         for (field, value) in [
             ("context", json!({})),
             ("finished_at", json!(0)),

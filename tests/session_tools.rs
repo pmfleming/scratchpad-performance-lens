@@ -1,9 +1,9 @@
 use serde_json::{json, Value};
 use std::{fs, path::Path, process::Command};
 
-fn archive(path: &Path, mean: u64, other_health: &str) {
-    fs::create_dir_all(path.join("performance")).unwrap();
-    fs::write(path.join("check.exit"), "0\n").unwrap();
+fn archive(path: &Path, mean: u64, other_health: &str) -> anyhow::Result<()> {
+    fs::create_dir_all(path.join("performance"))?;
+    fs::write(path.join("check.exit"), "0\n")?;
     let rows: Vec<_> = [
         "session_persist_latency/10000",
         "session_restore_latency/10000",
@@ -22,20 +22,19 @@ fn archive(path: &Path, mean: u64, other_health: &str) {
         {"title": "Session Persistence Restore", "promise_health": "pass", "evidence": {"latency": rows}},
         {"title": "Other", "promise_health": other_health},
     ]});
-    fs::write(
+    Ok(fs::write(
         path.join("performance/performance_review.json"),
         report.to_string(),
-    )
-    .unwrap();
+    )?)
 }
 
 #[test]
-fn both_entrypoints_compare_archives_and_enforce_opt_in_promise_gate() {
-    let dir = tempfile::tempdir().unwrap();
+fn both_entrypoints_compare_archives_and_enforce_opt_in_promise_gate() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
     let baseline = dir.path().join("baseline");
     let current = dir.path().join("current");
-    archive(&baseline, 100, "pass");
-    archive(&current, 90, "at_risk");
+    archive(&baseline, 100, "pass")?;
+    archive(&current, 90, "at_risk")?;
     for bin in [
         env!("CARGO_BIN_EXE_splens"),
         env!("CARGO_BIN_EXE_scratchpad-performance-lens"),
@@ -49,7 +48,7 @@ fn both_entrypoints_compare_archives_and_enforce_opt_in_promise_gate() {
             if require_all {
                 command.arg("--require-all-promises");
             }
-            let output = command.output().unwrap();
+            let output = command.output()?;
             assert_eq!(
                 output.status.success(),
                 !require_all,
@@ -62,15 +61,15 @@ fn both_entrypoints_compare_archives_and_enforce_opt_in_promise_gate() {
             assert!(stdout.contains("0.900x baseline"));
         }
     }
-    archive(&current, 101, "pass");
+    archive(&current, 101, "pass")?;
     let output = Command::new(env!("CARGO_BIN_EXE_splens"))
         .arg("compare-session-baseline")
         .arg(&baseline)
         .arg(&current)
-        .output()
-        .unwrap();
+        .output()?;
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("Session latency acceptance: FAIL"));
+    Ok(())
 }
 
 #[test]
@@ -98,9 +97,10 @@ fn dirty_save_cli_requires_explicit_probe_and_valid_launch_count_before_writing(
 
 #[cfg(unix)]
 #[test]
-fn dirty_save_cli_writes_compatible_archive_and_prints_summary() {
+fn dirty_save_cli_archives_independent_launches_and_refuses_overwrite() -> anyhow::Result<()> {
+    use sha2::{Digest, Sha256};
     use std::os::unix::fs::PermissionsExt;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir()?;
     let binary = dir.path().join("probe with spaces");
     let samples = (0..9)
         .map(|step| {
@@ -111,33 +111,53 @@ fn dirty_save_cli_writes_compatible_archive_and_prints_summary() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    fs::write(&binary, format!("#!/bin/sh\ntest \"$1\" = --large-dirty-save || exit 2\ncat <<'SAMPLES'\n{samples}\nSAMPLES\n")).unwrap();
-    fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+    let pids_path = dir.path().join("pids");
+    fs::write(&binary, format!("#!/bin/sh\ntest \"$1\" = --large-dirty-save || exit 2\necho $$ >> '{}'\nprintf diagnostic >&2\ncat <<'SAMPLES'\n{samples}\nSAMPLES\n", pids_path.display()))?;
+    fs::set_permissions(&binary, fs::Permissions::from_mode(0o755))?;
     let archive = dir.path().join("archive");
-    let output = Command::new(env!("CARGO_BIN_EXE_splens"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_splens"));
+    let output = command
         .arg("measure-large-dirty-save")
         .arg("--binary")
         .arg(&binary)
         .arg("--output")
         .arg(&archive)
-        .args(["--launches", "1"])
-        .output()
-        .unwrap();
+        .args(["--launches", "3"])
+        .output()?;
     assert!(
         output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let summary: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let summary: Vec<Value> = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(summary.len(), 3);
+    for (launch, row) in summary.iter().enumerate() {
+        assert_eq!(
+            *row,
+            json!({"launch": launch, "median_save_ms": 1.0, "median_write_bytes": null, "write_bytes_available": false})
+        );
+        assert!(archive.join(format!("run-{launch}.jsonl")).is_file());
+        assert_eq!(
+            fs::read_to_string(archive.join(format!("run-{launch}.stderr")))?,
+            "diagnostic"
+        );
+    }
     assert_eq!(
         summary,
-        json!([{"launch": 0, "median_save_ms": 1.0, "median_write_bytes": null, "write_bytes_available": false}])
+        serde_json::from_slice::<Vec<Value>>(&fs::read(archive.join("summary.json"))?)?
     );
+    let metadata: Value = serde_json::from_slice(&fs::read(archive.join("metadata.json"))?)?;
+    assert_eq!(metadata["launches"], 3);
     assert_eq!(
-        summary,
-        serde_json::from_slice::<Value>(&fs::read(archive.join("summary.json")).unwrap()).unwrap()
+        metadata["binary_sha256"],
+        format!("{:x}", Sha256::digest(fs::read(&binary)?))
     );
-    assert!(archive.join("metadata.json").is_file());
-    assert!(archive.join("run-0.jsonl").is_file());
-    assert!(archive.join("run-0.stderr").is_file());
+    let pids = fs::read_to_string(&pids_path)?;
+    assert_eq!(
+        pids.lines().collect::<std::collections::HashSet<_>>().len(),
+        3
+    );
+    assert!(!command.output()?.status.success());
+    assert_eq!(fs::read_to_string(&pids_path)?, pids);
+    Ok(())
 }

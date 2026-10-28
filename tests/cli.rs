@@ -46,10 +46,10 @@ fn both_entrypoints_expose_catalog_and_telemetry_contracts() {
 }
 
 #[test]
-fn project_code_metrics_uses_a_self_contained_git_history() {
-    let root = tempfile::tempdir().unwrap();
-    std::fs::create_dir(root.path().join("src")).unwrap();
-    std::fs::write(root.path().join("src/main.rs"), "fn main() {}\n").unwrap();
+fn project_code_metrics_uses_a_self_contained_git_history() -> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
+    std::fs::create_dir(root.path().join("src"))?;
+    std::fs::write(root.path().join("src/main.rs"), "fn main() {}\n")?;
     for args in [
         vec!["init"],
         vec!["add", "."],
@@ -66,8 +66,7 @@ fn project_code_metrics_uses_a_self_contained_git_history() {
         let output = Command::new("git")
             .args(args)
             .current_dir(root.path())
-            .output()
-            .unwrap();
+            .output()?;
         assert!(
             output.status.success(),
             "{}",
@@ -84,21 +83,18 @@ fn project_code_metrics_uses_a_self_contained_git_history() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let report: Value = serde_json::from_slice(
-        &std::fs::read(
-            root.path()
-                .join("target/analysis/project_code_metrics.json"),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    let report: Value = serde_json::from_slice(&std::fs::read(
+        root.path()
+            .join("target/analysis/project_code_metrics.json"),
+    )?)?;
     assert_eq!(report["current"]["application"], 1);
     assert_eq!(report["history"].as_array().unwrap().len(), 1);
+    Ok(())
 }
 
 #[test]
-fn schema_export_writes_typed_artifact_contracts() {
-    let root = tempfile::tempdir().unwrap();
+fn schema_export_writes_typed_artifact_contracts() -> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
     let output = run(
         env!("CARGO_BIN_EXE_splens"),
         root.path(),
@@ -110,8 +106,7 @@ fn schema_export_writes_typed_artifact_contracts() {
         String::from_utf8_lossy(&output.stderr)
     );
     let index: Value =
-        serde_json::from_slice(&std::fs::read(root.path().join("schemas/index.json")).unwrap())
-            .unwrap();
+        serde_json::from_slice(&std::fs::read(root.path().join("schemas/index.json"))?)?;
     for (id, required) in [
         (
             "performance_review",
@@ -128,11 +123,12 @@ fn schema_export_writes_typed_artifact_contracts() {
             .iter()
             .any(|schema| schema["id"] == id));
         let schema =
-            std::fs::read_to_string(root.path().join(format!("schemas/{id}.schema.json"))).unwrap();
+            std::fs::read_to_string(root.path().join(format!("schemas/{id}.schema.json")))?;
         for field in required {
             assert!(schema.contains(field));
         }
     }
+    Ok(())
 }
 
 #[test]

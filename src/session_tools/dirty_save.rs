@@ -204,8 +204,16 @@ fn summarize(text: &str, launch: u8) -> Result<Summary> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use serde_json::Value;
+    use super::summarize;
+    #[cfg(unix)]
+    use super::{measure, MeasureLargeDirtySaveArgs};
+    use serde_json::{json, Value};
+    #[cfg(unix)]
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        time::{Duration, Instant},
+    };
 
     fn samples() -> Vec<Value> {
         (0..9)
@@ -274,46 +282,6 @@ mod tests {
         fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
         path
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn runner_archives_independent_launches_and_refuses_overwrite() {
-        let dir = tempfile::tempdir().unwrap();
-        let binary = probe(dir.path(), &format!(
-            "test \"$1\" = --large-dirty-save || exit 2\necho $$ >> '{}'\nprintf diagnostic >&2\ncat <<'SAMPLES'\n{}SAMPLES",
-            dir.path().join("pids").display(), ndjson(&samples())
-        ));
-        let args = MeasureLargeDirtySaveArgs {
-            binary,
-            output: dir.path().join("archive"),
-            launches: 3,
-        };
-        measure(&args, Duration::from_secs(5)).unwrap();
-        let summary: Value =
-            serde_json::from_slice(&fs::read(args.output.join("summary.json")).unwrap()).unwrap();
-        assert_eq!(summary.as_array().unwrap().len(), 3);
-        let metadata: Value =
-            serde_json::from_slice(&fs::read(args.output.join("metadata.json")).unwrap()).unwrap();
-        assert_eq!(metadata["launches"], 3);
-        assert_eq!(
-            metadata["binary_sha256"],
-            format!("{:x}", Sha256::digest(fs::read(&args.binary).unwrap()))
-        );
-        for launch in 0..3 {
-            assert_eq!(
-                fs::read_to_string(args.output.join(format!("run-{launch}.stderr"))).unwrap(),
-                "diagnostic"
-            );
-            assert!(args.output.join(format!("run-{launch}.jsonl")).is_file());
-        }
-        let pids = fs::read_to_string(dir.path().join("pids")).unwrap();
-        assert_eq!(
-            pids.lines().collect::<std::collections::HashSet<_>>().len(),
-            3
-        );
-        assert!(measure(&args, Duration::from_secs(5)).is_err());
-        assert_eq!(fs::read_to_string(dir.path().join("pids")).unwrap(), pids);
     }
 
     #[cfg(unix)]

@@ -182,6 +182,28 @@ pub fn run_command(project_root: &Path, args: &[&str]) -> Result<std::process::O
         .with_context(|| format!("failed to run {}", args.join(" ")))
 }
 
+pub(crate) fn cargo_target_directory(project_root: &Path) -> PathBuf {
+    // Cargo resolves workspace roots, environment overrides and .cargo/config.toml.
+    run_command(
+        project_root,
+        &["cargo", "metadata", "--no-deps", "--format-version", "1"],
+    )
+    .ok()
+    .filter(|output| output.status.success())
+    .and_then(|output| serde_json::from_slice::<Value>(&output.stdout).ok())
+    .and_then(|meta| meta["target_directory"].as_str().map(PathBuf::from))
+    .unwrap_or_else(|| {
+        let path = std::env::var_os("CARGO_TARGET_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("target"));
+        if path.is_absolute() {
+            path
+        } else {
+            project_root.join(path)
+        }
+    })
+}
+
 pub fn run_progress_command(project_root: &Path, args: &[&str], label: &str) -> Result<()> {
     eprintln!("{label}");
     let (program, rest) = args.split_first().context("empty command")?;

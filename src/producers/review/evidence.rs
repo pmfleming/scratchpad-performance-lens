@@ -211,26 +211,26 @@ mod tests {
 
     #[test]
     fn resource_contract_detects_cache_violations_and_failed_samples() {
-        assert!(resource_contract_failed(&serde_json::json!({
-            "cache_bound_held": false,
-            "cache_bound_violations": 1,
-            "samples": [{"status": "ok"}]
-        })));
-        assert!(resource_contract_failed(&serde_json::json!({
-            "samples": [{"status": "panic"}]
-        })));
-        assert!(!resource_contract_failed(&serde_json::json!({
-            "cache_bound_held": true,
-            "cache_bound_violations": 0,
-            "samples": [{"status": "ok"}]
-        })));
+        for (held, violations, status, failed) in [
+            (false, 0, "ok", true),
+            (true, 1, "ok", true),
+            (true, 0, "panic", true),
+            (true, 0, "ok", false),
+        ] {
+            assert_eq!(
+                resource_contract_failed(&serde_json::json!({
+                    "cache_bound_held":held, "cache_bound_violations":violations, "samples":[{"status":status}]
+                })),
+                failed
+            );
+        }
     }
 
     #[test]
-    fn source_status_distinguishes_loaded_missing_and_unparseable() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("slowspots.json"), "[]").unwrap();
-        std::fs::write(dir.path().join("frame_metrics.json"), "{truncated").unwrap();
+    fn source_status_distinguishes_loaded_missing_and_unparseable() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        std::fs::write(dir.path().join("slowspots.json"), "[]")?;
+        std::fs::write(dir.path().join("frame_metrics.json"), "{truncated")?;
         let config = LensConfig {
             project_name: "fixture".to_string(),
             project_root: dir.path().to_path_buf(),
@@ -238,21 +238,16 @@ mod tests {
         };
 
         let statuses = source_status(&config);
-        let slowspots = statuses.iter().find(|row| row.id == "slowspots").unwrap();
-        let frame_metrics = statuses
-            .iter()
-            .find(|row| row.id == "frame_metrics")
-            .unwrap();
-        let search = statuses
-            .iter()
-            .find(|row| row.id == "search_speed")
-            .unwrap();
-
-        assert_eq!(slowspots.status, "unverified");
-        assert!(!slowspots.available);
-        assert_eq!(frame_metrics.status, "unparseable");
-        assert!(!frame_metrics.available);
-        assert!(frame_metrics.error.is_some());
-        assert_eq!(search.status, "missing");
+        for (id, status, has_error) in [
+            ("slowspots", "unverified", false),
+            ("frame_metrics", "unparseable", true),
+            ("search_speed", "missing", false),
+        ] {
+            let row = statuses.iter().find(|row| row.id == id).unwrap();
+            assert_eq!(row.status, status);
+            assert!(!row.available);
+            assert_eq!(row.error.is_some(), has_error);
+        }
+        Ok(())
     }
 }
