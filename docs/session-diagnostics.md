@@ -6,7 +6,7 @@ interpret lens artifacts and orchestrate external measurements. Scratchpad still
 owns the `resource_probe` implementation and Criterion benchmarks that depend on
 its production code. Neither helper belongs in Scratchpad's `xtask` or runtime.
 
-Both commands are available through `splens` and `scratchpad-performance-lens`.
+These commands are available through `splens` and `scratchpad-performance-lens`.
 They are opt-in, independent of `measure all`, and do not write dashboard
 artifacts or claim fresh provenance for archived evidence.
 
@@ -97,3 +97,33 @@ all launches succeed. Existing archives are never overwritten.
 
 These summaries describe nine saves per independent launch; they do not establish
 a population percentile, confidence interval, or dashboard promise compliance.
+
+## Session maintenance and subsequent saves
+
+```console
+splens measure-session-maintenance --binary /absolute/path/to/resource_probe --output NEW_RUN_DIR --launches 3
+```
+
+This opt-in diagnostic invokes `--session-maintenance` with a 600-second deadline
+per independent launch. The Scratchpad fixture contains non-repeating 50 MiB live
+text and 128 initial closed archives. Setup, legacy-digest injection and clock
+advancement are excluded. Nine samples each cover usage accounting, token lookup,
+archive append, save after legacy history backfill, save after navigation, and a
+new periodic snapshot. Archives and snapshots grow during a launch; sample order
+is fixed. These are warm-worker measurements, not cold startup or a concurrent
+reader/writer throughput test. The navigation case checkpoints a return state,
+then saves the live document; it isolates inventory preservation rather than
+measuring the UI's document-install path.
+
+Archives have the same metadata/raw-stream/summary layout as large dirty saves.
+Each launch summary contains per-scenario median action, save, total duration,
+maximum total duration, incremental snapshot bytes hashed, and process write-byte
+median (null unless all nine counters exist). Hash-work counters exclude the
+separate full-text identity hash for new snapshots. Full elapsed/save durations
+include that work. Durations and byte counts are diagnostics, not new authoritative
+budgets; maxima of nine samples are not population percentiles.
+
+The lens rejects missing/duplicate/failed scenarios, incorrect fixture identity or
+scope, and missing/invalid durations or hash-work metrics. Raw evidence survives
+failures; no successful summary is published unless all launches validate. The
+probe binary SHA-256 and selected probe flag are recorded for reproducibility.

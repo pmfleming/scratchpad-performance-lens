@@ -57,6 +57,15 @@ pub(crate) fn measure_large_dirty_save(args: MeasureLargeDirtySaveArgs) -> Resul
 }
 
 fn measure(args: &MeasureLargeDirtySaveArgs, timeout: Duration) -> Result<()> {
+    measure_with(args, timeout, "--large-dirty-save", summarize)
+}
+
+pub(super) fn measure_with<T: Serialize>(
+    args: &MeasureLargeDirtySaveArgs,
+    timeout: Duration,
+    flag: &str,
+    summarize: impl Fn(&str, u8) -> Result<T>,
+) -> Result<()> {
     ensure!(
         (1..=20).contains(&args.launches),
         "launches must be between 1 and 20"
@@ -92,6 +101,7 @@ fn measure(args: &MeasureLargeDirtySaveArgs, timeout: Duration) -> Result<()> {
             "binary_sha256": digest,
             "platform": format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
             "launches": args.launches,
+            "probe_flag": flag,
             "io_definition": "process write_bytes delta; WAL plus automatic checkpoint writes, not device traffic",
         }),
     )?;
@@ -99,7 +109,7 @@ fn measure(args: &MeasureLargeDirtySaveArgs, timeout: Duration) -> Result<()> {
     for launch in 0..args.launches {
         let stdout = args.output.join(format!("run-{launch}.jsonl"));
         let stderr = args.output.join(format!("run-{launch}.stderr"));
-        run_probe(&binary, &stdout, &stderr, timeout).with_context(|| {
+        run_probe(&binary, &stdout, &stderr, timeout, flag).with_context(|| {
             format!("launch {launch}; raw evidence in {}", args.output.display())
         })?;
         let samples = fs::read_to_string(&stdout)?;
@@ -118,11 +128,17 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
     Ok(())
 }
 
-fn run_probe(binary: &Path, stdout: &Path, stderr: &Path, timeout: Duration) -> Result<()> {
+fn run_probe(
+    binary: &Path,
+    stdout: &Path,
+    stderr: &Path,
+    timeout: Duration,
+    flag: &str,
+) -> Result<()> {
     // Direct-to-file output cannot deadlock on a full pipe and preserves evidence
     // on failure/timeout without buffering an unbounded subprocess in memory.
     let mut child = Command::new(binary)
-        .arg("--large-dirty-save")
+        .arg(flag)
         .stdin(Stdio::null())
         .stdout(File::create_new(stdout)?)
         .stderr(File::create_new(stderr)?)

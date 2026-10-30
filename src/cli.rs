@@ -122,6 +122,8 @@ enum Command {
     CompareSessionBaseline(crate::session_tools::CompareSessionBaselineArgs),
     /// Archive independent large-dirty-save probe launches (opt-in diagnostic).
     MeasureLargeDirtySave(crate::session_tools::MeasureLargeDirtySaveArgs),
+    /// Archive usage/archive/history maintenance and subsequent save samples.
+    MeasureSessionMaintenance(crate::session_tools::MeasureLargeDirtySaveArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -191,6 +193,9 @@ pub fn run_cli() -> Result<()> {
         }
         Command::MeasureLargeDirtySave(args) => {
             crate::session_tools::measure_large_dirty_save(args)
+        }
+        Command::MeasureSessionMaintenance(args) => {
+            crate::session_tools::measure_session_maintenance(args)
         }
     }
 }

@@ -105,6 +105,48 @@ fn dirty_save_cli_requires_explicit_probe_and_valid_launch_count_before_writing(
 
 #[cfg(unix)]
 #[test]
+fn maintenance_cli_runs_the_selected_probe_and_requires_all_scenarios() -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir()?;
+    let binary = dir.path().join("maintenance probe");
+    let samples = ["stored_usage", "closed_token_lookup", "closed_archive_append", "save_after_history_backfill", "save_after_navigation", "periodic_snapshot_save"]
+        .iter().flat_map(|scenario| (0..9).map(move |step| json!({
+            "scenario": scenario, "step_index": step, "status": "ok", "measurement_scope": "prepared_operation",
+            "workload_details": {"fixture_revision": 1, "buffer_bytes": 50*1024*1024, "initial_archives": 128, "synchronous": "FULL"},
+            "phase_elapsed_ns": {"action_ns": 1_000_000, "save_ns": 2_000_000}, "elapsed_ns": 3_000_000,
+            "result_unit": "snapshot-bytes-hashed", "result_value": 65536, "process_resources": {"write_bytes": null}
+        }).to_string())).collect::<Vec<_>>().join("\n");
+    fs::write(&binary, format!("#!/bin/sh\ntest \"$1\" = --session-maintenance || exit 2\ncat <<'SAMPLES'\n{samples}\nSAMPLES\n"))?;
+    fs::set_permissions(&binary, fs::Permissions::from_mode(0o755))?;
+    let archive = dir.path().join("archive");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_splens"));
+    let output = command
+        .arg("measure-session-maintenance")
+        .arg("--binary")
+        .arg(&binary)
+        .arg("--output")
+        .arg(&archive)
+        .args(["--launches", "1"])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(summary[0]["scenarios"].as_array().unwrap().len(), 6);
+    assert_eq!(
+        summary[0]["scenarios"][3]["median_snapshot_bytes_hashed"],
+        65536
+    );
+    let metadata: Value = serde_json::from_slice(&fs::read(archive.join("metadata.json"))?)?;
+    assert_eq!(metadata["probe_flag"], "--session-maintenance");
+    assert!(!command.output()?.status.success());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
 fn dirty_save_cli_archives_independent_launches_and_refuses_overwrite() -> anyhow::Result<()> {
     use sha2::{Digest, Sha256};
     use std::os::unix::fs::PermissionsExt;

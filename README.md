@@ -76,6 +76,7 @@ scripts in Scratchpad:
 ```console
 splens compare-session-baseline BASELINE_RUN CURRENT_RUN --require-all-promises
 splens measure-large-dirty-save --binary /absolute/path/to/resource_probe --output NEW_RUN_DIR --launches 3
+splens measure-session-maintenance --binary /absolute/path/to/resource_probe --output NEW_RUN_DIR --launches 3
 ```
 
 These are opt-in diagnostics, not part of `measure all`. They compare archived
