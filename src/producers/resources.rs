@@ -216,7 +216,7 @@ fn resource_scenario(scenario: &str, mut events: Vec<Value>, gap: Option<&str>) 
         "budget_misses": events.iter().filter(|event| super::resource_budgets::status(event) == "fail").count(),
         "unbudgeted_samples": events.iter().filter(|event| super::resource_budgets::status(event) == "unbudgeted").count(),
         "max_setup_elapsed_ms": max_i64(&events, "setup_elapsed_ns").map(|value| value as f64 / 1_000_000.0),
-        "max_elapsed_ms": events.iter().map(|event| event["elapsed_ns"].as_f64().unwrap_or(0.0) / 1_000_000.0).fold(0.0, f64::max),
+        "max_elapsed_ms": events.iter().filter_map(elapsed_ms).reduce(f64::max),
         "max_allocated_bytes": max_i64(&events, "allocated_bytes"),
         "max_peak_live_bytes": max_i64(&events, "peak_live_bytes"),
         "max_live_bytes": max_i64(&events, "live_bytes"),
@@ -268,10 +268,7 @@ fn resource_sample(event: &Value) -> Value {
         "setup_elapsed_ms".into(),
         json!(event["setup_elapsed_ns"].as_f64().map(|ns| ns / 1e6)),
     );
-    sample.insert(
-        "elapsed_ms".into(),
-        json!(event["elapsed_ns"].as_f64().unwrap_or(0.0) / 1e6),
-    );
+    sample.insert("elapsed_ms".into(), json!(elapsed_ms(event)));
     sample.insert(
         "write_amplification".into(),
         json!(write_amplification(event)),
@@ -293,9 +290,16 @@ fn resource_sample(event: &Value) -> Value {
     sample.insert("cache_bound_held".into(), json!(cache_bound_held(event)));
     sample.insert(
         "status".into(),
-        json!(event["status"].as_str().unwrap_or("ok")),
+        json!(event["status"].as_str().unwrap_or("unknown")),
     );
     Value::Object(sample)
+}
+
+fn elapsed_ms(event: &Value) -> Option<f64> {
+    event["elapsed_ns"]
+        .as_f64()
+        .filter(|n| n.is_finite() && *n >= 0.0)
+        .map(|n| n / 1e6)
 }
 
 fn write_amplification(event: &Value) -> Option<f64> {
@@ -344,6 +348,17 @@ fn max_i64(events: &[Value], key: &str) -> Option<i64> {
 
 #[cfg(test)]
 mod selection_tests {
+    #[test]
+    fn missing_resource_latency_and_status_remain_unknown() {
+        use serde_json::json;
+        let event = json!({"scenario":"unknown","workload_value":1});
+        let sample = super::resource_sample(&event);
+        assert!(sample["elapsed_ms"].is_null());
+        assert_eq!(sample["status"], "unknown");
+        let report = super::summarize_resources(vec![event], "partial");
+        assert!(report["scenarios"][0]["max_elapsed_ms"].is_null());
+        assert!(super::super::render::render_resources(&report).contains("max_elapsed=unknown"));
+    }
     #[test]
     fn persistence_write_ratio_requires_known_positive_logical_bytes() {
         use serde_json::json;

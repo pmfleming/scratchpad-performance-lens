@@ -244,3 +244,21 @@ Cold reads during concurrent saves straddled 4 ms across independent runs
 uncertain rather than pass. Evidence: Scratchpad
 `target/analysis/co-development/cycle-8/`. Validation: 702 app tests passed
 (seven ignored), 88 lens tests passed, and strict Clippy passed in both repos.
+
+## Cycle 9: retain original allocations and widen metadata scanning
+
+Original text storage shares the supplied String without copying its body into
+an Arc<str>. Snapshot tests verify allocation retention and isolation after an
+edit. Metadata inspection skips printable ASCII in 32-byte blocks, with
+exhaustive classifier and scalar-reference boundary tests. The edited-preview
+sweep now includes the required 10,000 pieces without removing smaller cases.
+
+The lens preserves missing resource latency and status as unknown rather than
+inventing zero milliseconds or success. The final focused evidence is in
+Scratchpad `target/analysis/co-development/cycle-9-final/`: edited previews
+complete in at most 5.9 ms; 10,000-tab build and installation still miss their
+140 ms budgets (239.8 and 257.8 ms). Buffer construction accounts for 231.5 ms
+of the targeted build, while workspace construction accounts for 4.2 ms.
+The allocation change removes the full-body copy, but does not resolve latency.
+Validation: 704 app tests passed (seven ignored), 89 lens tests passed, and
+strict Clippy passed in both repositories.

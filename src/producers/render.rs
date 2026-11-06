@@ -175,9 +175,11 @@ pub(super) fn render_resources(payload: &Value) -> String {
         .iter()
         .map(|item| {
             let mut row = format!(
-                "- {}: max_elapsed={:.1} ms | peak_heap={} | total_alloc={} | max_ws={}",
+                "- {}: max_elapsed={} | peak_heap={} | total_alloc={} | max_ws={}",
                 text(item, "scenario_label", "-"),
-                shared::f64_field(item, &["max_elapsed_ms"]),
+                item["max_elapsed_ms"]
+                    .as_f64()
+                    .map_or_else(|| "unknown".into(), |ms| format!("{ms:.1} ms")),
                 shared::human_bytes(item["max_peak_live_bytes"].as_i64()),
                 shared::human_bytes(item["max_allocated_bytes"].as_i64()),
                 shared::human_bytes(item["max_working_set_bytes"].as_i64()),
