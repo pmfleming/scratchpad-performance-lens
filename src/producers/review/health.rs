@@ -266,6 +266,7 @@ pub(super) fn scenario_opportunities(
         PromiseHealth::AtRisk => {
             vec!["Fill missing evidence before marking this promise healthy.".to_string()]
         }
+        PromiseHealth::PassingButRegressed => vec!["Absolute budgets pass, but measurements regressed against the accepted baseline.".into()],
         PromiseHealth::Pass => {
             vec!["Promise health is currently passing; keep the evidence fresh.".to_string()]
         }

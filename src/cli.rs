@@ -121,6 +121,8 @@ enum Command {
     Telemetry(ConfigArgs),
     Schema(SchemaArgs),
     /// Compare archived session latency without relaxing benchmark budgets.
+    AcceptBaseline(crate::baselines::BaselineArgs),
+    CompareBaseline(crate::baselines::BaselineArgs),
     CompareSessionBaseline(crate::session_tools::CompareSessionBaselineArgs),
     /// Archive independent large-dirty-save probe launches (opt-in diagnostic).
     MeasureLargeDirtySave(crate::session_tools::MeasureLargeDirtySaveArgs),
@@ -196,6 +198,8 @@ pub fn run_cli() -> Result<()> {
         Command::Telemetry(args) => telemetry(args),
         Command::Measure(args) => measure(args),
         Command::Schema(args) => schema(args),
+        Command::AcceptBaseline(args) => crate::baselines::accept(args),
+        Command::CompareBaseline(args) => crate::baselines::compare(args),
         Command::CompareSessionBaseline(args) => {
             crate::session_tools::compare_session_baseline(args)
         }

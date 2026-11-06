@@ -68,6 +68,8 @@ pub struct PerformanceReviewSummary {
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct PromiseHealthSummary {
     pub pass: usize,
+    #[serde(default)]
+    pub passing_but_regressed: usize,
     pub at_risk: usize,
     pub fail: usize,
     pub unmeasured: usize,
@@ -87,6 +89,8 @@ pub struct PerformanceReviewScenario {
     pub title: String,
     pub promise: String,
     pub promise_health: PromiseHealth,
+    #[serde(default)]
+    pub baseline_comparison: BaselineComparison,
     pub synthetic_evidence: bool,
     pub coverage_status: CoverageStatus,
     pub coverage_score: f64,
@@ -110,6 +114,7 @@ pub struct PerformanceReviewScenario {
 #[serde(rename_all = "snake_case")]
 pub enum PromiseHealth {
     Pass,
+    PassingButRegressed,
     AtRisk,
     Fail,
     Unmeasured,
@@ -225,4 +230,23 @@ pub struct Presentation {
     pub notes: Vec<String>,
     pub primary_view: String,
     pub secondary_view: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RegressionStatus {
+    #[default]
+    NoBaseline,
+    Stable,
+    Regressed,
+    EnvironmentMismatch,
+    EvidenceMismatch,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
+pub struct BaselineComparison {
+    pub status: RegressionStatus,
+    pub compared_measurements: usize,
+    pub regressed_measurements: Vec<String>,
+    pub worst_ratio: Option<f64>,
 }

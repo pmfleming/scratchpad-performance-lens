@@ -240,3 +240,23 @@ unverified. Counters cover the process, including concurrent saves, and do not
 attribute device I/O to a particular thread. The 4 ms target comes from the
 storage plan. Resource samples report write amplification when logical write
 bytes and process write counters are available; unavailable counters stay null.
+
+## Accepted promise baselines
+
+After reviewing a complete, fresh run, use:
+
+```console
+splens accept-baseline --config splens.toml
+splens compare-baseline --config splens.toml
+```
+
+Both commands accept `--baseline PATH`; the default is
+`OUTPUT/baselines/accepted.json`. Acceptance archives the previous snapshot and
+requires complete real coverage. A measured budget failure can be accepted as an
+observation without waiving its limit. Snapshots bind their contents and preserve
+revision, environment, workload, fixture, backing and scope. Comparisons refuse
+mismatched inventories or environments. By default a slowdown must exceed 20%
+and have non-overlapping observed ranges to be called a regression. Regular
+reviews compare against the default accepted snapshot automatically. A passing
+promise with such a regression becomes `passing_but_regressed`; failing promises
+remain failing. `baseline_comparison.json` contains explicit comparison results.

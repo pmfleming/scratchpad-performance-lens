@@ -10,3 +10,5 @@ mod shared;
 pub use cli::run_cli;
 
 pub mod measurement_contract;
+
+pub mod baselines;

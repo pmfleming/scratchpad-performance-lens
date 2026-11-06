@@ -59,7 +59,7 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
     let capacity_synthetic = capacity.meta.synthetic;
     let resources_synthetic = payload_synthetic(&resources);
     let scenarios = review_scenarios();
-    let scenario_payload: Vec<_> = scenarios
+    let mut scenario_payload: Vec<_> = scenarios
         .iter()
         .map(|scenario| {
             build_review_scenario(
@@ -73,6 +73,7 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
             )
         })
         .collect();
+    crate::baselines::annotate(config, &inputs.context, &mut scenario_payload)?;
     let target_promises: Vec<_> = scenarios
         .iter()
         .map(|scenario| scenario.promise.to_string())
@@ -126,6 +127,7 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
             resource_rows: resource_rows.len(),
             flamegraph_rows: values_array(&flamegraphs).len(),
             promise_health: PromiseHealthSummary {
+                passing_but_regressed: scenario_payload.iter().filter(|row|row.promise_health == PromiseHealth::PassingButRegressed).count(),
                 pass: scenario_payload
                     .iter()
                     .filter(|row| row.promise_health == PromiseHealth::Pass)
@@ -319,6 +321,7 @@ fn build_review_scenario(
         title: scenario.title.to_string(),
         promise: scenario.promise.to_string(),
         promise_health,
+        baseline_comparison: Default::default(),
         synthetic_evidence,
         coverage_status,
         coverage_score: if required == 0 {
