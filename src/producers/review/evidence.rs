@@ -46,7 +46,10 @@ pub(super) fn over_budget_latency(row: &&Value) -> bool {
 }
 
 pub(super) fn resource_contract_failed(row: &Value) -> bool {
-    row.get("cache_bound_held").and_then(Value::as_bool) == Some(false)
+    row["samples"]
+        .as_array()
+        .is_some_and(|samples| samples.iter().any(|s| s["fixture_valid"] == false))
+        || row.get("cache_bound_held").and_then(Value::as_bool) == Some(false)
         || row
             .get("cache_bound_violations")
             .and_then(Value::as_u64)

@@ -224,6 +224,10 @@ fn resource_sample(event: &Value) -> Value {
         "elapsed_ms".into(),
         json!(event["elapsed_ns"].as_f64().unwrap_or(0.0) / 1e6),
     );
+    sample.insert(
+        "fixture_valid".into(),
+        json!(crate::measurement_contract::import_fixture_valid(event)),
+    );
     sample.insert("cache_bound_held".into(), json!(cache_bound_held(event)));
     sample.insert(
         "status".into(),
@@ -302,7 +306,7 @@ mod tests {
         ] {
             let payload = summarize_resources(
                 vec![json!({"scenario":"file_backed_chunk_cache_tracking",
-                "measurement_contract":{"text_backing":"store","production_path":true,"code_path":"read_file_in_store"},
+                "measurement_contract":{"fixture_kind":"non_repeating","fixture_revision":2,"text_backing":"store","production_path":true,"code_path":"read_file_in_store"},
                 "elapsed_ns":10,"status":"ok","workload_value":shared::GB,"measurement_scope":"prepared_operation",
                 "retained_file_chunks":retained,"file_chunk_cache_limit":32,"result_value":shared::GB,
                 "live_bytes":100,"baseline_live_bytes":200,"live_growth_bytes":-100,

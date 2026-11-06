@@ -100,6 +100,9 @@ pub(super) fn gap_evidence(scenario: &str, events: &[Value], synthetic: bool) ->
         if !crate::measurement_contract::eligible(scenario, &event["measurement_contract"]) {
             missing.push("production_store_path".into());
         }
+        if !crate::measurement_contract::import_fixture_valid(event) {
+            missing.push("non_deduplicated_import".into());
+        }
         missing.extend(
             sample_requirements(event, fields)
                 .into_iter()

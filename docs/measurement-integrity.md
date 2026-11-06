@@ -189,3 +189,12 @@ for store backing; scroll evidence must exceed the 16 MiB storage threshold.
 Owned-text component rows remain diagnostics. Search uses snapshot chunk windows;
 paste measures the app input/preparation/publication workflow without an injected
 writer pause. GPU submission and presentation remain outside frame scope.
+
+## Fixture identity and deduplication
+
+Store workloads use deterministic non-repeating UTF-8 fixtures (revision 2).
+The fixture kind and revision travel with the measurement contract. Setting
+`SCRATCHPAD_FIXTURE_KIND=dedup` selects a repeating fixture for diagnostics;
+such samples cannot prove a storage-sensitive promise. Fresh load probes use
+an isolated store and report logical bytes and database growth. Growth below
+half the logical body flags the fixture as invalid, independently of latency.
