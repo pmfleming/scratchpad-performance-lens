@@ -262,3 +262,41 @@ of the targeted build, while workspace construction accounts for 4.2 ms.
 The allocation change removes the full-body copy, but does not resolve latency.
 Validation: 704 app tests passed (seven ignored), 89 lens tests passed, and
 strict Clippy passed in both repositories.
+
+## Full promise check after cycle 9
+
+All eight producers completed in 884.2 seconds. The review reports six failing
+promises and Many Views at risk, with 16 budget misses and six unmet scale
+checks. Search UI workflows all passed their workload contracts and budgets.
+Capacity met the 10,000-file visibility/completion targets and tab/view targets;
+GB indexing, store-backed search and paste remain below promised scale. Twelve
+resource scenarios still exceed their budgets. Prepared preview and fragmented
+mutation rows now pass with the required workloads.
+
+Evidence: Scratchpad `target/analysis/co-development/promises-after-cycle-9/`.
+Capacity controls were stable. The search-workflow control was noisy (within-run
+max/min 1.562), so this is not an accepted all-promise baseline. The review also
+propagates noise from the derived speed report to every promise; this warrants
+more precise attribution rather than weakening measurement thresholds.
+
+## Cycle 10: attribute cold reads to the reader and reuse its statement
+
+The dedicated foreground reader exposes its Linux thread I/O counters for
+profiling. Normal reads do not sample counters. Cold-read verification now
+excludes concurrent writer and background-reader I/O; unsupported counters stay
+unknown. The reader reuses its body-query statement, drains each cursor, and
+recreates the statement after a failed query. Regression coverage exercises
+missing rows, rebinding, and separation of foreground/background counters.
+
+The lens requires reader-scoped raw samples and recomputes the verified count
+and p99 before closing the cold-read measurement gap. Process-scoped or
+inconsistent claims cannot prove it. Failed/missing resource statuses also
+cannot pass a budget; malformed observations are invalid, not unbudgeted.
+
+The focused run had stable controls. All 128 cold reads were physically verified
+on the foreground reader during 362 saves; observed p99 was 3.547 ms against
+4 ms. This is one independent run, not a population-tail guarantee. The 64 MiB
+store-backed search resource workload also passed its declared five-second
+budget; the stricter capacity search promise remains unresolved. Evidence:
+Scratchpad `target/analysis/co-development/cycle-10/`. Validation: 705 app tests
+passed (seven ignored), 89 lens tests passed, and strict Clippy passed in both.

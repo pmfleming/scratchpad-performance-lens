@@ -246,10 +246,7 @@ fn sample_requirements<'a>(event: &Value, fields: &'a [&str]) -> Vec<&'a str> {
 fn scenario_requirement(scenario: &str, event: &Value) -> Option<&'static str> {
     match scenario {
         "cold_reads_during_save"
-            if event["phase_elapsed_ns"]["physical_read_verified_count"]
-                .as_u64()
-                .unwrap_or(0)
-                < 100
+            if !verified_cold_reads(&event["phase_elapsed_ns"])
                 || event["phase_elapsed_ns"]["concurrent_saves"]
                     .as_u64()
                     .unwrap_or(0)
@@ -289,6 +286,42 @@ fn scenario_requirement(scenario: &str, event: &Value) -> Option<&'static str> {
         }
         _ => None,
     }
+}
+
+fn verified_cold_reads(phase: &Value) -> bool {
+    if phase["physical_io_scope"] != "foreground_reader_thread_read_bytes" {
+        return false;
+    }
+    let Some(samples) = phase["cold_read_samples"].as_array() else {
+        return false;
+    };
+    if phase["read_sample_count"].as_u64() != Some(samples.len() as u64) {
+        return false;
+    }
+    let mut verified = Vec::new();
+    for sample in samples {
+        let Some(elapsed) = sample["elapsed_ns"].as_u64().filter(|value| *value > 0) else {
+            return false;
+        };
+        let Some(claimed) = sample["physical_read_verified"].as_bool() else {
+            return false;
+        };
+        let observed = sample["eviction_succeeded"] == true
+            && sample["read_bytes"].as_u64().is_some_and(|bytes| bytes > 0);
+        if claimed != observed {
+            return false;
+        }
+        if claimed {
+            verified.push(elapsed);
+        }
+    }
+    if verified.len() < 100
+        || phase["physical_read_verified_count"].as_u64() != Some(verified.len() as u64)
+    {
+        return false;
+    }
+    verified.sort_unstable();
+    phase["cold_read_p99_ns"].as_u64() == Some(verified[(verified.len() * 99).div_ceil(100) - 1])
 }
 
 fn full_history_save(event: &Value) -> bool {
@@ -331,7 +364,33 @@ mod tests {
             "phase_elapsed_ns":{"cold_read_p99_ns":3000000,"physical_read_verified_count":0,"concurrent_saves":3}});
         assert!(!proven("cold_reads_during_save", &row));
         row["phase_elapsed_ns"]["physical_read_verified_count"] = json!(128);
+        assert!(!proven("cold_reads_during_save", &row));
+        row["phase_elapsed_ns"]["physical_io_scope"] = json!("foreground_reader_thread_read_bytes");
+        row["phase_elapsed_ns"]["read_sample_count"] = json!(128);
+        row["phase_elapsed_ns"]["cold_read_samples"] = json!(vec![
+            json!({
+                "elapsed_ns":3000000,"eviction_succeeded":true,
+                "physical_read_verified":true,"read_bytes":4096
+            });
+            128
+        ]);
         assert!(proven("cold_reads_during_save", &row));
+        for (field, value) in [
+            (
+                "physical_io_scope",
+                json!("process read_bytes during each read; includes concurrent saves"),
+            ),
+            ("physical_read_verified_count", json!(127)),
+            ("read_sample_count", json!(127)),
+            ("cold_read_p99_ns", json!(1)),
+        ] {
+            let mut invalid = row.clone();
+            invalid["phase_elapsed_ns"][field] = value;
+            assert!(!proven("cold_reads_during_save", &invalid), "{field}");
+        }
+        let mut cached = row.clone();
+        cached["phase_elapsed_ns"]["cold_read_samples"][0]["read_bytes"] = json!(0);
+        assert!(!proven("cold_reads_during_save", &cached));
         row["phase_elapsed_ns"]["concurrent_saves"] = json!(0);
         assert!(!proven("cold_reads_during_save", &row));
     }

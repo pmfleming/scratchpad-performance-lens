@@ -27,6 +27,9 @@ pub(super) fn attach(root: &Path, events: &mut [Value]) -> Result<()> {
 }
 
 fn observation(sample: &Value) -> Option<(f64, f64)> {
+    if sample["status"] != "ok" {
+        return None;
+    }
     let budget = &sample["resource_budget"];
     if budget["measurement_scope"].is_string()
         && sample["measurement_scope"] != budget["measurement_scope"]
@@ -81,13 +84,15 @@ pub(super) fn group_status<'a>(samples: impl IntoIterator<Item = &'a Value>) -> 
 }
 
 fn workload_status(group: &[&Value]) -> &'static str {
-    let parsed: Option<Vec<_>> = group
+    if group
         .iter()
-        .filter(|sample| sample["resource_budget"]["authoritative"] == true)
-        .map(|sample| observation(sample))
-        .collect();
-    let Some(parsed) = parsed.filter(|parsed| parsed.len() == group.len()) else {
+        .any(|sample| sample["resource_budget"]["authoritative"] != true)
+    {
         return "unbudgeted";
+    }
+    let parsed: Option<Vec<_>> = group.iter().map(|sample| observation(sample)).collect();
+    let Some(parsed) = parsed.filter(|parsed| parsed.len() == group.len()) else {
+        return "invalid";
     };
     let Some(first) = group.first() else {
         return "unmeasured";
@@ -117,7 +122,7 @@ mod tests {
     use serde_json::{json, Value};
     #[test]
     fn fixture_inclusive_or_missing_scope_cannot_satisfy_an_operation_budget() {
-        let mut sample = json!({"elapsed_ns":10,"resource_budget":{
+        let mut sample = json!({"status":"ok","elapsed_ns":10,"resource_budget":{
             "metric":"/elapsed_ns","max":100,"authoritative":true,
             "measurement_scope":"prepared_operation"}});
         assert_eq!(status(&sample), "invalid");
@@ -130,7 +135,7 @@ mod tests {
     }
     #[test]
     fn budgets_keep_uncertainty_and_cannot_select_the_fastest_observation() {
-        let sample = |n| json!({"workload_value":10000,"elapsed_ns":n,"resource_budget":{"metric":"/elapsed_ns","max":100,"authoritative":true}});
+        let sample = |n| json!({"status":"ok","workload_value":10000,"elapsed_ns":n,"resource_budget":{"metric":"/elapsed_ns","max":100,"authoritative":true}});
         for (times, expected) in [
             ([90, 95, 110], "uncertain"),
             ([90, 110, 120], "fail"),
@@ -145,6 +150,12 @@ mod tests {
         assert_eq!(status(&row), "fail");
         row["elapsed_ns"] = json!(10);
         assert_eq!(status(&row), "pass");
+        for failed in [json!("panic"), json!("failed"), Value::Null] {
+            row["status"] = failed;
+            assert_eq!(status(&row), "invalid");
+            assert_eq!(group_status([&row]), "invalid");
+        }
+        row["status"] = json!("ok");
         row["resource_budget"]["metric"] = json!("/missing");
         assert_eq!(status(&row), "invalid");
         row["resource_budget"] = Value::Null;
