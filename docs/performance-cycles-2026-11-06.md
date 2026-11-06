@@ -745,3 +745,25 @@ was 1,410.0 ms with 2,760 ms process CPU in its median trial; the final median w
 not a closed promise. The 256 MiB median changed from 331.8 to 342.9 ms. Only up
 to 64 MiB is demonstrated within the unchanged 180 ms limit; 256 MiB and 1 GiB
 still fail. All trials, including slower first repetitions, remain archived.
+
+## Final audit after cycle 25 and requested stopping point
+
+All eight producers completed in 806.440 seconds against committed Scratchpad
+`b964a13` and lens `5aa2d08`. The review reports six failing promises and Many
+Views at risk, with 11 reported budget misses and six unmet scale checks.
+Six promises have covered evidence; session persistence/restore is thin because
+aged-store forget is uncertain. No all-promise success or clean baseline is claimed.
+
+All 12 production search workflow medians pass; 10,000-target first render is
+26.813 ms against 120 ms. Retained 100,000-edit history is 93.560 ms and retained
+1,000-target search results are 16.245 ms, both against 180 ms. Remaining failures
+include 1 GiB search (1,445.451 ms / 180 ms), 128 MiB paste, initial 10,000-tab
+save and full restore, large-file background loading, lazy many-file opening,
+and cold-read tails (3.679, 4.068, 4.114 ms / 4 ms). Aged-store forget includes a
+215.650 ms outlier against 180 ms. Relevant noisy launches remain in the evidence.
+
+The user requested completion of this cycle followed by a report, so no cycle 26
+was started. The [25-cycle report](report-cycle25/report.md) covers retained work,
+rejected experiments, measurement corrections, remaining lens inconsistencies,
+and unexecuted hypotheses. It includes [interactive graphs](report-cycle25/graphs.html),
+a standalone SVG, reproducible extracted data, and complete final audit tables.
