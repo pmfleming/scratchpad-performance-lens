@@ -208,3 +208,12 @@ budgets cannot prove scale. Budget misses feed promise health, including the
 initial save; an unchanged steady save has its own scenario. Initial limits reuse
 existing interaction, capacity and storage-plan targets rather than fitting the
 observed runtime. New limits should be calibrated through accepted baselines.
+
+## Store workflows in promise health
+
+The default resource suite includes store search, random-window reads, paired
+no-save/save typing, import, and UI frames during writes against a 3 GiB store.
+Each resource scenario runs in a separate bounded process. The heavy-write probe
+reports its injected writer pause separately and verifies that queued typing
+survives. Metrics are mapped to Large Files, Search and Session Persistence;
+unrelated missing scenarios do not erase their evidence.

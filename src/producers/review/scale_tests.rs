@@ -62,9 +62,10 @@ fn session_promise_uses_real_resource_output_and_separate_latency_budgets() {
     ] {
         let mut events: Vec<_> = scenario.resource_scenarios.iter().map(|id| json!({
             "scenario":id,"status":"ok","resource_budget":{"metric":"/elapsed_ns","max":180000000,"authoritative":true},"elapsed_ns":1_000_000,"measurement_scope":"prepared_operation",
-            "workload_value":if *id == "large_dirty_buffer_save" {50 * crate::shared::MB} else {10_000},
+            "workload_value":if *id == "large_dirty_buffer_save" || id.starts_with("typing_") {50 * crate::shared::MB} else if *id == "ui_during_store_writes" {64 * crate::shared::MB} else {10_000},
+            "measurement_contract":{"fixture_kind":"non_repeating","fixture_revision":2,"text_backing":"store","production_path":true,"code_path":"app"},
             "allocated_bytes":1,"manifest_size_bytes":1,
-            "phase_elapsed_ns":{"snapshot_capture_ns":1,"file_write_ns":1,"manifest_serialize_ns":1,
+            "phase_elapsed_ns":{"typing_p99_ns":1,"frame_p99_ns":1,"concurrent_write_bytes":3221225472u64,"seed_bytes":3221225472u64,"snapshot_capture_ns":1,"file_write_ns":1,"manifest_serialize_ns":1,
                 "manifest_read_parse_ns":1,"restore_reconstruction_ns":1,"startup_load_ns":1,"first_paint_ns":1,"save_ns":1},
             "process_resources":{"write_bytes":1},
             "workload_details":{"history_payload_bytes":16 * crate::shared::MB,"history_entries":1024,"inserted_bytes":1,"synchronous":"FULL"}

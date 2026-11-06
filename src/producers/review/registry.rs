@@ -43,6 +43,9 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
                 "large_utf8_load_peak_memory",
                 "large_file_first_visible_paint",
                 "file_backed_chunk_cache_tracking",
+                "file_backed_random_window",
+                "store_import",
+                "ui_during_store_writes",
             ],
             profile_ids: &[
                 "scroll_stress_profile",
@@ -132,6 +135,7 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
             capacity_scenarios: &["search_file_size_ceiling", "search_target_count_ceiling"],
             resource_scenarios: &[
                 "search_file_size_resource_tracking",
+                "file_backed_search",
                 "search_target_resource_tracking",
                 "search_app_result_tracking",
                 "edited_buffer_search_preview_rendering",
@@ -267,6 +271,9 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
                 "session_persist_cost",
                 "session_steady_persist_cost",
                 "large_dirty_buffer_save",
+                "typing_without_save",
+                "typing_during_save",
+                "ui_during_store_writes",
                 "session_restore_cost",
                 "startup_visible_restore_cost",
             ],

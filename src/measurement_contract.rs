@@ -7,6 +7,8 @@ pub fn requires_store(id: &str) -> bool {
         "large_file_background_index_ceiling"
             | "search_file_size_ceiling"
             | "paste_size_ceiling"
+            | "store_import"
+            | "ui_during_store_writes"
             | "large_utf8_load_peak_memory"
             | "file_backed_search"
             | "file_backed_random_window"

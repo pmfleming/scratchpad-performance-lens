@@ -1,4 +1,4 @@
-use super::common::{probe_path, run_probe_events, write_probe_artifact};
+use super::common::{probe_path, run_sweeps, write_probe_artifact};
 use super::render::render_resources;
 use super::resource_contracts::{
     cache_bound_held, demonstrated_workload, expected_scenarios, gap_evidence,
@@ -12,18 +12,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub fn resource_profiles(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
     let events = expected_scenarios(&config.project_root).and_then(|expected| {
-        run_probe_events(
+        run_sweeps(
             &config.project_root,
-            &[
-                "cargo",
-                "build",
-                "--release",
-                "--quiet",
-                "--bin",
-                "resource_probe",
-            ],
-            probe_path("resource_probe"),
-            "resource probe",
+            "resource_probe",
+            &expected.iter().map(String::as_str).collect::<Vec<_>>(),
         )
         .and_then(|mut result| {
             super::resource_budgets::attach(&config.project_root, &mut result.events)?;
@@ -243,6 +235,12 @@ fn resource_sample(event: &Value) -> Value {
 
 fn measurement_gap_scenarios() -> HashMap<&'static str, &'static str> {
     HashMap::from([
+        ("store_import", "store import cost and materialized body bytes"),
+        ("file_backed_random_window", "store read latency"),
+        ("file_backed_search", "store search completion"),
+        ("typing_without_save", "typing baseline"),
+        ("typing_during_save", "typing while saves run"),
+        ("ui_during_store_writes", "UI responsiveness during heavy store writes"),
         ("large_utf8_load_peak_memory", "peak RSS / allocator high-water mark during very large UTF-8 load"),
         ("file_backed_chunk_cache_tracking", "bounded retained-memory behavior after traversing every chunk of a large file"),
         ("edited_buffer_search_preview_rendering", "edited-buffer search preview rendering with many matches and many pieces"),

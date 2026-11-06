@@ -41,31 +41,21 @@ pub(in crate::producers) struct ProbeEvents {
     pub failure: Option<String>,
 }
 
-pub(in crate::producers) fn run_probe_events(
-    root: &Path,
-    build_cmd: &[&str],
-    path: PathBuf,
-    label: &str,
-) -> Result<ProbeEvents> {
-    let executable = build_probe(root, build_cmd, &path)?;
-    run_events(root, &executable, &[], label)
-}
-
 pub(in crate::producers) fn run_capacity_sweeps(
     root: &Path,
     scenarios: &[&str],
 ) -> Result<ProbeEvents> {
+    run_sweeps(root, "capacity_probe", scenarios)
+}
+pub(in crate::producers) fn run_sweeps(
+    root: &Path,
+    bin: &str,
+    scenarios: &[&str],
+) -> Result<ProbeEvents> {
     let executable = build_probe(
         root,
-        &[
-            "cargo",
-            "build",
-            "--release",
-            "--quiet",
-            "--bin",
-            "capacity_probe",
-        ],
-        &probe_path("capacity_probe"),
+        &["cargo", "build", "--release", "--quiet", "--bin", bin],
+        &probe_path(bin),
     )?;
     let mut combined = ProbeEvents {
         events: Vec::new(),

@@ -27,6 +27,18 @@ pub(super) fn expected_scenarios(root: &std::path::Path) -> anyhow::Result<Vec<S
 
 pub(super) fn gap_evidence(scenario: &str, events: &[Value], synthetic: bool) -> Value {
     let (minimum, fields): (i64, &[&str]) = match scenario {
+        "store_import" => (
+            shared::GB,
+            &["import_logical_bytes", "import_database_growth_bytes"],
+        ),
+        "file_backed_random_window" => (shared::GB, &["window_p99_ns", "window_samples"]),
+        "file_backed_search" => (64 * shared::MB, &["elapsed_ns"]),
+        "typing_without_save" => (50 * shared::MB, &["typing_p99_ns"]),
+        "typing_during_save" => (50 * shared::MB, &["typing_p99_ns", "save_ns"]),
+        "ui_during_store_writes" => (
+            64 * shared::MB,
+            &["frame_p99_ns", "concurrent_write_bytes", "seed_bytes"],
+        ),
         "large_utf8_load_peak_memory" => (
             shared::GB,
             &[
@@ -158,6 +170,18 @@ fn sample_requirements<'a>(event: &Value, fields: &'a [&str]) -> Vec<&'a str> {
 
 fn scenario_requirement(scenario: &str, event: &Value) -> Option<&'static str> {
     match scenario {
+        "ui_during_store_writes"
+            if event["phase_elapsed_ns"]["seed_bytes"]
+                .as_i64()
+                .unwrap_or(0)
+                < 3 * shared::GB
+                || event["phase_elapsed_ns"]["concurrent_write_bytes"]
+                    .as_i64()
+                    .unwrap_or(0)
+                    < 3 * shared::GB =>
+        {
+            Some("real_writes_against_multi_gib_store")
+        }
         "large_dirty_buffer_save" if !full_history_save(event) => {
             Some("prepared_single_character_save_with_full_history")
         }
