@@ -64,13 +64,15 @@ fn scenario_runs(
     scenario: &str,
     manifest: &Value,
 ) -> Result<ProbeEvents> {
+    let minimum = minimum_launches(manifest, bin, scenario)?;
     let run = || run_events(root, executable, &["--scenario", scenario], scenario);
     let first = run()?;
     let launches = if near_budget(manifest, bin, scenario, &first.events) {
         3
     } else {
         1
-    };
+    }
+    .max(minimum);
     let runs = std::iter::once(Ok(first)).chain((1..launches).map(|_| run()));
     Ok(merge_runs(runs.enumerate().map(|(launch, result)| {
         result.map(|mut result| {
@@ -83,6 +85,22 @@ fn scenario_runs(
             result
         })
     })))
+}
+
+fn minimum_launches(manifest: &Value, bin: &str, scenario: &str) -> Result<usize> {
+    let budgets = if bin == "capacity_probe" {
+        "capacity_budgets"
+    } else {
+        "resource_budgets"
+    };
+    let Some(value) = manifest[budgets][scenario].get("min_independent_launches") else {
+        return Ok(1);
+    };
+    let count = value
+        .as_u64()
+        .filter(|count| (1..=16).contains(count))
+        .context("min_independent_launches must be an integer from 1 through 16")?;
+    Ok(count as usize)
 }
 
 fn merge_runs(runs: impl IntoIterator<Item = Result<ProbeEvents>>) -> ProbeEvents {
@@ -324,6 +342,23 @@ pub(in crate::producers) fn output_text(output: &std::process::Output) -> String
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn declared_minimum_runs_are_enforced_even_away_from_a_budget() {
+        use serde_json::json;
+        assert_eq!(
+            super::minimum_launches(&json!({}), "resource_probe", "cold").unwrap(),
+            1
+        );
+        let mut manifest = json!({"resource_budgets":{"cold":{"min_independent_launches":3}}});
+        assert_eq!(
+            super::minimum_launches(&manifest, "resource_probe", "cold").unwrap(),
+            3
+        );
+        for invalid in [json!(0), json!(17), json!(1.5), json!(null)] {
+            manifest["resource_budgets"]["cold"]["min_independent_launches"] = invalid;
+            assert!(super::minimum_launches(&manifest, "resource_probe", "cold").is_err());
+        }
+    }
     #[test]
     fn executable_path_comes_from_matching_cargo_artifact_not_default_target() {
         let root = std::path::Path::new("/workspace");

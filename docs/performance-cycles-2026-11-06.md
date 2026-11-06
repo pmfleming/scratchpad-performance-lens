@@ -343,3 +343,24 @@ added 70–131 ms by scanning new storage-backed text. CPU controls were noisy
 Evidence: Scratchpad `target/analysis/co-development/cycle-12/`. Validation:
 706 app tests passed (seven ignored), 91 lens tests passed, and strict Clippy
 passed in both repositories.
+
+## Cycle 13: inspect replacement inputs without storage read-back
+
+Prepared replacement metadata now streams unchanged original spans and the
+normalized input already owned by the request. It avoids re-reading newly sealed
+bodies. Differential tests cover Unicode, control characters, CR/LF boundaries,
+multiple replacements and same-position insertions. A 40 MiB store-backed test
+checks reader requests, exact metadata, and undo/redo after preparation.
+
+Project budgets can now declare a minimum number of independent launches.
+Cold reads require three, and the lens rejects missing or inconsistent launch
+coverage instead of accepting a surviving subset. Adaptive repeats still apply
+above the declared floor. Validation: 708 app tests passed (seven ignored),
+93 lens tests passed, and strict Clippy passed in both repositories.
+
+The focused evidence in Scratchpad `target/analysis/co-development/cycle-13/`
+remains failing: verified cold-read p99 values were 4.109, 3.177 and 4.242 ms
+against 4 ms; 128 MiB paste publication was 1111.366 ms. Paste inspection took
+13.104 ms, while mutation/storage waits consumed 1067.051 ms. Controls were
+noisy (max/min 2.285). Subsequent host inspection also found sustained high
+Linux I/O pressure, so these timings are not an accepted clean baseline.

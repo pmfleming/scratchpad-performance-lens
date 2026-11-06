@@ -69,6 +69,11 @@ separate output directory: the resulting resource artifact contains only the
 selected scenarios and cannot establish coverage for omitted operations.
 `--scenario` is rejected for `promises` and other producers.
 
+Project capacity/resource budgets may declare `min_independent_launches` (1–16).
+The runner honors that floor even away from the adaptive repetition band, and
+resource verdicts reject missing or inconsistent launch coverage. Each launch
+still runs the complete selected workload sweep.
+
 Export artifact schemas:
 
 ```console

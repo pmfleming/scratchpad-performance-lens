@@ -103,6 +103,9 @@ fn workload_status(group: &[&Value]) -> &'static str {
     {
         return "invalid";
     }
+    if !complete_launches(group) {
+        return "invalid";
+    }
     let mut values: Vec<_> = parsed.iter().map(|(value, _)| *value).collect();
     values.sort_by(f64::total_cmp);
     let limit = parsed[0].1;
@@ -116,10 +119,69 @@ fn workload_status(group: &[&Value]) -> &'static str {
     }
 }
 
+fn complete_launches(group: &[&Value]) -> bool {
+    let Some(first) = group.first() else {
+        return false;
+    };
+    let minimum = match first["resource_budget"].get("min_independent_launches") {
+        Some(value) => match value.as_u64().filter(|count| (1..=16).contains(count)) {
+            Some(count) => count,
+            None => return false,
+        },
+        None => 1,
+    };
+    if group.iter().all(|sample| {
+        sample.get("independent_launch_count").is_none() && sample.get("launch_index").is_none()
+    }) {
+        return minimum == 1;
+    }
+    let Some(expected) = first["independent_launch_count"]
+        .as_u64()
+        .filter(|count| *count >= minimum)
+    else {
+        return false;
+    };
+    let mut observed = std::collections::BTreeSet::new();
+    for sample in group {
+        if sample["independent_launch_count"].as_u64() != Some(expected) {
+            return false;
+        }
+        let Some(index) = sample["launch_index"]
+            .as_u64()
+            .filter(|index| *index < expected)
+        else {
+            return false;
+        };
+        observed.insert(index);
+    }
+    observed.len() as u64 == expected
+}
+
 #[cfg(test)]
 mod tests {
     use super::{group_status, status};
     use serde_json::{json, Value};
+    #[test]
+    fn missing_or_duplicate_launches_cannot_prove_a_repeated_workload() {
+        let rows: Vec<_> = (0..3).map(|index| json!({"status":"ok","workload_value":100,
+            "elapsed_ns":80,"launch_index":index,"independent_launch_count":3,
+            "resource_budget":{"metric":"/elapsed_ns","max":100,"authoritative":true,"min_independent_launches":3}})).collect();
+        assert_eq!(group_status(&rows), "pass");
+        assert_eq!(group_status(&rows[..2]), "invalid");
+        let mut duplicated = rows.clone();
+        duplicated[2]["launch_index"] = json!(0);
+        assert_eq!(group_status(&duplicated), "invalid");
+        let mut inconsistent = rows.clone();
+        inconsistent[2]["independent_launch_count"] = json!(1);
+        assert_eq!(group_status(&inconsistent), "invalid");
+        let mut missing = rows[0].clone();
+        missing.as_object_mut().unwrap().remove("launch_index");
+        missing
+            .as_object_mut()
+            .unwrap()
+            .remove("independent_launch_count");
+        assert_eq!(group_status([&missing]), "invalid");
+    }
     #[test]
     fn fixture_inclusive_or_missing_scope_cannot_satisfy_an_operation_budget() {
         let mut sample = json!({"status":"ok","elapsed_ns":10,"resource_budget":{
