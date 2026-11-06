@@ -83,7 +83,7 @@ The full-workload confirmation uses
 
 ## Follow-up priorities
 
-1. Fix multiline long-line viewport layout, guided by the measured layout cost.
+1. Verify search under stable host controls after the cycle-3 wrapping fix.
 2. Investigate background installation timeout in many-file capacity sweeps;
    preserve the distinction between promised scale and larger stress workloads.
 3. Use the complete promise review to rank remaining latency/resource failures.
@@ -103,3 +103,28 @@ The full run is recorded in Scratchpad's
 `target/analysis/co-development/promises-after-cycle-1/`; the lens log is
 `target/co-development/initial/promises-after-cycle-1.log`. Capacity failures
 remain partial evidence and must not be represented as a successful baseline.
+
+## Cycle 3: stable wrapped layout and reflow diagnostics
+
+Tracing the production path corrected the initial diagnosis: the default editor
+uses wrapped, proportional text. Its first frame had no scrollbar gutter; the
+result frame gained a seven-pixel gutter and rewrapped the unchanged long
+paragraph. The editor now reserves the vertical gutter for wrapped text while
+keeping scrollbar visibility conditional. Text, selections, cursor mapping and
+wrapping semantics are unchanged. A regression test exercises content growing
+and shrinking across frames and checks stable viewport width.
+
+The probe records prepared/result wrap widths and wrapping mode. The lens reports
+the maximum per-trial width change, layout-job counts, and render time outside
+font layout. Missing or inconsistent counters stay unknown.
+
+All twelve workflow operations passed in 30 trials per mode. Active first render
+had median 3.746 ms and maximum 5.036 ms against 120 ms; its median layout time
+was 0.503 ms. Wrap-width changes were zero in every measured trial. Host controls
+flagged noise and unrelated projects were compiling during the comparison, so
+these results are not an accepted baseline. A stable full review is still needed.
+Artifacts are in Scratchpad's `target/analysis/co-development/cycle-3/`; raw
+baseline confirmation and the diagnostic trace are in
+`target/co-development/cycle-3/`. Validation: 697 Scratchpad tests passed (seven
+ignored); the focused gutter regression and strict Clippy also passed. The lens
+has 82 passing tests and strict all-target Clippy coverage.

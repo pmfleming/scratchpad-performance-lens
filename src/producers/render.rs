@@ -40,10 +40,18 @@ pub(super) fn render_search_workflows(payload: &Value) -> String {
             );
             if row["render_diagnostics"].is_object() {
                 let d = &row["render_diagnostics"];
+                let width = &d["wrap_width_change_px"];
+                let max_wrap_change = if width["complete"] == true {
+                    measured_ms(width, "max", 1.0)
+                } else {
+                    "unknown".to_owned()
+                };
                 line.push_str(&format!(
-                    " | delivery-to-render={} ms | layout={} ms | groups rendered={} skipped={}",
+                    " | delivery-to-render={} ms | layout={} ms | other render={} ms | max wrap change={} px | groups rendered={} skipped={}",
                     measured_ms(&d["delivery_to_render_ms"], "median", 1.0),
                     measured_ms(&d["layout_ms"], "median", 1.0),
+                    measured_ms(&d["non_layout_render_ms"], "median", 1.0),
+                    max_wrap_change,
                     measured_ms(&d["result_groups_rendered"], "median", 1.0),
                     measured_ms(&d["result_groups_skipped"], "median", 1.0)
                 ));
