@@ -49,6 +49,41 @@ pub(super) fn scaling(events: &[Value]) -> Value {
         "interpretation":"observed_workload_medians_only_no_extrapolation_or_budget_override"})
 }
 
+/// Configuration is observed, never inferred from source defaults or database size.
+pub(super) fn storage(events: &[Value]) -> Value {
+    let mut configurations: BTreeMap<String, (Value, usize)> = BTreeMap::new();
+    let mut missing = 0;
+    let mut invalid = 0;
+    for event in events {
+        let config = &event["workload_details"]["storage_configuration"];
+        if config.is_null() {
+            missing += 1;
+            continue;
+        }
+        let valid = config["page_size_bytes"]
+            .as_u64()
+            .is_some_and(|size| (512..=65536).contains(&size) && size.is_power_of_two())
+            && config["writer_cache_size_pragma"]
+                .as_i64()
+                .is_some_and(|size| size != 0)
+            && config["engine"]
+                .as_str()
+                .is_some_and(|engine| !engine.is_empty())
+            && config["scope"] == "measured_store_connection";
+        if !valid {
+            invalid += 1;
+            continue;
+        }
+        configurations
+            .entry(config.to_string())
+            .or_insert_with(|| (config.clone(), 0))
+            .1 += 1;
+    }
+    json!({"configurations":configurations.into_values().map(|(configuration, sample_count)| json!({"configuration":configuration,"sample_count":sample_count})).collect::<Vec<_>>(),
+        "missing_sample_count":missing,"invalid_sample_count":invalid,"sample_count":events.len(),
+        "interpretation":"observed_store_settings_only_no_inferred_defaults_or_budget_override"})
+}
+
 pub(super) fn phases(events: &[Value]) -> Value {
     let mut workloads: BTreeMap<i64, Vec<&Value>> = BTreeMap::new();
     for event in events {
@@ -144,5 +179,20 @@ mod tests {
             result[1]["phases"]["build_ns"]["complete_for_observed_trials"],
             false
         );
+    }
+    #[test]
+    fn storage_settings_remain_observed_and_mixed_formats_stay_distinct() {
+        let row = |size| {
+            json!({"workload_details":{"storage_configuration":{"page_size_bytes":size,
+            "writer_cache_size_pragma":-8192,"engine":"turso-0.8.3","scope":"measured_store_connection"}}})
+        };
+        let result = storage(&[row(4096), row(16384), row(16384), row(1234), json!({})]);
+        assert_eq!(result["configurations"].as_array().unwrap().len(), 2);
+        assert_eq!(result["missing_sample_count"], 1);
+        assert_eq!(result["invalid_sample_count"], 1);
+        assert_eq!(result["sample_count"], 5);
+        let mut invalid = row(4096);
+        invalid["workload_details"]["storage_configuration"]["scope"] = json!("assumed_default");
+        assert_eq!(storage(&[invalid])["invalid_sample_count"], 1);
     }
 }

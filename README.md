@@ -98,6 +98,11 @@ Incomplete observed trials leave comparisons unknown. The CLI shows the last
 step's change in time per unit when it is available. These diagnostics help
 locate growth in work; they do not extrapolate capacity or override budgets.
 
+Resource `storage_diagnostics` groups explicitly observed store settings, including
+page size and the writer's cache pragma. Missing settings remain missing; invalid
+or assumed defaults cannot become observations. Multiple formats stay distinct,
+which matters when new-store tuning leaves existing databases unchanged.
+
 Export artifact schemas:
 
 ```console

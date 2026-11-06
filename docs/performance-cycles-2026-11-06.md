@@ -510,3 +510,35 @@ noisy; the third was stable and still missed. Forget's median remained below
 uncertain. Save/restore/close maintenance timings passed. Initial save (2,542.9 ms)
 and full restore (302.3 ms) at 10,000 tabs still fail; unchanged save and startup
 visibility pass. The retained outliers motivate storage-latency work next.
+
+## Cycle 19: measured storage configuration and verified-read scanning
+
+The 16 KiB new-store page candidate was rejected. Its `cycle-19/` evidence showed
+mixed cold-read results, increased initial-save allocation/write traffic, and a
+noisy import interval. Cold p99 observations were 3.91, 1.52 and 4.05 ms; the last
+launch was noisy. The 10,000-tab initial save allocated 12.32 GB and wrote 484 MB,
+versus 6.31 GB and 285 MB in cycle 18. Import's CPU time was similar but wall time
+was much higher, so the environment does not support a simple causal comparison.
+No page-size change is retained.
+
+The retained app change uses the existing vectorized byte-search implementation
+to count newlines when measuring and verifying immutable chunk metadata. Digest,
+UTF-8, length, character-count and newline-count validation remain mandatory.
+Profiling now reads actual page size and writer-cache settings from the measured
+store outside the operation timer. A reopen test covers the default format and
+pre-existing 4 KiB/16 KiB stores, preserving exact text and history.
+
+The lens groups observed storage configurations and explicitly counts missing or
+invalid observations. It does not infer settings from source defaults; mixed
+formats remain separate. This retains useful evidence from the rejected tuning
+experiment without claiming its results apply to every existing store.
+
+Validation: 717 app tests passed (seven ignored), 102 lens tests passed, and strict
+Clippy passed in both repositories. `cycle-19-final/` completed 11 focused scenarios
+in 73.23 seconds. All three cold-read launches had stable controls and passed
+4 ms p99 (3.24, 3.85 and 3.89 ms), with the observed page size still 4 KiB. This does
+not establish that newline scanning caused the difference between runs. Forget
+retains one 195.0 ms outlier against 180 ms and remains uncertain. Initial save
+(2,563.5 ms) and full restore (304.9 ms) at 10,000 tabs still fail. The 100,000-edit
+history fixture measured 1,314.5 ms and allocated 20.25 GB during construction,
+providing the baseline for the next copying investigation.
