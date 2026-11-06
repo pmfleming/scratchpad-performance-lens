@@ -1,0 +1,105 @@
+# Paired performance cycles — 2026-11-06
+
+## Working plan
+
+Each cycle follows the same feedback loop:
+
+1. Read Scratchpad's promises and manifest, then collect real release evidence.
+2. Use the lens to identify a failing operation and the work responsible for it.
+3. Improve the application path while preserving workload and correctness.
+4. Improve the lens wherever that investigation exposes inaccurate conclusions,
+   missing attribution, or unnecessary measurement cost.
+5. Validate both changes, repeat the affected production workload without
+   concurrent builds, and commit both repositories at the cycle boundary.
+6. Run the complete promise lane periodically to expose regressions and select
+   the next operation. Preserve partial and failed evidence.
+
+The seven promises remain the acceptance criteria. A completed measurement
+process is not a passing promise, and a targeted improvement is not proof that
+all promises pass. GPU submission and display presentation are outside the
+headless workflow measurements.
+
+## Cycle 0: runner cost and evidence scope
+
+Lens commit `1f3a2bb` includes the existing uncommitted lens work, as requested,
+plus a `measure promises` lane and `measure_run.json` wall-time accounting.
+The promise lane derives its capacity/resource selection from the review
+registry while retaining the same required workloads and budgets. It avoids
+unrelated diagnostic ceilings. The text-mutation scale dependency now names
+the production-paste scenario that the registry actually collects.
+
+An initial `measure all` was interrupted after completed Criterion, frame, and
+workflow measurements; its unrelated text-layout diagnostic timed out. This
+is incomplete evidence, not an accepted baseline. Logs and an explicit
+interruption marker are under `target/co-development/initial/` in the lens.
+
+## Cycle 1: search result rendering and attribution
+
+Scratchpad `dec2962` culls offscreen collapsed search-result groups while
+preserving scroll geometry, expanded groups, and visible controls. Tests compare
+culled and unculled scroll geometry and exercise a visible result button.
+The application probe exposes rendered/skipped group counts.
+
+Lens `a36005d` adds per-trial delivery-to-render intervals, editor layout work,
+and rendered/skipped group summaries. Missing counters remain unknown. This
+separates result-list work from editor layout without changing any budget.
+
+The saved pre-change release executable ran immediately before the changed
+probe, with 30 independent fixtures per mode and no intervening compilation.
+For all-tabs first render at 10,000 targets × 16 KiB, the observed median was
+109.017 ms before and 43.977 ms after; maxima were 150.091 and 54.490 ms.
+All 30 changed trials met the 120 ms budget. The post-change control was stable.
+These are observations on one host, not a population-tail guarantee.
+
+Active-buffer first render still failed: its changed median was 167.689 ms,
+with 164.527 ms spent in editor layout. A long first line followed by the match
+line bypasses the existing single-line viewport clipping. Any fix must preserve
+document/display offsets, cursor movement, selections, Unicode, and scrolling.
+
+Raw confirmation artifacts are in Scratchpad's
+`target/co-development/cycle-1/` and
+`target/analysis/co-development/cycle-1/`. These measurements preceded the
+cycle commit; their provenance records the parent revision and dirty source.
+
+Validation: Scratchpad's targeted search UI tests and strict library/test Clippy
+passed; the lens's full tests and strict all-target Clippy passed.
+
+## Cycle 2: authoritative workflow contracts
+
+The search probe duplicated manifest budgets, and a reduced target fixture
+could report passing operation budgets. Scratchpad now owns workflow sizes
+alongside budgets in its manifest. The lens validates raw match counts, bytes,
+operation times, and statistical summaries before accepting a row. Smaller
+fixtures retain observed timings but are diagnostic and cannot prove a promise.
+
+Validation: 696 Scratchpad library tests passed (seven ignored), 80 lens tests
+passed, and strict Clippy passed in both repositories. A real 30-trial run capped
+at 100 targets preserved all four observed all-tabs passes but reported them as
+diagnostic with an unmeasured promise budget. Active/current workloads retained
+their normal verdicts because the cap did not reduce those fixtures. Artifacts
+are in Scratchpad's `target/analysis/co-development/cycle-2-reduced/`.
+The full-workload confirmation uses
+`target/analysis/co-development/cycle-2-full/`.
+
+## Follow-up priorities
+
+1. Fix multiline long-line viewport layout, guided by the measured layout cost.
+2. Investigate background installation timeout in many-file capacity sweeps;
+   preserve the distinction between promised scale and larger stress workloads.
+3. Use the complete promise review to rank remaining latency/resource failures.
+4. Repeat the affected workloads after each fix and commit each paired cycle.
+
+Full promise execution after cycle 1 completed all eight producers in about
+17 minutes. Capacity returned partial evidence after the two 50,000-file
+background-installation timeouts; all other producers completed. At 10,000
+files, both first-visible and background-completion measurements completed
+but exceeded their budgets. The review reported six failed promises and one
+at risk (many views), with 19 budget misses and seven missing scale targets.
+Several producer controls were noisy, so this is not an accepted baseline.
+The separately controlled cycle-1 search confirmation remains the evidence for
+the attributed search improvement.
+
+The full run is recorded in Scratchpad's
+`target/analysis/co-development/promises-after-cycle-1/`; the lens log is
+`target/co-development/initial/promises-after-cycle-1.log`. Capacity failures
+remain partial evidence and must not be represented as a successful baseline.

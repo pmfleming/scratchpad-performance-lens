@@ -200,6 +200,10 @@ remaining budget violations.
   It defaults to 30 repetitions, with all-tabs coverage up to 10,000 targets.
   `SCRATCHPAD_WORKFLOW_REPETITIONS` and `SCRATCHPAD_WORKFLOW_MAX_TARGETS` can
   reduce a smoke run; fewer than 30 repetitions cannot produce a passing budget.
+  Budgets and minimum fixture sizes come from Scratchpad's measurement manifest.
+  Reduced fixtures remain diagnostic, with an `unmeasured` promise budget even
+  when their observed timings pass. The lens checks raw match counts, byte counts,
+  operation timings, and summaries against that contract before reporting.
   First-render rows also summarize per-trial delivery-to-tessellation intervals,
   editor layout time/input bytes, and rendered/skipped search-result groups when
   supplied by the probe. Missing counters remain unknown; these diagnostics do

@@ -3,6 +3,7 @@ use crate::{cli::MeasureOptions, config::LensConfig};
 use anyhow::Result;
 use serde_json::json;
 
+mod contract;
 mod diagnostics;
 
 fn valid_trials(row: &serde_json::Value) -> bool {
@@ -83,12 +84,21 @@ fn valid_workflows(payload: &serde_json::Value) -> bool {
 
 pub fn search_workflows(config: &LensConfig, _: MeasureOptions) -> Result<()> {
     let result = (|| -> Result<serde_json::Value> {
-        let run = || run_probe_object(&config.project_root, "search_workflow_metrics");
+        let manifest = serde_json::from_slice(&std::fs::read(
+            config
+                .project_root
+                .join("benches/measurement_manifest.json"),
+        )?)?;
+        let run = || -> Result<serde_json::Value> {
+            let payload = run_probe_object(&config.project_root, "search_workflow_metrics")?;
+            anyhow::ensure!(
+                valid_workflows(&payload),
+                "invalid or incomplete search workflow measurements"
+            );
+            contract::validate(&payload, &manifest)?;
+            Ok(payload)
+        };
         let mut payload = run()?;
-        anyhow::ensure!(
-            valid_workflows(&payload),
-            "invalid or incomplete search workflow measurements"
-        );
         let near = payload["scenarios"].as_array().unwrap().iter().any(|row| {
             row["median_ms"]
                 .as_f64()
@@ -98,11 +108,11 @@ pub fn search_workflows(config: &LensConfig, _: MeasureOptions) -> Result<()> {
         if near {
             for _ in 0..2 {
                 let more = run()?;
-                anyhow::ensure!(valid_workflows(&more), "invalid search workflow repeat");
                 merge_trials(&mut payload, &more)?;
             }
         }
         diagnostics::annotate(&mut payload);
+        contract::annotate(&mut payload, &manifest);
         Ok(payload)
     })();
     let (payload, failure) = match result {
@@ -131,7 +141,10 @@ fn merge_trials(payload: &mut serde_json::Value, more: &serde_json::Value) -> Re
             .ok_or_else(|| anyhow::anyhow!("workflow repeat changed inventory"))?;
         anyhow::ensure!(
             row["threshold_ms"] == extra["threshold_ms"]
-                && row["measurement_scope"] == extra["measurement_scope"],
+                && row["measurement_scope"] == extra["measurement_scope"]
+                && ["parameter_value", "bytes_per_target", "total_bytes", "mode"]
+                    .iter()
+                    .all(|key| row[*key] == extra[*key]),
             "workflow repeat changed contract"
         );
         for key in ["sample_elapsed_ms", "raw_samples"] {
@@ -204,6 +217,20 @@ mod tests {
         assert!(text.contains("median=280.000 ms"));
         assert!(text.contains("status=fail"));
         assert!(text.contains("median=unknown"));
+    }
+
+    #[test]
+    fn repeated_workflows_cannot_mix_fixture_sizes() {
+        let original = json!({"scenarios":[{"name":"search/100", "parameter_value":100,
+            "bytes_per_target":16384, "total_bytes":1638400, "mode":"all"}]});
+        for key in ["parameter_value", "bytes_per_target", "total_bytes", "mode"] {
+            let mut changed = original.clone();
+            changed["scenarios"][0][key] = json!(0);
+            assert!(
+                super::merge_trials(&mut original.clone(), &changed).is_err(),
+                "{key}"
+            );
+        }
     }
 
     #[test]
