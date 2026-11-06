@@ -28,6 +28,11 @@ pub(super) fn attach(root: &Path, events: &mut [Value]) -> Result<()> {
 
 fn observation(sample: &Value) -> Option<(f64, f64)> {
     let budget = &sample["resource_budget"];
+    if budget["measurement_scope"].is_string()
+        && sample["measurement_scope"] != budget["measurement_scope"]
+    {
+        return None;
+    }
     let value = sample
         .pointer(budget["metric"].as_str()?)?
         .as_f64()
@@ -110,6 +115,19 @@ fn workload_status(group: &[&Value]) -> &'static str {
 mod tests {
     use super::{group_status, status};
     use serde_json::{json, Value};
+    #[test]
+    fn fixture_inclusive_or_missing_scope_cannot_satisfy_an_operation_budget() {
+        let mut sample = json!({"elapsed_ns":10,"resource_budget":{
+            "metric":"/elapsed_ns","max":100,"authoritative":true,
+            "measurement_scope":"prepared_operation"}});
+        assert_eq!(status(&sample), "invalid");
+        sample["measurement_scope"] = json!("scenario_including_fixture_work");
+        assert_eq!(status(&sample), "invalid");
+        sample["measurement_scope"] = json!("prepared_operation");
+        assert_eq!(status(&sample), "pass");
+        sample["elapsed_ns"] = json!(110);
+        assert_eq!(status(&sample), "fail");
+    }
     #[test]
     fn budgets_keep_uncertainty_and_cannot_select_the_fastest_observation() {
         let sample = |n| json!({"workload_value":10000,"elapsed_ns":n,"resource_budget":{"metric":"/elapsed_ns","max":100,"authoritative":true}});

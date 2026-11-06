@@ -154,3 +154,22 @@ build/test activity was present, so this focused run is not an accepted baseline
 Raw evidence: Scratchpad `target/co-development/cycle-4/many-files.jsonl`.
 Validation: 698 app tests passed (seven ignored), 83 lens tests passed, and
 strict Clippy passed in both repositories.
+
+## Cycle 5: separate fixture preparation from measured resource operations
+
+Edited-preview and fragmented-mutation probes now prepare the edited document
+before timing. Tab construction receives the same unique 48 KiB UTF-8 strings,
+prepared before timing, and still constructs the buffers and workspaces itself.
+Prepared state survives through resource sampling, excluding fixture teardown.
+Tab split/combine preparation now happens only for the selected scenario.
+The manifest declares the required prepared-operation scope for these six
+probes; the lens rejects missing or mismatched scope without changing limits.
+
+Three focused repetitions per scenario preserve a clear remaining bottleneck:
+10,000-tab construction still takes about 1.1 seconds, exceeding 140 ms even
+after text generation is excluded. Edited-preview and fragmented-mutation
+operations are within 180 ms at every existing workload. Split and combine
+operations also meet 140 ms. These are scoped measurement corrections, not
+claims that production operations became faster. Evidence is in Scratchpad's
+`target/co-development/cycle-5/`. The resource binary passes strict Clippy;
+84 lens tests and strict all-target Clippy pass.
