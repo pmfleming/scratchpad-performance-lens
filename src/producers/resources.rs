@@ -183,7 +183,7 @@ fn resource_scenario(scenario: &str, mut events: Vec<Value>, gap: Option<&str>) 
         "max_retained_file_chunks": max_i64(&events, "retained_file_chunks"),
         "file_chunk_cache_limit": max_i64(&events, "file_chunk_cache_limit"),
         "cache_bound_violations": events.iter().filter(|event| cache_bound_held(event) == Some(false)).count(),
-        "cache_bound_held": events.iter().any(|event| event["file_chunk_cache_limit"].as_i64().is_some())
+        "cache_bound_held": events.iter().any(|event| cache_bound_held(event).is_some())
             .then(|| events.iter().all(|event| cache_bound_held(event) != Some(false))),
         "page_fault_growth": shared::safe_delta(last["page_fault_count"].as_i64(), first["page_fault_count"].as_i64()),
         "handle_growth": shared::safe_delta(last["handle_count"].as_i64(), first["handle_count"].as_i64()),
@@ -246,6 +246,7 @@ fn resource_sample(event: &Value) -> Value {
 
 fn measurement_gap_scenarios() -> HashMap<&'static str, &'static str> {
     HashMap::from([
+        ("production_paste", "production paste through publication"),
         ("cold_reads_during_save", "verified cold reads during concurrent saves"),
         ("aged_store_save", "save on an aged multi-GiB database"),
         ("aged_store_restore", "restore on an aged multi-GiB database"),
@@ -327,6 +328,7 @@ mod tests {
                 vec![json!({"scenario":"file_backed_chunk_cache_tracking",
                 "measurement_contract":{"fixture_kind":"non_repeating","fixture_revision":2,"text_backing":"store","production_path":true,"code_path":"read_file_in_store"},
                 "elapsed_ns":10,"status":"ok","workload_value":shared::GB,"measurement_scope":"prepared_operation",
+                "phase_elapsed_ns":{"retained_cache_bytes":retained.as_u64().map(|n|n * 262144),"cache_limit_bytes":32 * 262144},
                 "retained_file_chunks":retained,"file_chunk_cache_limit":32,"result_value":shared::GB,
                 "live_bytes":100,"baseline_live_bytes":200,"live_growth_bytes":-100,
                 "retained_live_bytes_before_teardown":350,"process_resources":{"read_bytes":1024}})],

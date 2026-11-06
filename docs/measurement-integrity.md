@@ -277,3 +277,25 @@ and comparison reject noisy runs. Near-budget capacity and resource scenarios
 raw trials, and near-budget Criterion rows get a targeted 50-sample repeat with
 the first estimate archived. Resource trials that straddle a limit are uncertain,
 and scale proof cannot select only their fastest sample.
+
+## Evolving project contracts
+
+Maintenance diagnostics read scenario IDs and save requirements from the project
+manifest. Dirty-save diagnostics and promise evidence share its exact revision,
+retention and minimum full-history requirements; the archive preserves the
+selected contract and its fingerprint. A copied probe can select its declaration
+with `--manifest`. Cache proof compares owner-resident bytes with the per-owner
+byte limit. Chunk counts remain diagnostics and never establish byte compliance.
+
+The final path audit also removes the prepared buffer-construction stand-in for
+many-file hydration, routes target-count search through the app query pipeline,
+and makes production paste resource evidence replace direct-insert diagnostics.
+Session fixtures seed different content for each document so an entire workspace
+cannot deduplicate to a single tab body.
+
+The implementation was checked with the lens test suite, all-target checks and
+Clippy, plus release-probe smoke runs for unique store imports, production paste,
+target-count search, store-backed frames, byte-cache accounting, dirty saves,
+maintenance and physically verified cold reads. Smoke artifacts are in Scratchpad's
+`target/splens-final-smoke`. These checks validate measurement behavior; they do
+not replace a complete new `measure all` run or accept a performance baseline.

@@ -41,6 +41,7 @@ pub(super) fn gap_evidence(scenario: &str, events: &[Value], synthetic: bool) ->
             3 * shared::GB,
             &["database_bytes", "history_revisions", "initial_archives"],
         ),
+        "production_paste" => (128 * shared::MB, &["workflow_ns", "frame_p99_ns"]),
         "store_import" => (
             shared::GB,
             &["import_logical_bytes", "import_database_growth_bytes"],
@@ -63,11 +64,7 @@ pub(super) fn gap_evidence(scenario: &str, events: &[Value], synthetic: bool) ->
         ),
         "file_backed_chunk_cache_tracking" => (
             shared::GB,
-            &[
-                "retained_file_chunks",
-                "file_chunk_cache_limit",
-                "result_value",
-            ],
+            &["retained_cache_bytes", "cache_limit_bytes", "result_value"],
         ),
         // Post-operation live bytes can be sampled after fixture destruction;
         // they cannot establish retention while the edited document is still alive.
@@ -239,16 +236,18 @@ fn scenario_requirement(scenario: &str, event: &Value) -> Option<&'static str> {
 }
 
 fn full_history_save(event: &Value) -> bool {
-    let details = &event["workload_details"];
-    details["history_payload_bytes"].as_i64().unwrap_or(0) >= 15 * shared::MB
-        && details["history_entries"].as_u64().unwrap_or(0) >= 1024
-        && details["inserted_bytes"] == 1
-        && details["synchronous"] == "FULL"
+    crate::fixture_contract::matches(&event["workload_details"], &event["fixture_contract"])
         && event["measurement_scope"] == "prepared_operation"
 }
 
 pub(super) fn cache_bound_held(event: &Value) -> Option<bool> {
-    Some(event["retained_file_chunks"].as_i64()? <= event["file_chunk_cache_limit"].as_i64()?)
+    let bytes = event["retained_cache_bytes"]
+        .as_u64()
+        .or_else(|| event["phase_elapsed_ns"]["retained_cache_bytes"].as_u64())?;
+    let limit = event["cache_limit_bytes"]
+        .as_u64()
+        .or_else(|| event["phase_elapsed_ns"]["cache_limit_bytes"].as_u64())?;
+    Some(bytes <= limit)
 }
 
 #[cfg(test)]
@@ -256,6 +255,16 @@ mod tests {
     use super::{expected_scenarios, gap_evidence};
     use crate::shared;
     use serde_json::{json, Value};
+    #[test]
+    fn chunk_counts_cannot_substitute_for_the_cache_byte_limit() {
+        let mut sample = json!({"retained_file_chunks":17,"file_chunk_cache_limit":257,
+            "phase_elapsed_ns":{"retained_cache_bytes":4 * shared::MB + 1,"cache_limit_bytes":4 * shared::MB}});
+        assert_eq!(super::cache_bound_held(&sample), Some(false));
+        sample["phase_elapsed_ns"]["retained_cache_bytes"] = json!(4 * shared::MB);
+        assert_eq!(super::cache_bound_held(&sample), Some(true));
+        sample["phase_elapsed_ns"] = Value::Null;
+        assert_eq!(super::cache_bound_held(&sample), None);
+    }
     #[test]
     fn cold_read_labels_require_physical_reads_and_concurrent_saves() {
         let mut row = json!({"status":"ok","elapsed_ns":100,"workload_value":3 * shared::GB,
@@ -297,8 +306,8 @@ mod tests {
     fn large_save_requires_actual_write_counters_and_full_history() {
         let mut sample = json!({"workload_value":50 * shared::MB,"status":"ok","elapsed_ns":10,
             "measurement_scope":"prepared_operation", "phase_elapsed_ns":{"save_ns":9},
-            "workload_details":{"history_payload_bytes":16 * shared::MB,"history_entries":1024,
-                "inserted_bytes":1,"synchronous":"FULL"}});
+            "fixture_contract":{"equals":{"fixture_revision":2,"history_retention":"unbounded","inserted_bytes":1,"synchronous":"FULL"},"minimum":{"history_payload_bytes":50 * shared::MB,"history_entries":1025}},
+            "workload_details":{"fixture_revision":2,"history_retention":"unbounded","history_payload_bytes":50 * shared::MB,"history_entries":1025,"inserted_bytes":1,"synchronous":"FULL"}});
         let check = |s: &Value| {
             gap_evidence("large_dirty_buffer_save", std::slice::from_ref(s), false)["closed"]
                 == true

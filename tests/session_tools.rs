@@ -103,13 +103,33 @@ fn dirty_save_cli_requires_explicit_probe_and_valid_launch_count_before_writing(
     }
 }
 
+fn write_measurement_contract(root: &std::path::Path) -> anyhow::Result<()> {
+    let scenarios = [
+        "stored_usage",
+        "closed_token_lookup",
+        "closed_archive_append",
+        "save_after_branch",
+        "save_after_navigation",
+        "incremental_save",
+    ];
+    fs::create_dir_all(root.join("benches"))?;
+    fs::write(root.join("benches/measurement_manifest.json"),json!({
+        "fixtures":{"large_dirty_buffer_save":{"equals":{"fixture_revision":2,"history_retention":"unbounded"},"minimum":{"history_payload_bytes":52428800}}},
+        "diagnostics":{"session_maintenance":{"samples_per_scenario":9,
+            "fixture":{"equals":{"fixture_revision":1,"buffer_bytes":52428800,"initial_archives":128,"synchronous":"FULL"}},
+            "scenarios":scenarios.iter().map(|id|json!({"id":id,"save_required":id.starts_with("save_after_") || *id == "incremental_save"})).collect::<Vec<_>>()}}
+    }).to_string())?;
+    Ok(())
+}
+
 #[cfg(unix)]
 #[test]
 fn maintenance_cli_runs_the_selected_probe_and_requires_all_scenarios() -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir()?;
+    write_measurement_contract(dir.path())?;
     let binary = dir.path().join("maintenance probe");
-    let samples = ["stored_usage", "closed_token_lookup", "closed_archive_append", "save_after_history_backfill", "save_after_navigation", "periodic_snapshot_save"]
+    let samples = ["stored_usage", "closed_token_lookup", "closed_archive_append", "save_after_branch", "save_after_navigation", "incremental_save"]
         .iter().flat_map(|scenario| (0..9).map(move |step| json!({
             "scenario": scenario, "step_index": step, "status": "ok", "measurement_scope": "prepared_operation",
             "workload_details": {"fixture_revision": 1, "buffer_bytes": 50*1024*1024, "initial_archives": 128, "synchronous": "FULL"},
@@ -151,11 +171,13 @@ fn dirty_save_cli_archives_independent_launches_and_refuses_overwrite() -> anyho
     use sha2::{Digest, Sha256};
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir()?;
+    write_measurement_contract(dir.path())?;
     let binary = dir.path().join("probe with spaces");
     let samples = (0..9)
         .map(|step| {
             json!({
         "scenario": "large_dirty_buffer_save", "step_index": step, "status": "ok",
+        "measurement_scope":"prepared_operation","workload_details":{"fixture_revision":2,"history_retention":"unbounded","history_payload_bytes":52428800},
         "phase_elapsed_ns": {"save_ns": 1_000_000}, "process_resources": {"write_bytes": null},
     }).to_string()
         })

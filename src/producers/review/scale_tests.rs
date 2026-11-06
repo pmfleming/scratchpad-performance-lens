@@ -69,7 +69,8 @@ fn session_promise_uses_real_resource_output_and_separate_latency_budgets() {
             "phase_elapsed_ns":{"typing_p99_ns":1,"frame_p99_ns":1,"concurrent_write_bytes":3221225472u64,"seed_bytes":3221225472u64,"snapshot_capture_ns":1,"file_write_ns":1,"manifest_serialize_ns":1,
                 "manifest_read_parse_ns":1,"restore_reconstruction_ns":1,"startup_load_ns":1,"first_paint_ns":1,"save_ns":1},
             "process_resources":{"write_bytes":1},
-            "workload_details":{"database_bytes":3221225472u64,"history_revisions":128,"initial_archives":128,"history_payload_bytes":16 * crate::shared::MB,"history_entries":1024,"inserted_bytes":1,"synchronous":"FULL"}
+            "fixture_contract":{"equals":{"fixture_revision":2,"history_retention":"unbounded","inserted_bytes":1,"synchronous":"FULL"},"minimum":{"history_payload_bytes":50 * crate::shared::MB,"history_entries":1025}},
+            "workload_details":{"fixture_revision":2,"history_retention":"unbounded","database_bytes":3221225472u64,"history_revisions":128,"initial_archives":128,"history_payload_bytes":50 * crate::shared::MB,"history_entries":1025,"inserted_bytes":1,"synchronous":"FULL"}
         })).collect();
         match case {
             "slow_initial_save" => events[0]["elapsed_ns"] = json!(5_200_000_000u64),

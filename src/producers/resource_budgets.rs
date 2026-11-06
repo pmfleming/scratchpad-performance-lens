@@ -19,6 +19,7 @@ pub(super) fn attach(root: &Path, events: &mut [Value]) -> Result<()> {
             object.insert("authoritative".into(), json!(true));
             object.insert("source".into(), json!("benches/measurement_manifest.json"));
         }
+        event["fixture_contract"] = manifest["fixtures"][id].clone();
         event["resource_budget"] = budget;
         event["budget_status"] = json!(status(event));
     }

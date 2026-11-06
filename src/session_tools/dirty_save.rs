@@ -23,6 +23,28 @@ pub(crate) struct MeasureLargeDirtySaveArgs {
     output: PathBuf,
     #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u8).range(1..=20))]
     launches: u8,
+    /// Project-owned measurement manifest; otherwise found above the selected binary.
+    #[arg(long)]
+    manifest: Option<PathBuf>,
+}
+
+impl MeasureLargeDirtySaveArgs {
+    pub(super) fn project_manifest(&self) -> Result<serde_json::Value> {
+        let path = if let Some(path) = &self.manifest {
+            path.clone()
+        } else {
+            self.binary
+                .canonicalize()?
+                .ancestors()
+                .skip(1)
+                .map(|ancestor| ancestor.join("benches/measurement_manifest.json"))
+                .find(|path| path.is_file())
+                .context("cannot find project measurement manifest; use --manifest PATH")?
+        };
+        Ok(serde_json::from_slice(&fs::read(&path).with_context(
+            || format!("read manifest {}", path.display()),
+        )?)?)
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -40,6 +62,8 @@ struct Sample {
     status: String,
     phase_elapsed_ns: Phases,
     process_resources: Resources,
+    measurement_scope: String,
+    workload_details: serde_json::Value,
 }
 
 #[derive(Deserialize)]
@@ -57,13 +81,26 @@ pub(crate) fn measure_large_dirty_save(args: MeasureLargeDirtySaveArgs) -> Resul
 }
 
 fn measure(args: &MeasureLargeDirtySaveArgs, timeout: Duration) -> Result<()> {
-    measure_with(args, timeout, "--large-dirty-save", summarize)
+    let manifest = args.project_manifest()?;
+    let contract = manifest["fixtures"]["large_dirty_buffer_save"].clone();
+    ensure!(
+        contract["equals"].is_object(),
+        "missing dirty-save fixture contract"
+    );
+    measure_with(
+        args,
+        timeout,
+        "--large-dirty-save",
+        &contract,
+        |text, launch| summarize(text, launch, &contract),
+    )
 }
 
 pub(super) fn measure_with<T: Serialize>(
     args: &MeasureLargeDirtySaveArgs,
     timeout: Duration,
     flag: &str,
+    contract: &serde_json::Value,
     summarize: impl Fn(&str, u8) -> Result<T>,
 ) -> Result<()> {
     ensure!(
@@ -102,6 +139,8 @@ pub(super) fn measure_with<T: Serialize>(
             "platform": format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
             "launches": args.launches,
             "probe_flag": flag,
+            "measurement_contract": contract,
+            "contract_fingerprint": crate::provenance::fingerprint(&serde_json::to_vec(contract)?),
             "io_definition": "process write_bytes delta; WAL plus automatic checkpoint writes, not device traffic",
         }),
     )?;
@@ -173,7 +212,7 @@ fn run_probe(
     Ok(())
 }
 
-fn summarize(text: &str, launch: u8) -> Result<Summary> {
+fn summarize(text: &str, launch: u8, contract: &serde_json::Value) -> Result<Summary> {
     let samples: Vec<Sample> = text
         .lines()
         .enumerate()
@@ -191,6 +230,11 @@ fn summarize(text: &str, launch: u8) -> Result<Summary> {
     let mut writes = Vec::new();
     for sample in samples {
         ensure!(sample.status == "ok", "failed save sample");
+        ensure!(
+            sample.measurement_scope == "prepared_operation"
+                && crate::fixture_contract::matches(&sample.workload_details, contract),
+            "wrong dirty-save fixture revision, history or scope"
+        );
         ensure!(
             sample.scenario == "large_dirty_buffer_save",
             "unexpected probe scenario"
@@ -220,7 +264,12 @@ fn summarize(text: &str, launch: u8) -> Result<Summary> {
 
 #[cfg(test)]
 mod tests {
-    use super::summarize;
+    fn contract() -> serde_json::Value {
+        serde_json::json!({"equals":{"fixture_revision":2,"history_retention":"unbounded"},"minimum":{"history_payload_bytes":52428800}})
+    }
+    fn summarize(text: &str, launch: u8) -> anyhow::Result<super::Summary> {
+        super::summarize(text, launch, &contract())
+    }
     #[cfg(unix)]
     use super::{measure, MeasureLargeDirtySaveArgs};
     use serde_json::{json, Value};
@@ -236,6 +285,7 @@ mod tests {
             .map(|step| {
                 json!({
                     "scenario": "large_dirty_buffer_save", "step_index": step, "status": "ok",
+                    "measurement_scope":"prepared_operation","workload_details":{"fixture_revision":2,"history_retention":"unbounded","history_payload_bytes":52428800},
                     "phase_elapsed_ns": {"save_ns": (9 - step) * 1_000_000},
                     "process_resources": {"write_bytes": step * 100},
                 })
@@ -276,6 +326,14 @@ mod tests {
         assert!(summarize(&ndjson(&rows), 0).is_err());
         for (field, value) in [
             ("status", json!("panic")),
+            (
+                "workload_details",
+                json!({"fixture_revision":1,"history_retention":"unbounded","history_payload_bytes":52428800}),
+            ),
+            (
+                "workload_details",
+                json!({"fixture_revision":2,"history_retention":"unbounded","history_payload_bytes":16777216}),
+            ),
             ("scenario", json!("unrelated")),
             ("step_index", json!(1)),
             ("step_index", json!(9)),
@@ -294,6 +352,12 @@ mod tests {
     #[cfg(unix)]
     fn probe(dir: &Path, body: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
+        fs::create_dir_all(dir.join("benches")).unwrap();
+        fs::write(
+            dir.join("benches/measurement_manifest.json"),
+            json!({"fixtures":{"large_dirty_buffer_save":contract()}}).to_string(),
+        )
+        .unwrap();
         let path = dir.join("probe");
         fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
@@ -313,6 +377,7 @@ mod tests {
                 binary: probe(dir.path(), body),
                 output: dir.path().join("archive"),
                 launches: 1,
+                manifest: None,
             };
             let started = Instant::now();
             assert!(measure(&args, Duration::from_millis(100)).is_err());

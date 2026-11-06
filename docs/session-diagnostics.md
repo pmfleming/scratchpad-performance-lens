@@ -127,3 +127,11 @@ The lens rejects missing/duplicate/failed scenarios, incorrect fixture identity 
 scope, and missing/invalid durations or hash-work metrics. Raw evidence survives
 failures; no successful summary is published unless all launches validate. The
 probe binary SHA-256 and selected probe flag are recorded for reproducibility.
+
+
+Diagnostic scenario names and fixture requirements come from
+`benches/measurement_manifest.json`. The lens finds this manifest above the selected
+probe binary. For copied binaries or relocated build directories, pass
+`--manifest /path/to/measurement_manifest.json`. Dirty-save evidence must match
+the declared fixture revision and unbounded history retention. Older 16 MiB
+history fixtures cannot stand in for the current full-history fixture.

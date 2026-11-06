@@ -14,3 +14,5 @@ pub mod measurement_contract;
 pub mod baselines;
 
 pub mod environment;
+
+pub mod fixture_contract;

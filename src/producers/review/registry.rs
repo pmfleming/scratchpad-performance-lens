@@ -251,7 +251,7 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
             benchmark_keys: &[],
             capacity_scenarios: &["paste_size_ceiling"],
             resource_scenarios: &[
-                "paste_allocation",
+                "production_paste",
                 "provenance_retained_memory",
                 "fragmented_long_session_mutation",
             ],
@@ -290,7 +290,7 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
             scale_targets: &[
                 ScaleTarget {
                     id: "large_dirty_buffer_autosave",
-                    label: "50 MiB dirty buffer with 16 MiB undo history",
+                    label: "50 MiB dirty buffer with full retained history",
                     minimum: 50 * shared::MB,
                     unit: "bytes",
                     capacity_scenarios: &[],
@@ -422,6 +422,9 @@ pub fn validate(root: &std::path::Path) -> anyhow::Result<()> {
             ("capacity", promise.capacity_scenarios, "capacity_budgets"),
             ("resource", promise.resource_scenarios, "resource_budgets"),
         ] {
+            if !ids.is_empty() && !root.join(format!("src/bin/{kind}_probe.rs")).is_file() {
+                errors.push(format!("{}: missing {kind}_probe target", promise.id));
+            }
             for id in ids {
                 let declared = manifest["probes"][format!("{kind}_probe")]
                     .as_array()
@@ -455,6 +458,14 @@ mod registry_tests {
         std::fs::create_dir_all(root.path().join("benches")).unwrap();
         std::fs::create_dir_all(root.path().join("src/bin")).unwrap();
         std::fs::write(root.path().join("src/bin/probe.rs"), "fn main() {}").unwrap();
+        for name in ["capacity_probe", "resource_probe"] {
+            std::fs::write(
+                root.path().join(format!("src/bin/{name}.rs")),
+                "fn main() {}",
+            )
+            .unwrap();
+        }
+
         let mut manifest = json!({"probe_measurements":{},"probes":{"capacity_probe":[],"resource_probe":[]},
             "capacity_budgets":{},"resource_budgets":{}});
         for scenario in super::review_scenarios() {
