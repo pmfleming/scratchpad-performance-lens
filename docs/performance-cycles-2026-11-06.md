@@ -437,3 +437,42 @@ Clippy passed in both repositories. Focused evidence in Scratchpad
 at 10,000 tabs measured 294.5 ms and still fails 180 ms; startup-visible restore
 measured 25.5 ms and passes. Full restore's last step had a 1.04x time-per-tab
 multiplier, rather than the rejected candidates' sharply increasing cost.
+
+Full verification after cycle 16 completed all eight producers in 834.2 seconds.
+All seven promises had coverage, but six failed and Many Views was at risk from
+the resource producer's noisy control interval. There were 12 budget misses and
+four unmet scales. All three cold-read launches passed the unchanged 4 ms p99
+limit with 128 physically verified foreground reads each. Search workflow
+medians passed, while large-file completion, larger store-backed search, 128 MiB
+paste, several resource operations, initial save and full restore still failed.
+The full evidence remains in `promises-after-cycle-16/`.
+
+## Cycle 17: indexed cache eviction and controls around each launch
+
+Scratchpad's byte-bounded cache now indexes global and per-owner recency. Inserting
+or touching a chunk no longer scans every retained body, including when newly
+committed chunks enter the cache during initial saves. Byte limits and oldest-first
+eviction remain unchanged. A 20,000-operation randomized model test compares
+insertions, touches, owner changes and budget resizing against the previous policy;
+pinned text remains readable after eviction and access-clock reset.
+
+The lens records fixed-workload controls before and after each independent
+capacity/resource launch, retaining them in resource samples and raw capacity
+repetitions. Review noise follows the controls for each dependent scenario.
+Complete stable local controls can supersede a noisy producer-wide interval;
+legacy evidence retains the producer-wide fallback, and missing launches or
+partial local controls remain uncertain. Local noise is detected even when the
+producer-wide controls happen to be stable. Whole-run baseline acceptance keeps
+its existing policy. Control revision 2 warms the hash workload for 20 ms before
+seven samples; the noise thresholds and application budgets are unchanged.
+Malformed control ranges now produce unknown quality.
+
+Validation: 716 app tests passed (seven ignored), 99 lens tests passed, and strict
+Clippy passed in both repositories. Focused evidence in `cycle-17/` completed in
+42.96 seconds with stable local controls for all four scenarios. The 10,000-tab
+initial save measured 2,418.7 ms, versus 3,307.6 ms in the preceding full run;
+its preparation phase fell from 1,435.9 to 549.7 ms while write time stayed near
+1,800 ms. This is an observed improvement, not a controlled causal estimate
+across identical environment conditions. Initial save still fails 180 ms. Full
+restore measured 309.8 ms and also fails; unchanged save (91.7 ms maximum) and
+anchor-heavy editing (23.9 ms maximum) pass. No full-promise success is claimed.

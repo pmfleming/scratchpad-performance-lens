@@ -75,6 +75,14 @@ The runner honors that floor even away from the adaptive repetition band, and
 resource verdicts reject missing or inconsistent launch coverage. Each launch
 still runs the complete selected workload sweep.
 
+Capacity and resource samples retain controls before and after each independent
+probe launch (including fixture setup). The review uses complete local controls
+for each dependency; older artifacts fall back to the producer-wide interval.
+Missing or noisy local controls cannot establish a stable promise. Whole-run
+baseline acceptance retains its producer-wide checks. Control revision 2 warms
+the fixed hash workload for 20 ms before seven samples; noise thresholds and
+application budgets are unchanged.
+
 Resource artifacts include `scaling_diagnostics`: observed median time per unit
 and adjacent workload multipliers, separated by unit and measurement scope.
 Incomplete observed trials leave comparisons unknown. The CLI shows the last

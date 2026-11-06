@@ -65,7 +65,17 @@ fn scenario_runs(
     manifest: &Value,
 ) -> Result<ProbeEvents> {
     let minimum = minimum_launches(manifest, bin, scenario)?;
-    let run = || run_events(root, executable, &["--scenario", scenario], scenario);
+    let run = || {
+        let before = crate::environment::control();
+        let mut result = run_events(root, executable, &["--scenario", scenario], scenario)?;
+        let after = crate::environment::control();
+        let mut quality = crate::environment::quality(&before, &after);
+        quality["scope"] = serde_json::json!("independent_probe_launch_including_setup");
+        for event in &mut result.events {
+            event["launch_measurement_quality"] = quality.clone();
+        }
+        Ok(result)
+    };
     let first = run()?;
     let launches = if near_budget(manifest, bin, scenario, &first.events) {
         3
