@@ -635,3 +635,34 @@ and text trees, 85.5 ms to layouts, 8.5 ms to orphan validation and 6.3 ms to co
 validation. Unchanged save (99.6 ms) and startup-visible restore (15.3 ms) passed.
 This diagnostic cycle makes no optimization or full-promise success claim; it
 identifies the next storage work and preserves the complete observed intervals.
+
+## Cycle 23: bounded inserts for new documents and histories
+
+New pathless documents, proven absent by the refreshed committed inventory, now
+insert metadata and history rows in batches of at most 32. Root/entry nodes precede
+positions and history, and all writes remain inside the existing FULL manifest
+transaction. Existing documents and retained-path release keep the incremental
+path. Shared parameter encoding preserves metadata, packed spans and history
+validation. Incomplete new-history captures are rejected. Power-of-two remainder
+batches bound cached statement shapes; failures still invalidate their statement
+and roll back the transaction.
+
+The lens summary now names the largest measured database child phase at the
+largest workload. It uses actual child medians, never products of independently
+aggregated fractions, and withholds the label for incomplete positive parent
+intervals. Zero-write intervals have no candidate phase. The report remains an
+observed-trial diagnostic and does not change any budget.
+
+Validation: all 723 app tests passed (seven ignored), including the 130-document
+failed-manifest retry and exact undo/redo test, packed histories, branch replay,
+quarantine and existing inventory tests. All 105 lens tests and strict Clippy in
+both repositories passed.
+
+`cycle-23/` completed four session scenarios in 2.76 seconds with stable controls.
+At 10,000 tabs, first save measured 1,321.6 ms, with document/history writes
+299.1 ms, content preparation 406.6 ms, layout writes 261.4 ms, content-reference
+writes 125.8 ms and commit 38.7 ms. Allocation traffic was 4.5 GiB. The cycle-22
+first-save total was 3,695.2 ms and document/history writes were 1,359.1 ms;
+content preparation and commit also varied substantially, so the entire elapsed
+change must not be attributed solely to batching. Full restore remains failing
+at 296.5 ms. Steady save (104.4 ms) and startup-visible restore (16.1 ms) pass.

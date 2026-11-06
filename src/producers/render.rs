@@ -195,6 +195,9 @@ pub(super) fn render_resources(payload: &Value) -> String {
                     }
                 }
             }
+            if let Some((size, name, ms)) = largest_database_phase(item) {
+                row.push_str(&format!(" | largest DB phase at {size}: {name}={ms:.1} ms"));
+            }
             if let Some(save_ms) = item["max_save_ms"].as_f64() {
                 row.push_str(&format!(
                     " | max_save={save_ms:.1} ms | max_write_bytes/save={}",
@@ -308,4 +311,61 @@ pub(super) fn render_project_code(payload: &Value) -> String {
         format!("- Total code: {}", integer(current, "total")),
     ]
     .join("\n")
+}
+
+// Use measured child medians, never multiply independently aggregated fractions.
+fn largest_database_phase(item: &Value) -> Option<(u64, String, f64)> {
+    let largest = item["phase_subdivisions"]
+        .as_array()?
+        .iter()
+        .max_by_key(|row| row["workload_value"].as_u64())?;
+    let size = largest["workload_value"].as_u64()?;
+    let diagnostics = item["phase_diagnostics"]
+        .as_array()?
+        .iter()
+        .find(|row| row["workload_value"].as_u64() == Some(size))?;
+    let mut result: Option<(u64, String, f64)> = None;
+    for parent in largest["parents"].as_array()? {
+        let key = parent["parent"].as_str()?;
+        if diagnostics["phases"][key]["median_ms"].as_f64() == Some(0.0) {
+            continue;
+        }
+        if parent["complete_for_observed_trials"] != true {
+            return None;
+        }
+        for child in parent["median_child_fraction"].as_object()?.keys() {
+            let ms = diagnostics["phases"][child]["median_ms"].as_f64()?;
+            if ms > 0.0 && result.as_ref().is_none_or(|(_, _, largest)| ms > *largest) {
+                result = Some((size, child.trim_end_matches("_ns").replace('_', " "), ms));
+            }
+        }
+    }
+    result
+}
+
+#[cfg(test)]
+mod resource_phase_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn largest_phase_uses_child_measurements_and_requires_complete_largest_workload() {
+        let mut payload = json!({"phase_subdivisions":[{"workload_value":100,"parents":[
+            {"parent":"prepare_ns","complete_for_observed_trials":true,"median_child_fraction":{"content_ns":0.9,"history_ns":0.1}},
+            {"parent":"write_ns","complete_for_observed_trials":false,"median_child_fraction":{}}]}],
+            "phase_diagnostics":[{"workload_value":100,"phases":{"prepare_ns":{"median_ms":100},"content_ns":{"median_ms":20},"history_ns":{"median_ms":30},"write_ns":{"median_ms":0}}}]});
+        assert_eq!(
+            largest_database_phase(&payload),
+            Some((100, "history".into(), 30.0))
+        );
+        payload["phase_subdivisions"][0]["parents"][0]["complete_for_observed_trials"] =
+            json!(false);
+        assert!(largest_database_phase(&payload).is_none());
+        payload["phase_subdivisions"][0]["parents"][0]["complete_for_observed_trials"] =
+            json!(true);
+        payload["phase_subdivisions"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"workload_value":1000,"parents":[]}));
+        assert!(largest_database_phase(&payload).is_none());
+    }
 }
