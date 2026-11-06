@@ -322,3 +322,24 @@ and whole-run baseline acceptance; real failures remain failures. Tests cover
 search noise leaving unrelated view evidence unaffected, resource dependencies,
 and preservation of failure status. Validation: 706 app tests passed (seven
 ignored), 90 lens tests passed, and strict Clippy passed in both repositories.
+
+## Cycle 12: measure paste publication separately from durability
+
+Paste publication ends after the new text and queued typing have reached a
+rendered/tessellated frame. The full workflow and subsequent chunk flush remain
+separate metrics. Both resource and capacity probes use the publication endpoint;
+the existing 150 ms budget is unchanged. Process-wide preparation diagnostics
+record store binding, normalization, mutation (including storage waits), and
+inspection wall time. They are not CPU measurements or an exclusive partition.
+
+The lens requires the declared publication endpoint, preserved queued input,
+no injected writer pause, and consistent publication/flush/workflow intervals.
+Missing or legacy endpoint claims cannot close the paste measurement gap.
+
+Three independent launches observed 64 MiB publication at 137.711–148.501 ms.
+128 MiB still failed at 474.890–2163.860 ms; mutation dominated, and inspection
+added 70–131 ms by scanning new storage-backed text. CPU controls were noisy
+(max/min 1.751), so this is diagnostic evidence rather than an accepted baseline.
+Evidence: Scratchpad `target/analysis/co-development/cycle-12/`. Validation:
+706 app tests passed (seven ignored), 91 lens tests passed, and strict Clippy
+passed in both repositories.

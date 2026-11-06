@@ -51,7 +51,7 @@ const GAP_CONTRACTS: &[GapContract] = &[
     (
         &["production_paste"],
         128 * MB,
-        &["workflow_ns", "frame_p99_ns"],
+        &["publication_ns", "workflow_ns", "frame_p99_ns"],
     ),
     (
         &["store_import"],
@@ -245,6 +245,9 @@ fn sample_requirements<'a>(event: &Value, fields: &'a [&str]) -> Vec<&'a str> {
 
 fn scenario_requirement(scenario: &str, event: &Value) -> Option<&'static str> {
     match scenario {
+        "production_paste" if !published_paste(&event["phase_elapsed_ns"]) => {
+            Some("published_paste_and_queued_input_with_separate_flush")
+        }
         "cold_reads_during_save"
             if !verified_cold_reads(&event["phase_elapsed_ns"])
                 || event["phase_elapsed_ns"]["concurrent_saves"]
@@ -286,6 +289,27 @@ fn scenario_requirement(scenario: &str, event: &Value) -> Option<&'static str> {
         }
         _ => None,
     }
+}
+
+fn published_paste(phase: &Value) -> bool {
+    let Some(publication) = phase["publication_ns"].as_u64().filter(|value| *value > 0) else {
+        return false;
+    };
+    let Some(workflow) = phase["workflow_ns"]
+        .as_u64()
+        .filter(|value| *value >= publication)
+    else {
+        return false;
+    };
+    phase["publication_endpoint"] == "published_text_and_queued_input_tessellated"
+        && phase["queued_typing_preserved"] == true
+        && phase["writer_pause_ms"].as_u64() == Some(0)
+        && phase["post_publication_flush_ns"]
+            .as_u64()
+            .is_some_and(|flush| flush <= workflow - publication)
+        && phase["frame_p99_ns"]
+            .as_u64()
+            .is_some_and(|frame| frame > 0 && frame <= publication)
 }
 
 fn verified_cold_reads(phase: &Value) -> bool {
@@ -346,6 +370,29 @@ mod tests {
     use serde_json::{json, Value};
     fn proven(id: &str, row: &Value) -> bool {
         gap_evidence(id, std::slice::from_ref(row), false)["closed"] == true
+    }
+
+    #[test]
+    fn paste_proof_separates_publication_from_flush_and_requires_queued_input() {
+        let row = json!({"status":"ok","elapsed_ns":100,"workload_value":128 * shared::MB,
+            "measurement_scope":"prepared_operation",
+            "measurement_contract":{"text_backing":"store","production_path":true,"code_path":"production input","fixture_kind":"non_repeating","fixture_revision":2},
+            "phase_elapsed_ns":{"publication_ns":30,"workflow_ns":80,"frame_p99_ns":10,
+                "post_publication_flush_ns":40,"writer_pause_ms":0,"queued_typing_preserved":true,
+                "publication_endpoint":"published_text_and_queued_input_tessellated"}});
+        assert!(proven("production_paste", &row));
+        for (field, value) in [
+            ("publication_ns", Value::Null),
+            ("publication_ns", json!(90)),
+            ("post_publication_flush_ns", json!(60)),
+            ("writer_pause_ms", json!(200)),
+            ("queued_typing_preserved", json!(false)),
+            ("publication_endpoint", json!("flush_complete")),
+        ] {
+            let mut invalid = row.clone();
+            invalid["phase_elapsed_ns"][field] = value;
+            assert!(!proven("production_paste", &invalid), "{field}");
+        }
     }
 
     #[test]
