@@ -20,7 +20,7 @@ pub use flamegraphs::flamegraphs;
 pub use frame_metrics::frame_metrics;
 pub use project_code::project_code_metrics;
 pub use resources::resource_profiles;
-pub use review::performance_review;
+pub use review::{performance_review, validate_registry};
 pub use search::search_speed;
 pub use slowspots::slowspots;
 pub use speed_report::speed_efficiency_report;

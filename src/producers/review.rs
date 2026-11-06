@@ -23,8 +23,10 @@ use evidence::{
     source_status, unique_rows,
 };
 use health::{promise_health, scale_checks, scenario_gaps, scenario_opportunities};
+pub use registry::validate as validate_registry;
 use registry::{probe_classes, promised_scale_payload, review_scenarios, ReviewScenario};
 use serde_json::{json, Value};
+
 pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
     let inputs = AnalysisInputs::new(config);
     let slowspots = inputs.read("slowspots.json", json!([]));
@@ -34,6 +36,7 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
         serde_json::to_value(CapacityReportArtifact::default())?,
     ))
     .context("capacity_report.json has an incompatible capacity schema")?;
+    validate_registry(&config.project_root)?;
     let resources = inputs.read("resource_profiles.json", json!({"scenarios": []}));
     let flamegraphs = inputs.read(
         "flamegraphs.json",
@@ -271,7 +274,19 @@ fn build_review_scenario(
         capacity_synthetic,
         resources_synthetic,
     );
-    let budget_misses = latency_rows.iter().filter(over_budget_latency).count()
+    let budget_misses = latency_rows
+        .iter()
+        .filter(|row| {
+            scenario
+                .benchmark_keys
+                .contains(&row["benchmark_key"].as_str().unwrap_or(""))
+                && crate::measurement_contract::eligible(
+                    row["benchmark_key"].as_str().unwrap_or(""),
+                    &row["measurement_contract"],
+                )
+                && over_budget_latency(row)
+        })
+        .count()
         + if resources_synthetic {
             0
         } else {
@@ -424,7 +439,10 @@ mod tests {
             .contains("capacity_report.json has an incompatible capacity schema"));
         assert!(!root.path().join("performance_review.json").exists());
         std::fs::remove_file(path)?;
-        super::performance_review(&config, options)?;
+        assert!(super::performance_review(&config, options)
+            .unwrap_err()
+            .to_string()
+            .contains("missing project measurement manifest"));
         Ok(())
     }
 
@@ -435,7 +453,8 @@ mod tests {
             .find(|s| s.id == "large_files")
             .unwrap();
         for (p95, p99, missed) in [(7.0, 10.0, false), (9.0, 10.0, true), (7.0, 20.0, true)] {
-            let payload = json!({"scenarios":[{"scenario_id":"editor_scroll_event_to_tessellation/4194304",
+            let payload = json!({"scenarios":[{"scenario_id":"editor_scroll_event_to_tessellation/67108864",
+                "measurement_contract":{"fixture_kind":"non_repeating","fixture_revision":2,"text_backing":"store","production_path":true,"code_path":"app","document_bytes":67108864},
                 "measurement_scope":"end_to_end_event_to_tessellation", "present_included":false,
                 "p95_ms":p95,"p99_ms":p99,"budget_ms":8.33,"p99_budget_ms":12,"frame_count":240}]});
             let row = build_review_scenario(
@@ -461,7 +480,8 @@ mod tests {
         let row = build_review_scenario(
             &scenario,
             &[json!({
-                "benchmark_key": "file_load",
+                "benchmark_key": "editor_scroll_frame_120hz",
+                "measurement_contract":{"fixture_kind":"non_repeating","fixture_revision":2,"text_backing":"store","production_path":true,"code_path":"app","document_bytes":67108864},
                 "workload_family": "file-load",
                 "threshold_ms": 100.0,
                 "budget_probe_ns": 125_000_000.0,

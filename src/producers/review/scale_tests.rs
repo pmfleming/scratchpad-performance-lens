@@ -11,6 +11,7 @@ fn failed_attempt_above_target_is_not_success_or_headroom() {
     let mut capacity = CapacityScenario {
         scenario: "tab_count_ceiling".into(),
         threshold_ms: 140.0,
+        threshold_authoritative: true,
         first_failure_workload: Some(20_000),
         last_successful_workload: Some(4096),
         samples: vec![

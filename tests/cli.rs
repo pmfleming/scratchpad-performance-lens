@@ -132,7 +132,7 @@ fn schema_export_writes_typed_artifact_contracts() -> anyhow::Result<()> {
 }
 
 #[test]
-fn all_continues_after_failures_indexes_profiles_and_rejects_inapplicable_flags() {
+fn all_rejects_unsatisfiable_registry_before_running_and_rejects_inapplicable_flags() {
     let root = tempfile::tempdir().unwrap();
     let profiles = root.path().join("target/analysis/flamegraphs");
     std::fs::create_dir_all(&profiles).unwrap();
@@ -149,19 +149,10 @@ fn all_continues_after_failures_indexes_profiles_and_rejects_inapplicable_flags(
     );
     assert!(!output.status.success());
     let analysis = root.path().join("target/analysis");
-    assert!(analysis.join("performance_review.json").exists());
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!analysis.join("performance_review.json").exists());
     assert!(
-        stderr.contains("measure producer(s) failed") && stderr.contains("frame-metrics"),
-        "{stderr}"
+        String::from_utf8_lossy(&output.stderr).contains("missing project measurement manifest")
     );
-    let profiles: Value =
-        serde_json::from_slice(&std::fs::read(analysis.join("flamegraphs.json")).unwrap()).unwrap();
-    assert!(profiles
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|row| row["id"] == "tab_operations_profile" && row["available"] == true));
     for (tool, flag) in [
         ("capacity", "--fail-on-slow"),
         ("search", "--index-only"),

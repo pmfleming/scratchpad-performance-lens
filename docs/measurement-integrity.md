@@ -217,3 +217,13 @@ Each resource scenario runs in a separate bounded process. The heavy-write probe
 reports its injected writer pause separately and verifies that queued typing
 survives. Metrics are mapped to Large Files, Search and Session Persistence;
 unrelated missing scenarios do not erase their evidence.
+
+## Registry preflight
+
+`splens validate --config CONFIG` checks required measurement inventory and budgets.
+The same preflight runs before `measure all` and `performance-review`. Required
+Criterion names must be in the project manifest with authoritative metadata;
+probe measurements must name an existing probe target and a positive limit.
+Capacity and resource scenarios must be declared and budgeted. Removed split/tile
+benchmarks and unbudgeted component diagnostics no longer gate promises. Capacity
+limits now come from the project manifest; Rust fallback values classify rows only.

@@ -32,8 +32,6 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
             benchmark_keys: &[
                 "editor_scroll_frame_120hz",
                 "editor_scroll_event_to_tessellation",
-                "viewport_extraction_latency",
-                "snapshot_shared_edit_latency",
             ],
             capacity_scenarios: &[
                 "large_file_first_visible_ceiling",
@@ -205,11 +203,7 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
             title: "Many Views",
             promise: "Keep many views into the same loaded files responsive.",
             families: &["split-layout", "viewport"],
-            benchmark_keys: &[
-                "split_stress_latency",
-                "tile_count_scale",
-                "viewport_extraction_latency",
-            ],
+            benchmark_keys: &[],
             capacity_scenarios: &["split_count_ceiling", "view_count_ceiling"],
             resource_scenarios: &["view_count_resource_tracking", "anchor_heavy_view_editing"],
             profile_ids: &[
@@ -243,7 +237,7 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
             promise:
                 "Paste, cut, undo, redo, and metadata refresh should stay fast on huge buffers.",
             families: &["edit-paste", "anchor-maintenance"],
-            benchmark_keys: &["paste_stress_latency", "large_paste_undo_latency"],
+            benchmark_keys: &[],
             capacity_scenarios: &["paste_size_ceiling"],
             resource_scenarios: &[
                 "paste_allocation",
@@ -356,4 +350,124 @@ pub(super) fn probe_classes() -> BTreeMap<String, ProbeClass> {
             },
         ),
     ])
+}
+
+/// Validate the project declaration before spending time on a promise run.
+pub fn validate(root: &std::path::Path) -> anyhow::Result<()> {
+    use anyhow::{ensure, Context};
+    use serde_json::Value;
+    let manifest: Value = serde_json::from_slice(
+        &std::fs::read(root.join("benches/measurement_manifest.json"))
+            .context("promise registry: missing project measurement manifest")?,
+    )?;
+    let metadata = crate::shared::load_benchmark_metadata(root);
+    let mut errors = Vec::new();
+    for promise in review_scenarios() {
+        for key in promise.benchmark_keys {
+            let criterion = manifest["suites"]
+                .as_object()
+                .into_iter()
+                .flat_map(|s| s.values())
+                .any(|groups| groups[*key].as_array().is_some_and(|p| !p.is_empty()));
+            let probe = &manifest["probe_measurements"][*key];
+            let budgeted = if criterion {
+                metadata
+                    .get(*key)
+                    .and_then(crate::shared::authoritative_threshold_ms)
+                    .is_some_and(|ms| ms.is_finite() && ms > 0.0)
+            } else {
+                probe["probe"]
+                    .as_str()
+                    .is_some_and(|name| root.join(format!("src/bin/{name}.rs")).is_file())
+                    && probe["threshold_ms"]
+                        .as_f64()
+                        .is_some_and(|ms| ms.is_finite() && ms > 0.0)
+            };
+            if !budgeted {
+                errors.push(format!(
+                    "{}: {key} is absent or has no authoritative budget",
+                    promise.id
+                ));
+            }
+        }
+        for (kind, ids, budgets) in [
+            ("capacity", promise.capacity_scenarios, "capacity_budgets"),
+            ("resource", promise.resource_scenarios, "resource_budgets"),
+        ] {
+            for id in ids {
+                let declared = manifest["probes"][format!("{kind}_probe")]
+                    .as_array()
+                    .is_some_and(|values| values.iter().any(|value| value == id));
+                let budget = &manifest[budgets][*id];
+                let limit = if kind == "capacity" {
+                    budget["threshold_ms"].as_f64()
+                } else {
+                    budget["max"].as_f64()
+                };
+                if !declared || limit.is_none_or(|limit| !limit.is_finite() || limit <= 0.0) {
+                    errors.push(format!("{}: {id} is absent or unbudgeted", promise.id));
+                }
+            }
+        }
+    }
+    ensure!(
+        errors.is_empty(),
+        "unsatisfiable promise registry:\n{}",
+        errors.join("\n")
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod registry_tests {
+    #[test]
+    fn valid_inventory_passes_but_missing_measurement_or_zero_budget_fails() {
+        use serde_json::json;
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("benches")).unwrap();
+        std::fs::create_dir_all(root.path().join("src/bin")).unwrap();
+        std::fs::write(root.path().join("src/bin/probe.rs"), "fn main() {}").unwrap();
+        let mut manifest = json!({"probe_measurements":{},"probes":{"capacity_probe":[],"resource_probe":[]},
+            "capacity_budgets":{},"resource_budgets":{}});
+        for scenario in super::review_scenarios() {
+            for key in scenario.benchmark_keys {
+                manifest["probe_measurements"][*key] = json!({"probe":"probe","threshold_ms":1});
+            }
+            for (probe, budgets, ids) in [
+                (
+                    "capacity_probe",
+                    "capacity_budgets",
+                    scenario.capacity_scenarios,
+                ),
+                (
+                    "resource_probe",
+                    "resource_budgets",
+                    scenario.resource_scenarios,
+                ),
+            ] {
+                for id in ids {
+                    manifest["probes"][probe]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(json!(id));
+                    manifest[budgets][*id] = json!({"threshold_ms":1,"max":1});
+                }
+            }
+        }
+        let path = root.path().join("benches/measurement_manifest.json");
+        std::fs::write(&path, manifest.to_string()).unwrap();
+        super::validate(root.path()).unwrap();
+        manifest["probe_measurements"]["session_persist_latency"]["threshold_ms"] = json!(0);
+        std::fs::write(&path, manifest.to_string()).unwrap();
+        assert!(super::validate(root.path()).is_err());
+    }
+    #[test]
+    fn missing_declarations_fail_before_measurement() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("benches")).unwrap();
+        std::fs::write(root.path().join("benches/measurement_manifest.json"), "{}").unwrap();
+        let error = super::validate(root.path()).unwrap_err().to_string();
+        assert!(error.contains("session_persist_latency"));
+        assert!(error.contains("large_file_first_visible_ceiling"));
+    }
 }

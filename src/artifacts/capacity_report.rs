@@ -50,6 +50,8 @@ pub struct CapacityScenario {
     pub scenario_label: String,
     pub workload_family: String,
     pub threshold_ms: f64,
+    #[serde(default)]
+    pub threshold_authoritative: bool,
     pub failure_mode: String,
     pub ceiling_reached: Option<bool>,
     pub last_successful_workload: Option<i64>,
@@ -72,7 +74,10 @@ impl CapacityScenario {
     /// Largest workload actually observed to complete within this operation's budget.
     /// Summary labels and failed attempts are never evidence of a successful run.
     pub fn demonstrated_workload(&self) -> Option<i64> {
-        if !self.threshold_ms.is_finite() || self.threshold_ms <= 0.0 {
+        if !self.threshold_authoritative
+            || !self.threshold_ms.is_finite()
+            || self.threshold_ms <= 0.0
+        {
             return None;
         }
         self.samples

@@ -116,6 +116,8 @@ struct Cli {
 enum Command {
     Measure(MeasureArgs),
     Catalog(ConfigArgs),
+    /// Check required measurements and project-owned budgets without running probes.
+    Validate(ConfigArgs),
     Telemetry(ConfigArgs),
     Schema(SchemaArgs),
     /// Compare archived session latency without relaxing benchmark budgets.
@@ -185,6 +187,12 @@ pub fn run_cli() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Catalog(args) => catalog(args),
+        Command::Validate(args) => {
+            let config = LensConfig::load(args.config.as_deref())?;
+            producers::validate_registry(&config.project_root)?;
+            println!("Promise registry is satisfiable.");
+            Ok(())
+        }
         Command::Telemetry(args) => telemetry(args),
         Command::Measure(args) => measure(args),
         Command::Schema(args) => schema(args),
@@ -256,6 +264,12 @@ fn measure(args: MeasureArgs) -> Result<()> {
     let selected = selected_producers(&args.tool);
     validate_measure_options(&selected, options)?;
 
+    if matches!(
+        args.tool.as_str(),
+        "all" | "all-with-flamegraphs" | "performance-review"
+    ) {
+        producers::validate_registry(&config.project_root)?;
+    }
     let mut failures = Vec::new();
     let mut completed_benchmarks = HashSet::new();
     for producer in selected {

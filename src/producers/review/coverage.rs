@@ -77,6 +77,7 @@ pub(super) fn axes(
                 .iter()
                 .filter(|row| {
                     !capacity_synthetic
+                        && row.threshold_authoritative
                         && row.threshold_ms > 0.0
                         && !row.samples.is_empty()
                         && row.samples.iter().all(|sample| {

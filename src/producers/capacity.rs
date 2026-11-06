@@ -161,7 +161,16 @@ pub fn capacity_report(config: &LensConfig, _options: MeasureOptions) -> Result<
             .collect::<Vec<_>>(),
     );
     let (payload, failure) = match events {
-        Ok(result) if !result.events.is_empty() => {
+        Ok(mut result) if !result.events.is_empty() => {
+            let manifest: Value = serde_json::from_slice(&std::fs::read(
+                config
+                    .project_root
+                    .join("benches/measurement_manifest.json"),
+            )?)?;
+            for event in &mut result.events {
+                event["operation_budget"] =
+                    manifest["capacity_budgets"][event["scenario"].as_str().unwrap_or("")].clone();
+            }
             let validation = validate_capacity_events(&result.events)
                 .err()
                 .map(|e| e.to_string());
@@ -311,7 +320,12 @@ fn group_capacity_events(events: Vec<Value>) -> BTreeMap<String, Vec<Value>> {
 fn capacity_scenario_summary(scenario: String, events: Vec<Value>) -> Value {
     let mut events = aggregate_capacity_repetitions(events);
     events.sort_by_key(|event| event.get("step_index").and_then(Value::as_i64).unwrap_or(0));
-    let (threshold_ms, family, profile_id) = capacity_config(&scenario);
+    let (_, family, profile_id) = capacity_config(&scenario);
+    let threshold_ms = events
+        .first()
+        .and_then(|event| event["operation_budget"]["threshold_ms"].as_f64())
+        .filter(|ms| ms.is_finite() && *ms > 0.0)
+        .unwrap_or(0.0);
     let failure_index = events
         .iter()
         .position(|event| capacity_step_failed(event, threshold_ms));
@@ -359,6 +373,7 @@ fn capacity_scenario_summary(scenario: String, events: Vec<Value>) -> Value {
         "scenario_label": scenario_label,
         "workload_family": workload_family,
         "threshold_ms": threshold_ms,
+        "threshold_authoritative": threshold_ms > 0.0,
         "failure_mode": if first_failure.is_some_and(|event| event["failure_count"].as_u64().unwrap_or(0) > 0) { "operation_failed" } else if first_failure.is_some() { "unusable_latency" } else if !complete { "incomplete" } else { "not_reached" },
         "ceiling_reached": if first_failure.is_some() { Some(true) } else { complete.then_some(false) },
         "last_successful_workload": last_success.and_then(|row| row.get("workload_value")),
@@ -382,7 +397,8 @@ fn capacity_step_failed(event: &Value, threshold_ms: f64) -> bool {
     event["failure_count"]
         .as_u64()
         .is_some_and(|count| count > 0)
-        || event["complete"] == true
+        || threshold_ms > 0.0
+            && event["complete"] == true
             && event
                 .get("elapsed_ns")
                 .and_then(Value::as_f64)
@@ -505,7 +521,7 @@ mod tests {
             (3, "ok", 150_000_000, "unusable_latency", Some(true)),
             (3, "ok", 10, "not_reached", Some(false)),
         ] {
-            let events = (0..count).map(|repeat_index| json!({"scenario":"tab_count_ceiling", "step_index":0,
+            let events = (0..count).map(|repeat_index| json!({"scenario":"tab_count_ceiling", "operation_budget":{"threshold_ms":140}, "step_index":0,
                 "repeat_index":repeat_index,"workload_value":10000,"elapsed_ns":elapsed,"status":status,"working_set_bytes":123})).collect();
             let payload = summarize_capacity(events, "completed");
             let row = &payload["scenarios"][0];
