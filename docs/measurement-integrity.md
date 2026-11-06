@@ -198,3 +198,13 @@ The fixture kind and revision travel with the measurement contract. Setting
 such samples cannot prove a storage-sensitive promise. Fresh load probes use
 an isolated store and report logical bytes and database growth. Growth below
 half the logical body flags the fixture as invalid, independently of latency.
+
+## Resource scale budgets
+
+A completed resource workload proves scale only when its exact operation also
+passes a project-owned `resource_budgets` entry in the measurement manifest.
+Entries name a JSON-pointer metric, a maximum and its unit. Missing or invalid
+budgets cannot prove scale. Budget misses feed promise health, including the
+initial save; an unchanged steady save has its own scenario. Initial limits reuse
+existing interaction, capacity and storage-plan targets rather than fitting the
+observed runtime. New limits should be calibrated through accepted baselines.

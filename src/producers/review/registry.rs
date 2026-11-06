@@ -91,6 +91,7 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
                 "many_file_lazy_open_tracking",
                 "search_target_resource_tracking",
                 "session_persist_cost",
+                "session_steady_persist_cost",
                 "session_restore_cost",
             ],
             profile_ids: &["search_all_tabs_profile", "search_dispatch_profile"],
@@ -174,6 +175,7 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
                 "tab_combine_targeted",
                 "tab_strip_frame_rendering",
                 "session_persist_cost",
+                "session_steady_persist_cost",
                 "session_restore_cost",
                 "startup_visible_restore_cost",
             ],
@@ -263,6 +265,7 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
             capacity_scenarios: &[],
             resource_scenarios: &[
                 "session_persist_cost",
+                "session_steady_persist_cost",
                 "large_dirty_buffer_save",
                 "session_restore_cost",
                 "startup_visible_restore_cost",
@@ -285,6 +288,7 @@ pub(super) fn review_scenarios() -> Vec<ReviewScenario> {
                     capacity_scenarios: &[],
                     resource_scenarios: &[
                         "session_persist_cost",
+                        "session_steady_persist_cost",
                         "session_restore_cost",
                         "startup_visible_restore_cost",
                     ],

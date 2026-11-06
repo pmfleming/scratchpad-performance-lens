@@ -49,7 +49,7 @@ pub(super) fn gap_evidence(scenario: &str, events: &[Value], synthetic: bool) ->
             100_000,
             &["retained_live_bytes_before_teardown", "baseline_live_bytes"],
         ),
-        "session_persist_cost" => (
+        "session_persist_cost" | "session_steady_persist_cost" => (
             10_000,
             &[
                 "manifest_size_bytes",
@@ -116,13 +116,13 @@ pub(super) fn gap_evidence(scenario: &str, events: &[Value], synthetic: bool) ->
         "closed":missing.is_empty(), "minimum_workload":minimum,"required_metrics":fields,"missing_evidence":missing})
 }
 
-// Resource probes prove completed work and measurement completeness, not a latency budget.
-// Latency budgets are evaluated separately from authoritative benchmark evidence.
+// Scale requires both complete resource evidence and a budget for this exact operation.
 pub(super) fn demonstrated_workload(scenario: &str, samples: &[Value]) -> Option<i64> {
     samples
         .iter()
         .filter(|sample| {
             gap_evidence(scenario, std::slice::from_ref(sample), false)["closed"] == true
+                && super::resource_budgets::status(sample) == "pass"
         })
         .filter_map(|sample| sample["workload_value"].as_i64())
         .max()

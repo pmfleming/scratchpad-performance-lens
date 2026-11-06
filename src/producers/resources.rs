@@ -25,7 +25,10 @@ pub fn resource_profiles(config: &LensConfig, _options: MeasureOptions) -> Resul
             probe_path("resource_probe"),
             "resource probe",
         )
-        .map(|events| (events, expected))
+        .and_then(|mut result| {
+            super::resource_budgets::attach(&config.project_root, &mut result.events)?;
+            Ok((result, expected))
+        })
     });
     let (payload, failure) = match events {
         Ok((result, expected)) => {
@@ -166,8 +169,10 @@ fn resource_scenario(scenario: &str, mut events: Vec<Value>, gap: Option<&str>) 
         "closes_measurement_gap": evidence["closed"],
         "gap_evidence": evidence,
         "demonstrated_workload": demonstrated_workload(scenario, &events),
-        "scale_evidence_basis": "successful_resource_contract_not_latency_budget",
+        "scale_evidence_basis": "successful_resource_contract_with_project_operation_budget",
         "sample_count": events.len(),
+        "budget_misses": events.iter().filter(|event| super::resource_budgets::status(event) == "fail").count(),
+        "unbudgeted_samples": events.iter().filter(|event| super::resource_budgets::status(event) == "unbudgeted").count(),
         "max_setup_elapsed_ms": max_i64(&events, "setup_elapsed_ns").map(|value| value as f64 / 1_000_000.0),
         "max_elapsed_ms": events.iter().map(|event| event["elapsed_ns"].as_f64().unwrap_or(0.0) / 1_000_000.0).fold(0.0, f64::max),
         "max_allocated_bytes": max_i64(&events, "allocated_bytes"),

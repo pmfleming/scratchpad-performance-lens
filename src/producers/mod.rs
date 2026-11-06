@@ -5,6 +5,7 @@ mod flamegraphs;
 mod frame_metrics;
 mod project_code;
 mod render;
+mod resource_budgets;
 mod resource_contracts;
 mod resources;
 mod review;

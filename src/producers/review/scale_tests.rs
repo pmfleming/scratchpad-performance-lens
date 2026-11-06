@@ -58,9 +58,10 @@ fn session_promise_uses_real_resource_output_and_separate_latency_budgets() {
         ("undersized", PromiseHealth::AtRisk),
         ("incomplete_history", PromiseHealth::AtRisk),
         ("slow", PromiseHealth::Fail),
+        ("slow_initial_save", PromiseHealth::Fail),
     ] {
         let mut events: Vec<_> = scenario.resource_scenarios.iter().map(|id| json!({
-            "scenario":id,"status":"ok","elapsed_ns":1_000_000,"measurement_scope":"prepared_operation",
+            "scenario":id,"status":"ok","resource_budget":{"metric":"/elapsed_ns","max":180000000,"authoritative":true},"elapsed_ns":1_000_000,"measurement_scope":"prepared_operation",
             "workload_value":if *id == "large_dirty_buffer_save" {50 * crate::shared::MB} else {10_000},
             "allocated_bytes":1,"manifest_size_bytes":1,
             "phase_elapsed_ns":{"snapshot_capture_ns":1,"file_write_ns":1,"manifest_serialize_ns":1,
@@ -69,13 +70,20 @@ fn session_promise_uses_real_resource_output_and_separate_latency_budgets() {
             "workload_details":{"history_payload_bytes":16 * crate::shared::MB,"history_entries":1024,"inserted_bytes":1,"synchronous":"FULL"}
         })).collect();
         match case {
+            "slow_initial_save" => events[0]["elapsed_ns"] = json!(5_200_000_000u64),
             "panic" => events[2]["status"] = json!("panic"),
             "missing_metric" => {
-                events[2]["phase_elapsed_ns"]["manifest_read_parse_ns"] = json!(null)
+                events
+                    .iter_mut()
+                    .find(|e| e["scenario"] == "session_restore_cost")
+                    .unwrap()["phase_elapsed_ns"]["manifest_read_parse_ns"] = json!(null)
             }
             "undersized" => events[2]["workload_value"] = json!(9999),
             "incomplete_history" => {
-                events[1]["workload_details"]["history_payload_bytes"] = json!(0)
+                events
+                    .iter_mut()
+                    .find(|e| e["scenario"] == "large_dirty_buffer_save")
+                    .unwrap()["workload_details"]["history_payload_bytes"] = json!(0)
             }
             _ => {}
         }
