@@ -63,11 +63,38 @@ pub(in crate::producers) fn run_sweeps(
     };
     let mut failures = Vec::new();
     for scenario in scenarios {
+        let mut runs = Vec::new();
         match run_events(root, &executable, &["--scenario", scenario], scenario) {
             Ok(result) => {
-                combined.events.extend(result.events);
-                if let Some(error) = result.failure {
-                    failures.push(format!("{scenario}: {error}"));
+                let repeat = near_budget(root, bin, scenario, &result.events);
+                runs.push(result);
+                if repeat {
+                    for _ in 0..2 {
+                        match run_events(root, &executable, &["--scenario", scenario], scenario) {
+                            Ok(result) => runs.push(result),
+                            Err(error) => failures.push(format!("{scenario}: {error}")),
+                        }
+                    }
+                }
+                let launch_count = runs.len();
+                for (launch, mut result) in runs.into_iter().enumerate() {
+                    for event in &mut result.events {
+                        event["launch_index"] = serde_json::json!(launch);
+                        event["independent_launch_count"] = serde_json::json!(launch_count);
+                        if bin == "capacity_probe" {
+                            let count = event["expected_repetition_count"].as_u64().unwrap_or(3);
+                            if let Some(index) = event["repeat_index"].as_u64() {
+                                event["repeat_index"] =
+                                    serde_json::json!(index + count * launch as u64);
+                            }
+                            event["expected_repetition_count"] =
+                                serde_json::json!(count * launch_count as u64);
+                        }
+                    }
+                    combined.events.extend(result.events);
+                    if let Some(error) = result.failure {
+                        failures.push(format!("{scenario}: {error}"));
+                    }
                 }
             }
             Err(error) => failures.push(format!("{scenario}: {error}")),
@@ -75,6 +102,36 @@ pub(in crate::producers) fn run_sweeps(
     }
     combined.failure = (!failures.is_empty()).then(|| failures.join("; "));
     Ok(combined)
+}
+
+fn near_budget(root: &Path, bin: &str, scenario: &str, events: &[Value]) -> bool {
+    let manifest: Value = std::fs::read(root.join("benches/measurement_manifest.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    let (limit, metric) = if bin == "capacity_probe" {
+        (
+            manifest["capacity_budgets"][scenario]["threshold_ms"]
+                .as_f64()
+                .map(|v| v * 1e6),
+            "/elapsed_ns",
+        )
+    } else {
+        (
+            manifest["resource_budgets"][scenario]["max"].as_f64(),
+            manifest["resource_budgets"][scenario]["metric"]
+                .as_str()
+                .unwrap_or("/elapsed_ns"),
+        )
+    };
+    limit.filter(|v| *v > 0.0).is_some_and(|limit| {
+        events.iter().any(|event| {
+            event
+                .pointer(metric)
+                .and_then(Value::as_f64)
+                .is_some_and(|v| (0.9..=1.1).contains(&(v / limit)))
+        })
+    })
 }
 
 fn bounded_output(

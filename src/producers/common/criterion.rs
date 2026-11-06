@@ -27,6 +27,7 @@ pub(in crate::producers) fn run_benchmarks(
     }
     shared::run_progress_command(project_root, cargo_args, label)
         .and_then(|()| {
+            repeat_borderline(project_root, &suites, started)?;
             record_run(
                 project_root,
                 &suites,
@@ -36,6 +37,72 @@ pub(in crate::producers) fn run_benchmarks(
         })
         .err()
         .map(|error| error.to_string())
+}
+
+fn repeat_borderline(root: &Path, suites: &[&str], started: f64) -> Result<()> {
+    let metadata = shared::load_benchmark_metadata(root);
+    let manifest: Value = std::fs::read(root.join("benches/measurement_manifest.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    let directory = criterion_dir(root);
+    for path in shared::criterion_estimate_paths(&directory) {
+        let modified = path
+            .metadata()?
+            .modified()?
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs_f64();
+        if modified < started {
+            continue;
+        }
+        let Some(name) = shared::benchmark_name_from_estimate_path(&directory, &path) else {
+            continue;
+        };
+        let Some(limit) = metadata
+            .get(shared::benchmark_key(&name))
+            .and_then(shared::authoritative_threshold_ms)
+            .filter(|v| *v > 0.0)
+        else {
+            continue;
+        };
+        let estimates: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+        let near = estimates["mean"]["point_estimate"]
+            .as_f64()
+            .is_some_and(|ns| (0.9..=1.1).contains(&(ns / 1e6 / limit)));
+        if !near {
+            continue;
+        }
+        let Some(suite) = suites
+            .iter()
+            .find(|suite| manifest["suites"][**suite][shared::benchmark_key(&name)].is_array())
+        else {
+            continue;
+        };
+        let archive = directory.join(format!(
+            "splens-near-budget-{:.9}-{}.json",
+            started,
+            crate::provenance::fingerprint(name.as_bytes())
+        ));
+        std::fs::write(
+            &archive,
+            serde_json::to_vec_pretty(&json!({"name":name,"first_estimates":estimates}))?,
+        )?;
+        shared::run_progress_command(
+            root,
+            &[
+                "cargo",
+                "bench",
+                "--bench",
+                suite,
+                "--",
+                &name,
+                "--sample-size",
+                "50",
+            ],
+            "Repeating borderline benchmark with 50 samples",
+        )?;
+    }
+    Ok(())
 }
 
 fn criterion_dir(project_root: &Path) -> PathBuf {

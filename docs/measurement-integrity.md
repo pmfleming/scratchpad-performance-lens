@@ -260,3 +260,20 @@ and have non-overlapping observed ranges to be called a regression. Regular
 reviews compare against the default accepted snapshot automatically. A passing
 promise with such a regression becomes `passing_but_regressed`; failing promises
 remain failing. `baseline_comparison.json` contains explicit comparison results.
+
+## Environment and measurement noise
+
+Provenance records project, target and temporary-store filesystems, backing device,
+I/O scheduler, CPU governors, AC/battery state and power profile. Stable identity
+participates in freshness and baseline compatibility. Load, pressure and thermal
+readings are separate before/after observations, so changing load cannot make
+an otherwise fresh artifact stale. Unsupported OS counters remain null.
+
+A fixed 256 KiB hash control runs before and after each producer. More than 25%
+median drift or 1.5x within-control spread flags noise. Reviews preserve measured
+failures but withhold a passing verdict for noisy evidence; baseline acceptance
+and comparison reject noisy runs. Near-budget capacity and resource scenarios
+(within 10%) get three independent launches. Search workflows combine repeated
+raw trials, and near-budget Criterion rows get a targeted 50-sample repeat with
+the first estimate archived. Resource trials that straddle a limit are uncertain,
+and scale proof cannot select only their fastest sample.

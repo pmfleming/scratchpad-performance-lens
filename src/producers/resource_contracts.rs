@@ -144,13 +144,21 @@ pub(super) fn gap_evidence(scenario: &str, events: &[Value], synthetic: bool) ->
 
 // Scale requires both complete resource evidence and a budget for this exact operation.
 pub(super) fn demonstrated_workload(scenario: &str, samples: &[Value]) -> Option<i64> {
-    samples
-        .iter()
-        .filter(|sample| {
-            gap_evidence(scenario, std::slice::from_ref(sample), false)["closed"] == true
-                && super::resource_budgets::status(sample) == "pass"
+    let mut groups: std::collections::BTreeMap<i64, Vec<Value>> = std::collections::BTreeMap::new();
+    for sample in samples {
+        if let Some(workload) = sample["workload_value"].as_i64() {
+            groups.entry(workload).or_default().push(sample.clone());
+        }
+    }
+    groups
+        .into_iter()
+        .filter(|(_, group)| {
+            super::resource_budgets::group_status(group) == "pass"
+                && group.iter().all(|sample| {
+                    gap_evidence(scenario, std::slice::from_ref(sample), false)["closed"] == true
+                })
         })
-        .filter_map(|sample| sample["workload_value"].as_i64())
+        .map(|(workload, _)| workload)
         .max()
 }
 

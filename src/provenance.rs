@@ -48,6 +48,8 @@ fn executable_fingerprint() -> Option<&'static str> {
 struct RunSnapshot {
     root: PathBuf,
     value: Option<Value>,
+    conditions: Value,
+    control: Value,
 }
 
 thread_local! {
@@ -69,6 +71,8 @@ pub(crate) fn with_run_snapshot<T>(root: &Path, run: impl FnOnce() -> T) -> T {
         slot.replace(Some(RunSnapshot {
             root: root.to_owned(),
             value: None,
+            conditions: crate::environment::conditions(),
+            control: crate::environment::control(),
         }))
     }));
     run()
@@ -114,6 +118,7 @@ fn compute_context(root: &Path) -> Value {
         }
     }
     json!({
+        "measurement_environment": crate::environment::identity(root),
         "project_root": root.canonicalize().ok(),
         "revision": command(root, "git", &["rev-parse", "HEAD"]),
         "dirty_state": command(root, "git", &["status", "--porcelain"]),
@@ -156,7 +161,16 @@ pub fn record(
     let measured_failure = artifact.as_array().is_some_and(|rows| {
         !rows.is_empty() && rows.iter().all(|row| row["measurement_status"] == "valid")
     }) || artifact["meta"]["probe_status"] == "partial";
-    let payload = json!({"version": 1, "run_id": format!("{}-{started:.9}", std::process::id()),
+    let (before_conditions, before_control) = RUN_SNAPSHOT.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|s| (s.conditions.clone(), s.control.clone()))
+            .unwrap_or((Value::Null, Value::Null))
+    });
+    let after_control = crate::environment::control();
+    let payload = json!({"version": 1,
+        "conditions":{"before":before_conditions,"after":crate::environment::conditions()},
+        "measurement_quality":crate::environment::quality(&before_control,&after_control), "run_id": format!("{}-{started:.9}", std::process::id()),
         "started_at": started, "finished_at": timestamp(), "context": context,
         "producer_success": success, "artifact_fingerprint": fingerprint(&bytes),
         "status": if success || measured_failure { "valid" } else { "failed" }});

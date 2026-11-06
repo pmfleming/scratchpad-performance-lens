@@ -73,7 +73,31 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
             )
         })
         .collect();
-    crate::baselines::annotate(config, &inputs.context, &mut scenario_payload)?;
+    let noisy_sources: Vec<String> = source_status(config, &inputs.context)
+        .iter()
+        .filter(|source| source.available)
+        .filter_map(|source| {
+            let path = std::path::Path::new(&source.path);
+            let meta =
+                shared::read_json(&crate::provenance::sidecar(path)).into_value_or(json!({}));
+            (meta["measurement_quality"]["status"] == "noisy").then(|| source.id.clone())
+        })
+        .collect();
+    if noisy_sources.is_empty() {
+        crate::baselines::annotate(config, &inputs.context, &mut scenario_payload)?;
+    } else {
+        for scenario in &mut scenario_payload {
+            if scenario.promise_health == PromiseHealth::Pass {
+                scenario.promise_health = PromiseHealth::AtRisk;
+            }
+            scenario.baseline_comparison.status =
+                crate::artifacts::performance_review::RegressionStatus::Noisy;
+            scenario.gaps.push(format!(
+                "Measurement control detected noise in: {}",
+                noisy_sources.join(", ")
+            ));
+        }
+    }
     let target_promises: Vec<_> = scenarios
         .iter()
         .map(|scenario| scenario.promise.to_string())
@@ -98,6 +122,7 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
     let missing = scenario_payload.len() - covered - thin;
     let artifact = PerformanceReviewArtifact {
         meta: PerformanceReviewMeta {
+            noisy_sources,
             generated_from: "rust:performance_review".to_string(),
             source_artifacts: source_status(config, &inputs.context),
             scenario_model: "scenario-first performance coverage".to_string(),

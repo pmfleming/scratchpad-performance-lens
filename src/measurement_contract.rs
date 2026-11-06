@@ -38,6 +38,20 @@ pub fn eligible(id: &str, contract: &Value) -> bool {
                 .is_some_and(|bytes| bytes > 16 * 1024 * 1024))
 }
 
+/// A fresh import must materialize most of its logical body in the store.
+/// This is an integrity check, not a write-volume budget.
+pub fn import_fixture_valid(event: &Value) -> bool {
+    let phases = &event["phase_elapsed_ns"];
+    match (
+        phases["import_logical_bytes"].as_u64(),
+        phases["import_database_growth_bytes"].as_u64(),
+    ) {
+        (Some(logical), Some(stored)) => logical > 0 && stored >= logical / 2,
+        (None, None) => true,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,19 +79,5 @@ mod tests {
         assert!(eligible("editor_scroll_frame_120hz", &contract));
         contract["production_path"] = json!(false);
         assert!(!eligible("search_file_size_ceiling", &contract));
-    }
-}
-
-/// A fresh import must materialize most of its logical body in the store.
-/// This is an integrity check, not a write-volume budget.
-pub fn import_fixture_valid(event: &Value) -> bool {
-    let phases = &event["phase_elapsed_ns"];
-    match (
-        phases["import_logical_bytes"].as_u64(),
-        phases["import_database_growth_bytes"].as_u64(),
-    ) {
-        (Some(logical), Some(stored)) => logical > 0 && stored >= logical / 2,
-        (None, None) => true,
-        _ => false,
     }
 }

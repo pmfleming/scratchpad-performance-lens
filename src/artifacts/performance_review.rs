@@ -21,6 +21,8 @@ pub struct PerformanceReviewArtifact {
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct PerformanceReviewMeta {
+    #[serde(default)]
+    pub noisy_sources: Vec<String>,
     pub generated_from: String,
     pub source_artifacts: Vec<SourceArtifactStatus>,
     pub scenario_model: String,
@@ -237,6 +239,7 @@ pub struct Presentation {
 pub enum RegressionStatus {
     #[default]
     NoBaseline,
+    Noisy,
     Stable,
     Regressed,
     EnvironmentMismatch,

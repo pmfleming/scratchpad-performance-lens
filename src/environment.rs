@@ -1,0 +1,135 @@
+//! Stable measurement identity and separately recorded transient conditions.
+use serde_json::{json, Value};
+use std::{path::Path, process::Command, time::Instant};
+
+fn read(path: impl AsRef<Path>) -> Option<String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_owned())
+}
+fn command(program: &str, args: &[&str]) -> Option<String> {
+    let output = Command::new(program).args(args).output().ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+fn filesystem(path: &Path) -> Value {
+    let mut existing = path;
+    while !existing.exists() {
+        let Some(parent) = existing.parent() else {
+            break;
+        };
+        existing = parent;
+    }
+    let path = existing;
+    let mount = command(
+        "findmnt",
+        &[
+            "--json",
+            "--target",
+            &path.to_string_lossy(),
+            "--output",
+            "FSTYPE,SOURCE,OPTIONS,MAJ:MIN",
+        ],
+    )
+    .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+    .and_then(|v| v["filesystems"].as_array().and_then(|a| a.first()).cloned());
+    let Some(mut mount) = mount else {
+        return Value::Null;
+    };
+    if let Some(id) = mount["maj:min"].as_str() {
+        if let Ok(mut device) = std::fs::canonicalize(format!("/sys/dev/block/{id}")) {
+            if device.join("partition").exists() {
+                device.pop();
+            }
+            mount["device"] = json!({"model":read(device.join("device/model")),
+                "scheduler":read(device.join("queue/scheduler")),"rotational":read(device.join("queue/rotational")),
+                "read_ahead_kb":read(device.join("queue/read_ahead_kb"))});
+        }
+    }
+    mount
+}
+
+pub fn identity(root: &Path) -> Value {
+    let policies: Vec<_> = std::fs::read_dir("/sys/devices/system/cpu/cpufreq").into_iter().flatten().filter_map(Result::ok)
+        .map(|entry| (entry.file_name().to_string_lossy().into_owned(),json!({
+            "governor":read(entry.path().join("scaling_governor")),"driver":read(entry.path().join("scaling_driver")),
+            "min_khz":read(entry.path().join("scaling_min_freq")),"max_khz":read(entry.path().join("scaling_max_freq"))}))).collect();
+    let governors: std::collections::BTreeMap<_, _> = policies.into_iter().collect();
+    let power: std::collections::BTreeMap<_, _> = std::fs::read_dir("/sys/class/power_supply")
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| {
+            (
+                entry.file_name().to_string_lossy().into_owned(),
+                json!({"type":read(entry.path().join("type")),
+            "online":read(entry.path().join("online")),"status":read(entry.path().join("status"))}),
+            )
+        })
+        .collect();
+    json!({"project_filesystem":filesystem(root),"temp_filesystem":filesystem(&std::env::temp_dir()),
+        "target_filesystem":filesystem(&crate::shared::cargo_target_directory(root)),
+        "governors":governors,"power_supplies":power,"power_profile":command("powerprofilesctl",&["get"]),
+        "kernel":command("uname",&["-r"]),"control_revision":1})
+}
+
+pub fn conditions() -> Value {
+    let temperatures: std::collections::BTreeMap<_, _> = std::fs::read_dir("/sys/class/thermal")
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().starts_with("thermal_zone"))
+        .map(|e| {
+            (
+                e.file_name().to_string_lossy().into_owned(),
+                read(e.path().join("temp")),
+            )
+        })
+        .collect();
+    json!({"loadavg":read("/proc/loadavg"),"cpu_pressure":read("/proc/pressure/cpu"),
+        "io_pressure":read("/proc/pressure/io"),"memory_pressure":read("/proc/pressure/memory"),
+        "temperatures_millicelsius":temperatures})
+}
+
+pub fn control() -> Value {
+    let bytes: Vec<_> = (0..256 * 1024).map(|i| (i % 251) as u8).collect();
+    std::hint::black_box(crate::provenance::fingerprint(&bytes));
+    let mut samples = Vec::new();
+    for _ in 0..7 {
+        let start = Instant::now();
+        std::hint::black_box(crate::provenance::fingerprint(std::hint::black_box(&bytes)));
+        samples.push(start.elapsed().as_nanos() as u64);
+    }
+    samples.sort_unstable();
+    json!({"revision":1,"metric":"fixed_256_kib_hash_ns","median_ns":samples[3],"min_ns":samples[0],"max_ns":samples[6],"samples_ns":samples})
+}
+
+pub fn quality(before: &Value, after: &Value) -> Value {
+    let ratio = before["median_ns"]
+        .as_f64()
+        .zip(after["median_ns"].as_f64())
+        .filter(|(a, b)| *a > 0.0 && *b > 0.0)
+        .map(|(a, b)| a.max(b) / a.min(b));
+    let dispersion = [before, after]
+        .into_iter()
+        .filter_map(|v| v["max_ns"].as_f64().zip(v["min_ns"].as_f64()))
+        .filter(|(_, min)| *min > 0.0)
+        .map(|(max, min)| max / min)
+        .fold(1.0, f64::max);
+    json!({"status":if ratio.is_none() {"unknown"} else if ratio.is_some_and(|r|r > 1.25) || dispersion > 1.5 {"noisy"} else {"stable"},
+        "control_median_ratio":ratio,"control_max_min_ratio":dispersion,"before":before,"after":after})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn control_drift_flags_noise_without_changing_machine_identity() {
+        let control = |n| json!({"median_ns":n,"min_ns":n,"max_ns":n});
+        assert_eq!(quality(&control(100), &control(130))["status"], "noisy");
+        assert_eq!(quality(&control(100), &control(110))["status"], "stable");
+        assert_eq!(quality(&Value::Null, &control(100))["status"], "unknown");
+    }
+}

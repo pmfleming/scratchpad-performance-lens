@@ -76,6 +76,10 @@ pub fn accept(args: BaselineArgs) -> Result<()> {
     let config = LensConfig::load(args.config.as_deref())?;
     let report = load_current(&config)?;
     ensure!(
+        report.meta.noisy_sources.is_empty(),
+        "noisy runs cannot be accepted or compared as baselines"
+    );
+    ensure!(
         report.scenarios.len() == report.promise_count && report.promise_count > 0,
         "incomplete promise inventory"
     );
@@ -109,6 +113,10 @@ pub fn accept(args: BaselineArgs) -> Result<()> {
 pub fn compare(args: BaselineArgs) -> Result<()> {
     let config = LensConfig::load(args.config.as_deref())?;
     let report = load_current(&config)?;
+    ensure!(
+        report.meta.noisy_sources.is_empty(),
+        "noisy runs cannot be accepted or compared as baselines"
+    );
     let baseline = read(&args.baseline.unwrap_or_else(|| default_path(&config)))?;
     let current = snapshot(
         &provenance::context(&config.project_root),
@@ -216,8 +224,8 @@ fn snapshot(context: &Value, scenarios: &[PerformanceReviewScenario]) -> Snapsho
                     &row["measurement_scope"],
                     metric,
                     row[*metric].as_f64(),
-                    None,
-                    None,
+                    row["mean_confidence_interval_ns"]["lower_bound"].as_f64(),
+                    row["mean_confidence_interval_ns"]["upper_bound"].as_f64(),
                 );
             }
         }

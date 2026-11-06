@@ -26,6 +26,12 @@ pub(super) fn valid_latency(row: &Value) -> bool {
 }
 
 pub(super) fn valid_resource(row: &Value) -> bool {
+    if matches!(
+        row["budget_status"].as_str(),
+        Some("uncertain" | "invalid" | "unbudgeted")
+    ) {
+        return false;
+    }
     if row["measurement_gap"].is_string() && row["closes_measurement_gap"] != true {
         return false;
     }
