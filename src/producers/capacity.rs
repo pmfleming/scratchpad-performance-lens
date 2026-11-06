@@ -231,7 +231,18 @@ fn capacity_report_for(
         "focused"
     });
     payload["meta"]["requested_scenarios"] = json!(requested);
-    let payload = serde_json::to_value(serde_json::from_value::<CapacityReportArtifact>(payload)?)?;
+    let mut report = serde_json::from_value::<CapacityReportArtifact>(payload)?;
+    for scenario in &mut report.scenarios {
+        scenario.within_budget_workload = scenario.demonstrated_workload();
+        scenario.within_budget_label = scenario.within_budget_workload.and_then(|size| {
+            scenario
+                .samples
+                .iter()
+                .find(|sample| sample.workload_value == Some(size))
+                .and_then(|sample| sample.workload_label.clone())
+        });
+    }
+    let payload = serde_json::to_value(report)?;
     write_probe_artifact(
         &config.output_dir.join("capacity_report.json"),
         &payload,
@@ -473,6 +484,7 @@ fn resource_checklist(limiting: &str, events: &[Value]) -> Vec<Value> {
 fn capacity_sample(event: &Value) -> Value {
     json!({
         "measurement_contract": event["measurement_contract"],
+        "result_value": event["result_value"],
         "workload_value": event.get("workload_value"),
         "workload_label": event.get("workload_label"),
         "setup_elapsed_ms": event["setup_elapsed_ns"].as_f64().map(|value| value / 1_000_000.0),

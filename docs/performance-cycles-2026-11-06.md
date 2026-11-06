@@ -708,3 +708,40 @@ stable CPU controls; those controls do not certify disk scheduling stability.
 Retained full restores were 263.5, 261.2 and 269.8 ms, all failing 180 ms with all
 10,000 tabs/buffers and 40,960,000 text bytes present. Unchanged saves (90.4–100.3 ms)
 and startup-visible restores (15.6–15.8 ms) passed every observed launch.
+
+## Cycle 25: production search capacity and reusable fragment workers
+
+The file-size capacity probe now calls the production target matcher with the
+same intra-buffer worker policy. Previously it used a separate serial window
+loop. The input remains the exact requested number of non-repeating UTF-8 bytes,
+with one expected match. Fixture revision 3 records actual snapshot bytes, the
+matcher path and complete-result endpoint; the emitted result count must equal
+one. The lens rejects the former serial path, missing counts, partial results and
+mismatched input sizes. It validates every repetition and rechecks typed capacity
+scale evidence. Serial resource search remains a separate diagnostic.
+
+`cycle-25-baseline/` measures the corrected production path before optimizing it.
+The worker cohort was recreated after each eight-window batch. It now lives for
+the entire target, retaining the same eight-window planning bound and worker cap.
+Results are consumed in input order. Cancellation, failed reads and panicked
+fragment workers return no completed result; channels close before every scoped
+worker is joined. Tests verify a single cohort across 37 chunks, ordering despite
+uneven completion, failures in early/middle/final batches, cancellation, panic,
+and the existing Unicode, regex and non-overlapping literal results.
+
+Capacity summaries now distinguish the largest workload actually within budget
+from the first failed step. They previously labelled the failed step simply as a
+ceiling, which could be mistaken for demonstrated passing capacity. The derived
+within-budget fields use the existing validated scale calculation, and remain
+separate from the raw samples and all recorded repetitions.
+
+Validation: all 726 app tests passed (seven ignored), all 109 lens tests passed,
+and strict Clippy passed in both repositories. `cycle-25-final/` completed the
+capacity sweep in 16.48 seconds and search workflows in 10.66 seconds. All twelve
+workflow medians pass; all-tabs first render/completion were 25.25/25.28 ms at
+10,000 targets. Capacity launch controls were stable. The baseline 1 GiB median
+was 1,410.0 ms with 2,760 ms process CPU in its median trial; the final median was
+1,363.2 ms with 2,480 ms process CPU. This is a modest observed elapsed change,
+not a closed promise. The 256 MiB median changed from 331.8 to 342.9 ms. Only up
+to 64 MiB is demonstrated within the unchanged 180 ms limit; 256 MiB and 1 GiB
+still fail. All trials, including slower first repetitions, remain archived.

@@ -149,15 +149,15 @@ pub(super) fn render_capacity(payload: &Value) -> String {
     let rows = scenarios_array(payload)
         .iter()
         .map(|item| {
-            let ceiling = item
+            let first_failed_step = item
                 .get("first_failure_label")
-                .or_else(|| item.get("last_successful_label"))
                 .and_then(Value::as_str)
-                .unwrap_or("-");
+                .unwrap_or("none");
             format!(
-                "- {}: ceiling={} | mode={} | resource={}",
+                "- {}: within_budget={} | first_failed_step={} | mode={} | resource={}",
                 text(item, "scenario_label", "-"),
-                ceiling,
+                text(item, "within_budget_label", "none demonstrated"),
+                first_failed_step,
                 text(item, "failure_mode", "-"),
                 text(item, "suspected_limiting_resource", "-"),
             )

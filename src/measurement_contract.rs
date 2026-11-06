@@ -33,10 +33,30 @@ pub fn eligible(id: &str, contract: &Value) -> bool {
         && contract["code_path"]
             .as_str()
             .is_some_and(|s| !s.is_empty())
+        && (id != "search_file_size_ceiling"
+            || (contract["code_path"] == "search_target_ranges/production_worker_policy"
+                && contract["search_fixture_revision"] == 3
+                && contract["completion_endpoint"] == "all_ranges_returned"
+                && contract["expected_matches"] == 1
+                && contract["document_bytes"].as_u64().is_some_and(|n| n > 0)))
         && (!id.starts_with("editor_scroll_")
             || contract["document_bytes"]
                 .as_u64()
                 .is_some_and(|bytes| bytes > 16 * 1024 * 1024))
+}
+
+pub fn completed_search(
+    id: &str,
+    workload: Option<i64>,
+    result: Option<u64>,
+    scope: Option<&str>,
+    contract: &Value,
+) -> bool {
+    id != "search_file_size_ceiling"
+        || (eligible(id, contract)
+            && scope == Some("prepared_search_component_completion")
+            && workload.is_some_and(|n| n > 0 && Some(n) == contract["document_bytes"].as_i64())
+            && result == Some(1))
 }
 
 /// A fresh import must materialize most of its logical body in the store.
@@ -58,6 +78,38 @@ mod tests {
     use super::eligible;
     use serde_json::json;
     #[test]
+    fn production_search_requires_exact_input_and_complete_matching() {
+        let contract = json!({"fixture_kind":"non_repeating","fixture_revision":2,"production_path":true,"text_backing":"store",
+            "code_path":"search_target_ranges/production_worker_policy","search_fixture_revision":3,
+            "document_bytes":1048576,"expected_matches":1,"completion_endpoint":"all_ranges_returned"});
+        let valid = |bytes, count, contract: &serde_json::Value| {
+            super::completed_search(
+                "search_file_size_ceiling",
+                Some(bytes),
+                count,
+                Some("prepared_search_component_completion"),
+                contract,
+            )
+        };
+        assert!(valid(1048576, Some(1), &contract));
+        assert!(!valid(1073741824, Some(1), &contract));
+        assert!(!valid(1048576, None, &contract));
+        assert!(!valid(1048576, Some(0), &contract));
+        for (key, value) in [
+            (
+                "code_path",
+                json!("DocumentSnapshot::chunks_for_range/search_program"),
+            ),
+            ("search_fixture_revision", json!(2)),
+            ("completion_endpoint", json!("partial_ranges")),
+            ("expected_matches", json!(0)),
+        ] {
+            let mut invalid = contract.clone();
+            invalid[key] = value;
+            assert!(!valid(1048576, Some(1), &invalid));
+        }
+    }
+    #[test]
     fn dedup_fixtures_and_disproportionately_small_imports_are_not_proof() {
         assert!(!eligible(
             "file_backed_search",
@@ -71,7 +123,9 @@ mod tests {
     }
     #[test]
     fn size_labels_and_owned_component_paths_cannot_prove_store_promises() {
-        let mut contract = json!({"fixture_kind":"non_repeating","fixture_revision":2,"production_path":true,"text_backing":"owned","code_path":"search"});
+        let mut contract = json!({"fixture_kind":"non_repeating","fixture_revision":2,"production_path":true,"text_backing":"owned",
+            "code_path":"search_target_ranges/production_worker_policy","search_fixture_revision":3,
+            "document_bytes":1048576,"expected_matches":1,"completion_endpoint":"all_ranges_returned"});
         assert!(!eligible("search_file_size_ceiling", &contract));
         contract["text_backing"] = json!("store");
         assert!(eligible("search_file_size_ceiling", &contract));

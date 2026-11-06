@@ -60,6 +60,10 @@ pub struct CapacityScenario {
     pub ceiling_reached: Option<bool>,
     pub last_successful_workload: Option<i64>,
     pub last_successful_label: Option<String>,
+    #[serde(default)]
+    pub within_budget_workload: Option<i64>,
+    #[serde(default)]
+    pub within_budget_label: Option<String>,
     pub first_failure_workload: Option<i64>,
     pub first_failure_label: Option<String>,
     pub peak_working_set_bytes: Option<i64>,
@@ -88,6 +92,13 @@ impl CapacityScenario {
             .iter()
             .filter(|sample| {
                 crate::measurement_contract::eligible(&self.scenario, &sample.measurement_contract)
+                    && crate::measurement_contract::completed_search(
+                        &self.scenario,
+                        sample.workload_value,
+                        sample.result_value,
+                        sample.measurement_scope.as_deref(),
+                        &sample.measurement_contract,
+                    )
                     && sample.status == "ok"
                     && sample.complete
                     && sample.failure_count == 0
@@ -119,6 +130,8 @@ impl CapacityScenario {
 
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
 pub struct CapacitySample {
+    #[serde(default)]
+    pub result_value: Option<u64>,
     #[serde(default)]
     pub measurement_contract: Value,
     pub workload_value: Option<i64>,

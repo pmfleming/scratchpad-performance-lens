@@ -26,6 +26,13 @@ fn aggregate_step(repetitions: Vec<Value>) -> Value {
                 .as_u64()
                 .is_some_and(|index| index < expected && identities.insert(index))
             && event["elapsed_ns"].as_u64().is_some_and(|ns| ns > 0)
+            && crate::measurement_contract::completed_search(
+                event["scenario"].as_str().unwrap_or_default(),
+                event["workload_value"].as_i64(),
+                event["result_value"].as_u64(),
+                event["measurement_scope"].as_str(),
+                &event["measurement_contract"],
+            )
             && (event["background_completion_ns"].is_null()
                 || (event["completed_workload_value"] == event["workload_value"]
                     && event["background_completion_ns"]
@@ -114,6 +121,26 @@ mod tests {
             "workload_value":100,"workload_unit":"tabs","measurement_scope":"prepared_operation",
             "peak_working_set_bytes":peak})
     }
+    #[test]
+    fn one_incomplete_search_cannot_be_hidden_by_other_repetitions() {
+        let events: Vec<_> = (0..3).map(|index| {
+            let mut row = sample(index, 10, "ok", 20);
+            row["scenario"] = json!("search_file_size_ceiling");
+            row["measurement_scope"] = json!("prepared_search_component_completion");
+            row["result_value"] = json!(1);
+            row["measurement_contract"] = json!({"fixture_kind":"non_repeating","fixture_revision":2,
+                "production_path":true,"text_backing":"store","code_path":"search_target_ranges/production_worker_policy",
+                "search_fixture_revision":3,"document_bytes":100,"expected_matches":1,"completion_endpoint":"all_ranges_returned"});
+            row
+        }).collect();
+        assert_eq!(aggregate(events.clone())[0]["status"], "ok");
+        for result in [Value::Null, json!(0), json!(2)] {
+            let mut invalid = events.clone();
+            invalid[1]["result_value"] = result;
+            assert_eq!(aggregate(invalid)[0]["status"], "incomplete");
+        }
+    }
+
     #[test]
     fn a_timeout_with_only_two_installed_files_does_not_prove_background_completion() {
         let events: Vec<_> = (0..3)

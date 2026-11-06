@@ -123,6 +123,13 @@ fn exercise_event_probes(root: &std::path::Path, target: &std::path::Path) -> an
                     row["repeat_index"] = json!(repeat);
                     row["workload_unit"] = json!(unit);
                     row["expected_repetition_count"] = json!(3);
+                    if id == "search_file_size_ceiling" {
+                        row["measurement_scope"] = json!("prepared_search_component_completion");
+                        row["result_value"] = json!(1);
+                        row["measurement_contract"] = json!({"fixture_kind":"non_repeating","fixture_revision":2,
+                            "production_path":true,"text_backing":"store","code_path":"search_target_ranges/production_worker_policy",
+                            "search_fixture_revision":3,"document_bytes":workload,"expected_matches":1,"completion_endpoint":"all_ranges_returned"});
+                    }
                     row.to_string()
                 })
                 .collect::<Vec<_>>()
@@ -161,6 +168,12 @@ fn exercise_event_probes(root: &std::path::Path, target: &std::path::Path) -> an
                 .iter()
                 .all(|row| row["samples"][0]["repetition_count"] == 9
                     && row["samples"][0]["complete"] == true));
+            let search = rows
+                .iter()
+                .find(|row| row["scenario"] == "search_file_size_ceiling")
+                .unwrap();
+            assert_eq!(search["samples"][0]["result_value"], 1);
+            assert_eq!(search["within_budget_workload"], 1_073_741_824);
         } else {
             assert_eq!(report["meta"]["probe_status"], "partial");
             assert_eq!(rows.len(), 4);
