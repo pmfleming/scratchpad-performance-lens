@@ -245,6 +245,13 @@ fn sample_requirements<'a>(event: &Value, fields: &'a [&str]) -> Vec<&'a str> {
 
 fn scenario_requirement(scenario: &str, event: &Value) -> Option<&'static str> {
     match scenario {
+        "aged_store_forget"
+            if event["workload_details"]["fixture_revision"] != 2
+                || event["workload_details"]["edit_preparation"]
+                    != "recorded_single_character_insert" =>
+        {
+            Some("recorded_incremental_edit_before_forget")
+        }
         "production_paste" if !published_paste(&event["phase_elapsed_ns"]) => {
             Some("published_paste_and_queued_input_with_separate_flush")
         }
@@ -393,6 +400,21 @@ mod tests {
             invalid["phase_elapsed_ns"][field] = value;
             assert!(!proven("production_paste", &invalid), "{field}");
         }
+    }
+
+    #[test]
+    fn forget_proof_requires_a_recorded_incremental_edit() {
+        let mut row = json!({"status":"ok","elapsed_ns":100,"workload_value":3 * shared::GB,
+            "measurement_scope":"prepared_operation",
+            "measurement_contract":{"text_backing":"store","production_path":true,"code_path":"forget","fixture_kind":"non_repeating","fixture_revision":2},
+            "workload_details":{"database_bytes":3 * shared::GB,"history_revisions":128,"initial_archives":128,
+                "fixture_revision":2,"edit_preparation":"recorded_single_character_insert"}});
+        assert!(proven("aged_store_forget", &row));
+        row["workload_details"]["edit_preparation"] = json!("whole_document_replacement");
+        assert!(!proven("aged_store_forget", &row));
+        row["workload_details"]["edit_preparation"] = json!("recorded_single_character_insert");
+        row["workload_details"]["fixture_revision"] = json!(1);
+        assert!(!proven("aged_store_forget", &row));
     }
 
     #[test]

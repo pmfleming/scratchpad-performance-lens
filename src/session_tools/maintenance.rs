@@ -174,6 +174,23 @@ mod tests {
         assert!(super::summarize(&lines(&rows), 0, &declaration).is_ok());
         assert!(super::summarize(&lines(&rows), 0, &contract()).is_err());
     }
+
+    #[test]
+    fn updated_insert_contract_rejects_old_whole_document_fixtures() {
+        let mut declaration = contract();
+        declaration["fixture"]["equals"]["fixture_revision"] = json!(2);
+        declaration["fixture"]["equals"]["edit_preparation"] =
+            json!("recorded_single_character_insert");
+        let mut rows = samples();
+        assert!(super::summarize(&lines(&rows), 0, &declaration).is_err());
+        for row in &mut rows {
+            row["workload_details"]["fixture_revision"] = json!(2);
+            row["workload_details"]["edit_preparation"] = json!("recorded_single_character_insert");
+        }
+        assert!(super::summarize(&lines(&rows), 0, &declaration).is_ok());
+        rows[0]["workload_details"]["edit_preparation"] = json!("whole_document_replacement");
+        assert!(super::summarize(&lines(&rows), 0, &declaration).is_err());
+    }
     #[test]
     fn rejects_incomplete_failed_duplicate_wrong_fixture_and_missing_metrics() {
         for (field, value) in [

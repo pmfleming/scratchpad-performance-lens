@@ -386,3 +386,30 @@ fails the 180 ms capacity budget: observed medians were 247.475 ms at 64 MiB,
 925.218 ms at 256 MiB and 3481.982 ms at 1 GiB. The 64 MiB resource scenario stayed
 within its separate 5-second budget. These are targeted observations, not a full
 promise baseline; other host builds and storage pressure remain relevant.
+
+## Cycle 15: incremental fixture fidelity and indexed history batches
+
+Scratchpad restores history positions, entries and spans in batches of 64
+documents. Row validation still attributes corrupt payloads to their document,
+checks packed/row-span conflicts and orphans, and preserves exact replay. The
+queries cast `json_each` values to TEXT before joining the document indexes.
+A query-plan test requires indexed searches for all three history queries.
+
+The first two candidates were rejected: `IN (SELECT value FROM json_each(?))`
+scanned the history tables, and an untyped cross join still scanned them once
+per requested document. The 10,000-tab observations were 12.401 and 54.362 seconds.
+These failed runs remain in `cycle-15/` and `cycle-15-query-fix/`; neither query
+form is in the final implementation. The final indexed query measured 312.5 ms
+at 10,000 tabs and still fails the unchanged 180 ms restore budget.
+
+Incremental-save preparation now records a one-character insertion instead of
+replacing the whole document. This preserves original storage and exact undo/redo
+across persistence. Maintenance fixtures declare revision 2 and their edit
+preparation; the lens checks that declaration and rejects old replacement
+fixtures as forget evidence. Final aged-forget samples stayed within the existing
+180 ms budget (maximum 122.6 ms) on the seeded 3 GiB store.
+
+Validation: 713 app tests passed (seven ignored), 96 lens tests passed, and strict
+Clippy passed in both repositories. Final targeted evidence is in Scratchpad
+`target/analysis/co-development/cycle-15-indexed/`. Full promise verification is
+still outstanding; restore, search and other known failures remain open.
