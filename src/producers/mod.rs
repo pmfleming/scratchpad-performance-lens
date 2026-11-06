@@ -1,4 +1,5 @@
 mod capacity;
+mod capacity_diagnostics;
 mod capacity_repetitions;
 mod common;
 mod flamegraphs;

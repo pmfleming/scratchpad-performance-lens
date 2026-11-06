@@ -462,6 +462,7 @@ fn capacity_sample(event: &Value) -> Value {
         "repetition_count": event["repetition_count"].as_u64().unwrap_or(1),
         "measurement_scope": event.get("measurement_scope"),
         "metrics": event.get("metrics"),
+        "background_lane_diagnostics": super::capacity_diagnostics::background_lanes(event),
         "memory_budget": event.get("memory_budget"),
         "process_resources": event.get("process_resources"),
         "peak_working_set_bytes": event.get("peak_working_set_bytes"),
@@ -493,6 +494,10 @@ mod tests {
         let typed: crate::artifacts::capacity_report::CapacitySample =
             serde_json::from_value(sample).unwrap();
         assert_eq!(typed.metrics["search_max_queue_depth"], 4);
+        assert_eq!(
+            typed.background_lane_diagnostics["lanes"]["path"]["complete"],
+            false
+        );
         assert_eq!(typed.process_resources["cpu_elapsed_ms"], 2);
     }
 

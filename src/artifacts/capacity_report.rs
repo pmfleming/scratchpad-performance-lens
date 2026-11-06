@@ -147,6 +147,8 @@ pub struct CapacitySample {
     #[serde(default)]
     pub metrics: Value,
     #[serde(default)]
+    pub background_lane_diagnostics: Value,
+    #[serde(default)]
     pub memory_budget: Value,
     #[serde(default)]
     pub process_resources: Value,

@@ -128,3 +128,29 @@ baseline confirmation and the diagnostic trace are in
 `target/co-development/cycle-3/`. Validation: 697 Scratchpad tests passed (seven
 ignored); the focused gutter regression and strict Clippy also passed. The lens
 has 82 passing tests and strict all-target Clippy coverage.
+
+## Cycle 4: selected-file delivery before inactive batch installation
+
+The path lane now delivers the selected file's loaded text before constructing
+inactive cold shells. Once the batch arrives, requested tab order is restored.
+Failed selected files retain the existing successful-file fallback. Activity
+recording uses a set of installed document IDs instead of repeatedly scanning
+the batch. Regression tests cover delivery order, selected-file failure, final
+tab ordering, and pending reservations.
+
+First-visible profiling now rejects cold placeholders and checks the selected
+fixture's loaded byte count. The lens aggregates path/session/analysis busy wall
+time from raw repetitions. Its scope explicitly includes background completion;
+overlapping lane times are neither CPU time nor a sum of critical-path work.
+Missing or failed trials cannot produce a complete median.
+
+The focused run completed all nine trials, including the previously timing-out
+50,000-file workload. At the promised 10,000 files, first-visible observations
+were 81.878–83.432 ms against 180 ms, and installation completed in
+1,633.273–1,727.777 ms against 5,000 ms. The 50,000-file stress workload still
+exceeds both budgets. Normal deferred autosave remains separate from shell
+installation; persistence has its own required measurements. Unrelated host
+build/test activity was present, so this focused run is not an accepted baseline.
+Raw evidence: Scratchpad `target/co-development/cycle-4/many-files.jsonl`.
+Validation: 698 app tests passed (seven ignored), 83 lens tests passed, and
+strict Clippy passed in both repositories.
