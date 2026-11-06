@@ -87,7 +87,7 @@ fn exercise_event_probes(root: &std::path::Path, target: &std::path::Path) -> an
         arms.push(format!("{id:?} => {{println!(\"{{}}\",{text:?});std::io::Write::flush(&mut std::io::stdout()).unwrap();{ending}}}"));
     }
     let stub = |arms: Vec<String>| {
-        format!("fn main() {{match std::env::args().nth(2).unwrap().as_str() {{{}, _ => panic!(\"unknown scenario\")}}}}",arms.join(","))
+        format!("fn main() {{for id in std::env::args().skip(2).step_by(2) {{match id.as_str() {{{}, _ => panic!(\"unknown scenario\")}}}}}}",arms.join(","))
     };
     arms.push("\"omitted\" => {}".into());
     fs::write(root.join("src/bin/resource_probe.rs"), stub(arms))?;
@@ -184,6 +184,9 @@ fn exercise_event_probes(root: &std::path::Path, target: &std::path::Path) -> an
         }
     }
     manifest["probes"]["resource_probe"] = json!(["near", "later"]);
+    manifest["probe_fixture_groups"] =
+        json!({"resource_probe":[{"id":"shared","scenarios":["near","later"]}]});
+    manifest["resource_budgets"]["later"]["min_independent_launches"] = json!(4);
     fs::write(
         root.join("benches/measurement_manifest.json"),
         manifest.to_string(),
@@ -202,6 +205,20 @@ fn exercise_event_probes(root: &std::path::Path, target: &std::path::Path) -> an
         root.join("target/analysis/resource_profiles.json"),
     )?)?;
     assert_eq!(report["meta"]["probe_status"], "completed");
+    for row in report["scenarios"].as_array().unwrap() {
+        let samples = row["samples"].as_array().unwrap();
+        assert_eq!(samples.len(), 4);
+        for (index, sample) in samples.iter().enumerate() {
+            assert_eq!(sample["launch_index"], index);
+            assert_eq!(sample["independent_launch_count"], 4);
+            assert_eq!(sample["shared_fixture_group"], "shared");
+            assert_eq!(sample["launch_scenarios"], json!(["near", "later"]));
+            assert_eq!(
+                sample["launch_measurement_quality"]["scope"],
+                "independent_probe_launch_including_setup"
+            );
+        }
+    }
     Ok(())
 }
 

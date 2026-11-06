@@ -476,3 +476,37 @@ its preparation phase fell from 1,435.9 to 549.7 ms while write time stayed near
 across identical environment conditions. Initial save still fails 180 ms. Full
 restore measured 309.8 ms and also fails; unchanged save (91.7 ms maximum) and
 anchor-heavy editing (23.9 ms maximum) pass. No full-promise success is claimed.
+
+## Cycle 18: explicit shared fixtures without reducing required work
+
+Scratchpad's resource probe accepts repeated scenario selections and declares two
+shared fixture families: session costs and aged-store operations. The lens groups
+only declared, known, disjoint families; focused selections retain only their
+requested members. The highest member launch minimum applies to the whole group,
+and a near-budget observation triggers repetition against that scenario's own
+budget. Every sample retains the group, selected sequence and launch controls.
+Missing selected output marks the run partial; unexpected rows cannot become
+selected evidence, and raw stdout stays archived. State carries through the
+existing probe sequence, which is now explicit in provenance.
+
+This removes four redundant 3 GiB aged-store seeds from the normal three-launch
+cold-read plus four-maintenance workload: three shared seeds replace seven
+isolated seeds. Maintenance operations receive three independent launches instead
+of one, with their three within-launch trials unchanged. Session operations share
+the same persisted workspace. Workload sizes, cold physical-I/O verification,
+launch floors and numerical budgets are unchanged.
+
+Validation: both resource-probe tests passed, 101 lens tests passed, and strict
+Clippy passed in both repositories. Integration coverage exercises a group whose
+members require different launch counts, preserves all four independent launches,
+and checks selection metadata. Unit coverage rejects overlapping/unknown groups,
+wrong-budget cross-attribution, missing members and unsolicited output.
+
+Focused evidence in `cycle-18/` completed nine scenarios in 71.38 seconds. The
+aged group had three complete launches, with 128 verified cold reads each; its
+p99 values were 3.20, 4.13 and 4.99 ms against 4 ms. The middle launch's control was
+noisy; the third was stable and still missed. Forget's median remained below
+180 ms but two of nine observations exceeded it (maximum 215.0 ms), so it remains
+uncertain. Save/restore/close maintenance timings passed. Initial save (2,542.9 ms)
+and full restore (302.3 ms) at 10,000 tabs still fail; unchanged save and startup
+visibility pass. The retained outliers motivate storage-latency work next.

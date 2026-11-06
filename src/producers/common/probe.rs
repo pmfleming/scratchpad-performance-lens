@@ -1,3 +1,4 @@
+mod groups;
 use crate::shared;
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
@@ -42,18 +43,20 @@ pub(in crate::producers) fn run_sweeps(
     bin: &str,
     scenarios: &[&str],
 ) -> Result<ProbeEvents> {
-    let executable = build_probe(root, bin)?;
     let manifest = std::fs::read(root.join("benches/measurement_manifest.json"))
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
         .unwrap_or_default();
-    Ok(merge_runs(scenarios.iter().map(|scenario| {
-        scenario_runs(root, &executable, bin, scenario, &manifest)
+    let groups = groups::select(&manifest, bin, scenarios)?;
+    let executable = build_probe(root, bin)?;
+    Ok(merge_runs(groups.iter().map(|group| {
+        let label = group.scenarios.join(", ");
+        scenario_runs(root, &executable, bin, group, &manifest)
             .map(|mut result| {
-                result.failure = result.failure.map(|error| format!("{scenario}: {error}"));
+                result.failure = result.failure.map(|error| format!("{label}: {error}"));
                 result
             })
-            .map_err(|error| anyhow::anyhow!("{scenario}: {error}"))
+            .map_err(|error| anyhow::anyhow!("{label}: {error}"))
     })))
 }
 
@@ -61,23 +64,43 @@ fn scenario_runs(
     root: &Path,
     executable: &Path,
     bin: &str,
-    scenario: &str,
+    group: &groups::Group<'_>,
     manifest: &Value,
 ) -> Result<ProbeEvents> {
-    let minimum = minimum_launches(manifest, bin, scenario)?;
+    let minimum = group
+        .scenarios
+        .iter()
+        .map(|scenario| minimum_launches(manifest, bin, scenario))
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .max()
+        .unwrap_or(1);
+    let args: Vec<_> = group
+        .scenarios
+        .iter()
+        .flat_map(|scenario| ["--scenario", *scenario])
+        .collect();
+    let label = group.scenarios.join(", ");
     let run = || {
         let before = crate::environment::control();
-        let mut result = run_events(root, executable, &["--scenario", scenario], scenario)?;
+        let mut result = run_events(root, executable, &args, &label)?;
         let after = crate::environment::control();
         let mut quality = crate::environment::quality(&before, &after);
         quality["scope"] = serde_json::json!("independent_probe_launch_including_setup");
         for event in &mut result.events {
             event["launch_measurement_quality"] = quality.clone();
+            event["shared_fixture_group"] = serde_json::json!(group.id);
+            event["launch_scenarios"] = serde_json::json!(group.scenarios);
         }
+        validate_group_output(&mut result, group);
         Ok(result)
     };
     let first = run()?;
-    let launches = if near_budget(manifest, bin, scenario, &first.events) {
+    let launches = if group
+        .scenarios
+        .iter()
+        .any(|scenario| near_budget(manifest, bin, scenario, &first.events))
+    {
         3
     } else {
         1
@@ -95,6 +118,40 @@ fn scenario_runs(
             result
         })
     })))
+}
+
+fn validate_group_output(result: &mut ProbeEvents, group: &groups::Group<'_>) {
+    let missing: Vec<_> = group
+        .scenarios
+        .iter()
+        .filter(|id| {
+            !result
+                .events
+                .iter()
+                .any(|event| event["scenario"].as_str() == Some(**id))
+        })
+        .collect();
+    let unexpected = result.events.iter().any(|event| {
+        !event["scenario"]
+            .as_str()
+            .is_some_and(|id| group.scenarios.contains(&id))
+    });
+    if !missing.is_empty() || unexpected {
+        let message =
+            format!("probe selection mismatch: missing {missing:?}, unexpected rows: {unexpected}");
+        result.failure = Some(
+            result
+                .failure
+                .take()
+                .map_or_else(|| message.clone(), |error| format!("{error}; {message}")),
+        );
+    }
+    // Raw stdout remains archived; unsolicited rows cannot become selected evidence.
+    result.events.retain(|event| {
+        event["scenario"]
+            .as_str()
+            .is_some_and(|id| group.scenarios.contains(&id))
+    });
 }
 
 fn minimum_launches(manifest: &Value, bin: &str, scenario: &str) -> Result<usize> {
@@ -162,12 +219,15 @@ fn near_budget(manifest: &Value, bin: &str, scenario: &str, events: &[Value]) ->
         )
     };
     limit.filter(|v| *v > 0.0).is_some_and(|limit| {
-        events.iter().any(|event| {
-            event
-                .pointer(metric)
-                .and_then(Value::as_f64)
-                .is_some_and(|v| (0.9..=1.1).contains(&(v / limit)))
-        })
+        events
+            .iter()
+            .filter(|event| event["scenario"] == scenario)
+            .any(|event| {
+                event
+                    .pointer(metric)
+                    .and_then(Value::as_f64)
+                    .is_some_and(|v| (0.9..=1.1).contains(&(v / limit)))
+            })
     })
 }
 
@@ -379,5 +439,30 @@ mod tests {
             root.join("custom-build/triple/release/probe")
         );
         assert!(super::executable_from_messages(root, b"", "probe").is_err());
+    }
+    #[test]
+    fn shared_launch_budgets_and_partial_output_stay_scenario_specific() {
+        use serde_json::json;
+        let manifest = json!({"resource_budgets":{"a":{"max":100,"metric":"/elapsed_ns"},"b":{"max":1000,"metric":"/elapsed_ns"}}});
+        let rows = vec![
+            json!({"scenario":"a","elapsed_ns":95}),
+            json!({"scenario":"b","elapsed_ns":100}),
+        ];
+        assert!(super::near_budget(&manifest, "resource_probe", "a", &rows));
+        assert!(!super::near_budget(&manifest, "resource_probe", "b", &rows));
+        let group = super::groups::Group {
+            id: Some("fixture"),
+            scenarios: vec!["a", "missing"],
+        };
+        let mut result = super::ProbeEvents {
+            events: rows,
+            failure: Some("original failure".into()),
+        };
+        super::validate_group_output(&mut result, &group);
+        assert_eq!(result.events.len(), 1);
+        let failure = result.failure.unwrap();
+        assert!(failure.contains("original failure"));
+        assert!(failure.contains("missing"));
+        assert!(failure.contains("unexpected rows: true"));
     }
 }

@@ -75,6 +75,15 @@ The runner honors that floor even away from the adaptive repetition band, and
 resource verdicts reject missing or inconsistent launch coverage. Each launch
 still runs the complete selected workload sweep.
 
+Projects can declare `probe_fixture_groups` by probe executable, with an ID and
+an ordered list of scenario IDs per group. Only those explicit, disjoint families
+share a process; focused selection still runs only requested members. The runner
+uses the greatest launch minimum in the group and repeats the entire group when
+any member is near its own budget. Samples retain `shared_fixture_group` and
+`launch_scenarios`; raw stdout remains archived if output is incomplete. Shared
+fixtures retain state across their declared sequence, so their provenance differs
+from isolated launches. Scratchpad declares session-cost and aged-store families.
+
 Capacity and resource samples retain controls before and after each independent
 probe launch (including fixture setup). The review uses complete local controls
 for each dependency; older artifacts fall back to the producer-wide interval.
