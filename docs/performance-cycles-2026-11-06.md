@@ -173,3 +173,26 @@ operations also meet 140 ms. These are scoped measurement corrections, not
 claims that production operations became faster. Evidence is in Scratchpad's
 `target/co-development/cycle-5/`. The resource binary passes strict Clippy;
 84 lens tests and strict all-target Clippy pass.
+
+## Cycle 6: avoid per-document system-memory queries
+
+Phase isolation found that every TextDocument construction refreshed system
+memory for its default undo budget. Construction bursts now share a sample for
+one second; explicit automatic-budget resets still sample immediately. A
+deterministic test verifies reuse and expiry without sleeping. The metadata
+scanner also skips printable ASCII in eight-byte words, preserving scalar
+handling for controls, Unicode, and CRLF boundaries. Exhaustive byte/position
+tests accompany the existing streaming and parallel-inspection tests.
+
+The tab probe records buffer and workspace construction separately. The lens
+summarizes named nanosecond phases per workload, excludes non-time fields, and
+leaves failed, missing or impossible observations incomplete. Overlapping phases
+are explicitly not a partition of elapsed time.
+
+Focused current observations: 10,000-tab construction 261.832 ms (still over
+140 ms), 10,000-file tracking 80.197 ms (within 180 ms), and 10,000-tab full
+restore 417.236 ms (still over 180 ms). The 50,000-file stress tracking remains
+over budget. Temporary isolation code is archived under ignored target output;
+it is not part of the shipped application. Evidence: Scratchpad
+`target/co-development/cycle-6/`. Validation: 700 app tests passed (seven
+ignored), 85 lens tests passed, and strict Clippy passed in both repositories.

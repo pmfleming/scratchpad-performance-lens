@@ -8,6 +8,7 @@ mod project_code;
 mod render;
 mod resource_budgets;
 mod resource_contracts;
+mod resource_diagnostics;
 mod resources;
 mod review;
 mod search;

@@ -186,6 +186,7 @@ fn resource_scenario(scenario: &str, mut events: Vec<Value>, gap: Option<&str>) 
         "demonstrated_workload": demonstrated_workload(scenario, &events),
         "scale_evidence_basis": "successful_resource_contract_with_project_operation_budget",
         "sample_count": events.len(),
+        "phase_diagnostics": super::resource_diagnostics::phases(&events),
         "budget_status": super::resource_budgets::group_status(&events),
         "budget_misses": events.iter().filter(|event| super::resource_budgets::status(event) == "fail").count(),
         "unbudgeted_samples": events.iter().filter(|event| super::resource_budgets::status(event) == "unbudgeted").count(),
