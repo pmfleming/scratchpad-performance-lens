@@ -227,3 +227,16 @@ probe measurements must name an existing probe target and a positive limit.
 Capacity and resource scenarios must be declared and budgeted. Removed split/tile
 benchmarks and unbudgeted component diagnostics no longer gate promises. Capacity
 limits now come from the project manifest; Rust fallback values classify rows only.
+
+## Cold reads and aged storage
+
+The resource suite builds a disposable 3 GiB store with 128 persisted revisions
+and 128 archived tabs, then measures save, restore, close and forget operations.
+A separate scenario evicts the app cache and requests Linux page-cache eviction
+with `fadvise` before 128 reads during concurrent saves. Only reads with positive
+physical `read_bytes` enter its cold p99; at least 100 verified reads and a real
+concurrent save are required for proof. Unsupported eviction or cached reads stay
+unverified. Counters cover the process, including concurrent saves, and do not
+attribute device I/O to a particular thread. The 4 ms target comes from the
+storage plan. Resource samples report write amplification when logical write
+bytes and process write counters are available; unavailable counters stay null.

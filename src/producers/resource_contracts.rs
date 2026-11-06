@@ -27,6 +27,20 @@ pub(super) fn expected_scenarios(root: &std::path::Path) -> anyhow::Result<Vec<S
 
 pub(super) fn gap_evidence(scenario: &str, events: &[Value], synthetic: bool) -> Value {
     let (minimum, fields): (i64, &[&str]) = match scenario {
+        "cold_reads_during_save" => (
+            3 * shared::GB,
+            &[
+                "database_bytes",
+                "history_revisions",
+                "cold_read_p99_ns",
+                "physical_read_verified_count",
+                "concurrent_saves",
+            ],
+        ),
+        "aged_store_save" | "aged_store_restore" | "aged_store_close" | "aged_store_forget" => (
+            3 * shared::GB,
+            &["database_bytes", "history_revisions", "initial_archives"],
+        ),
         "store_import" => (
             shared::GB,
             &["import_logical_bytes", "import_database_growth_bytes"],
@@ -170,6 +184,30 @@ fn sample_requirements<'a>(event: &Value, fields: &'a [&str]) -> Vec<&'a str> {
 
 fn scenario_requirement(scenario: &str, event: &Value) -> Option<&'static str> {
     match scenario {
+        "cold_reads_during_save"
+            if event["phase_elapsed_ns"]["physical_read_verified_count"]
+                .as_u64()
+                .unwrap_or(0)
+                < 100
+                || event["phase_elapsed_ns"]["concurrent_saves"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    == 0 =>
+        {
+            Some("verified_cold_reads_with_concurrent_saves")
+        }
+        id if (id.starts_with("aged_store_") || id == "cold_reads_during_save")
+            && (event["workload_details"]["database_bytes"]
+                .as_i64()
+                .unwrap_or(0)
+                < 3 * shared::GB
+                || event["workload_details"]["history_revisions"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    < 128) =>
+        {
+            Some("aged_multi_gib_database")
+        }
         "ui_during_store_writes"
             if event["phase_elapsed_ns"]["seed_bytes"]
                 .as_i64()
@@ -210,6 +248,23 @@ mod tests {
     use super::{expected_scenarios, gap_evidence};
     use crate::shared;
     use serde_json::{json, Value};
+    #[test]
+    fn cold_read_labels_require_physical_reads_and_concurrent_saves() {
+        let mut row = json!({"status":"ok","elapsed_ns":100,"workload_value":3 * shared::GB,
+            "measurement_scope":"prepared_operation",
+            "measurement_contract":{"text_backing":"store","production_path":true,"code_path":"Chunk::load","fixture_kind":"non_repeating","fixture_revision":2},
+            "workload_details":{"database_bytes":3 * shared::GB,"history_revisions":128},
+            "phase_elapsed_ns":{"cold_read_p99_ns":3000000,"physical_read_verified_count":0,"concurrent_saves":3}});
+        let check = |row: &Value| {
+            gap_evidence("cold_reads_during_save", std::slice::from_ref(row), false)["closed"]
+                == true
+        };
+        assert!(!check(&row));
+        row["phase_elapsed_ns"]["physical_read_verified_count"] = json!(128);
+        assert!(check(&row));
+        row["phase_elapsed_ns"]["concurrent_saves"] = json!(0);
+        assert!(!check(&row));
+    }
     #[test]
     fn resource_expectations_come_from_project_owned_declarations() {
         let root = tempfile::tempdir().unwrap();

@@ -221,6 +221,16 @@ fn resource_sample(event: &Value) -> Value {
         "elapsed_ms".into(),
         json!(event["elapsed_ns"].as_f64().unwrap_or(0.0) / 1e6),
     );
+    let logical = event["phase_elapsed_ns"]["import_logical_bytes"]
+        .as_f64()
+        .or_else(|| event["workload_details"]["inserted_bytes"].as_f64());
+    sample.insert(
+        "write_amplification".into(),
+        json!(logical
+            .filter(|b| *b > 0.0)
+            .zip(event["process_resources"]["write_bytes"].as_f64())
+            .map(|(logical, physical)| physical / logical)),
+    );
     sample.insert(
         "fixture_valid".into(),
         json!(crate::measurement_contract::import_fixture_valid(event)),
@@ -235,6 +245,11 @@ fn resource_sample(event: &Value) -> Value {
 
 fn measurement_gap_scenarios() -> HashMap<&'static str, &'static str> {
     HashMap::from([
+        ("cold_reads_during_save", "verified cold reads during concurrent saves"),
+        ("aged_store_save", "save on an aged multi-GiB database"),
+        ("aged_store_restore", "restore on an aged multi-GiB database"),
+        ("aged_store_close", "close on an aged multi-GiB database"),
+        ("aged_store_forget", "forget on an aged multi-GiB database"),
         ("store_import", "store import cost and materialized body bytes"),
         ("file_backed_random_window", "store read latency"),
         ("file_backed_search", "store search completion"),
