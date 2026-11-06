@@ -567,9 +567,10 @@ mod tests {
                 skip_bench: true,
                 fail_on_slow,
                 index_only: false,
+                scenarios: Vec::new(),
             };
             assert_eq!(
-                crate::producers::search_speed(&config, options).is_err(),
+                crate::producers::search_speed(&config, options.clone()).is_err(),
                 fail_on_slow
             );
             assert_eq!(

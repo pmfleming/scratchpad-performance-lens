@@ -10,15 +10,19 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-pub fn resource_profiles(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
-    resource_profiles_for(config, false)
+pub fn resource_profiles(config: &LensConfig, options: MeasureOptions) -> Result<()> {
+    resource_profiles_for(config, false, &options.scenarios)
 }
 
 pub fn promise_resource_profiles(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
-    resource_profiles_for(config, true)
+    resource_profiles_for(config, true, &[])
 }
 
-fn resource_profiles_for(config: &LensConfig, promises_only: bool) -> Result<()> {
+fn resource_profiles_for(
+    config: &LensConfig,
+    promises_only: bool,
+    requested: &[String],
+) -> Result<()> {
     let events = expected_scenarios(&config.project_root).and_then(|expected| {
         let expected = if promises_only {
             let required = super::review::required_probe_scenarios(false);
@@ -35,6 +39,7 @@ fn resource_profiles_for(config: &LensConfig, promises_only: bool) -> Result<()>
         } else {
             expected
         };
+        let expected = select_scenarios(expected, requested)?;
         run_sweeps(
             &config.project_root,
             "resource_probe",
@@ -48,6 +53,12 @@ fn resource_profiles_for(config: &LensConfig, promises_only: bool) -> Result<()>
     let (payload, failure) = match events {
         Ok((result, expected)) => {
             let (mut payload, failure) = validated_resources(result.events, &expected);
+            payload["meta"]["selection_scope"] = json!(if requested.is_empty() {
+                "complete"
+            } else {
+                "focused"
+            });
+            payload["meta"]["requested_scenarios"] = json!(requested);
             let failure = result.failure.or(failure);
             if failure.is_some() {
                 payload["meta"]["probe_status"] = json!("partial");
@@ -68,6 +79,20 @@ fn resource_profiles_for(config: &LensConfig, promises_only: bool) -> Result<()>
         render_resources(&payload),
         failure.map(|error| format!("resource probe failed: {error}")),
     )
+}
+
+fn select_scenarios(expected: Vec<String>, requested: &[String]) -> Result<Vec<String>> {
+    if requested.is_empty() {
+        return Ok(expected);
+    }
+    anyhow::ensure!(
+        requested.iter().all(|id| expected.contains(id)),
+        "unknown resource scenario selection"
+    );
+    Ok(expected
+        .into_iter()
+        .filter(|id| requested.contains(id))
+        .collect())
 }
 
 fn validated_resources(events: Vec<Value>, expected: &[String]) -> (Value, Option<String>) {
@@ -300,4 +325,20 @@ fn measurement_gap_scenarios() -> HashMap<&'static str, &'static str> {
 
 fn max_i64(events: &[Value], key: &str) -> Option<i64> {
     events.iter().filter_map(|event| event[key].as_i64()).max()
+}
+
+#[cfg(test)]
+mod selection_tests {
+    #[test]
+    fn focused_selection_is_exact_deduplicated_and_rejects_typos() {
+        let expected = vec!["one".into(), "two".into(), "three".into()];
+        let selected =
+            super::select_scenarios(expected.clone(), &["two".into(), "two".into()]).unwrap();
+        assert_eq!(selected, vec!["two"]);
+        assert!(super::select_scenarios(expected.clone(), &["typo".into()]).is_err());
+        assert_eq!(
+            super::select_scenarios(expected.clone(), &[]).unwrap(),
+            expected
+        );
+    }
 }

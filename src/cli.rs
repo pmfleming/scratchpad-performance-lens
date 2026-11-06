@@ -166,6 +166,11 @@ struct MeasureArgs {
     fail_on_slow: bool,
     #[arg(long, help = "Only index existing SVGs (flamegraphs only)")]
     index_only: bool,
+    #[arg(
+        long = "scenario",
+        help = "Run only this resource scenario; repeat for several (resources only)"
+    )]
+    scenarios: Vec<String>,
 }
 
 fn measure_selection_values() -> PossibleValuesParser {
@@ -193,11 +198,12 @@ struct SchemaExportArgs {
     output: PathBuf,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct MeasureOptions {
     pub skip_bench: bool,
     pub fail_on_slow: bool,
     pub index_only: bool,
+    pub scenarios: Vec<String>,
 }
 
 pub fn run_cli() -> Result<()> {
@@ -279,9 +285,10 @@ fn measure(args: MeasureArgs) -> Result<()> {
         skip_bench: args.skip_bench,
         fail_on_slow: args.fail_on_slow,
         index_only: args.index_only,
+        scenarios: args.scenarios,
     };
     let selected = selected_producers(&args.tool);
-    validate_measure_options(&selected, options)?;
+    validate_measure_options(&selected, &options)?;
     let mut run_report = run_report::RunReport::start(&config.output_dir, &args.tool, &selected)?;
 
     if matches!(
@@ -296,7 +303,7 @@ fn measure(args: MeasureArgs) -> Result<()> {
     let mut failures = Vec::new();
     let mut completed_benchmarks = HashSet::new();
     for producer in selected {
-        let mut producer_options = options;
+        let mut producer_options = options.clone();
         if !producer.benchmarks.is_empty()
             && producer
                 .benchmarks
@@ -305,7 +312,7 @@ fn measure(args: MeasureArgs) -> Result<()> {
         {
             producer_options.skip_bench = true;
         }
-        run_report.begin(producer, producer_options)?;
+        run_report.begin(producer, producer_options.clone())?;
         eprintln!("Starting {}...", producer.tool);
         let start = std::time::Instant::now();
         let result = run_producer(&config, producer, producer_options);
@@ -401,7 +408,10 @@ fn selected_producers(selection: &str) -> Vec<&'static ProducerSpec> {
     }
 }
 
-fn validate_measure_options(selected: &[&ProducerSpec], options: MeasureOptions) -> Result<()> {
+fn validate_measure_options(selected: &[&ProducerSpec], options: &MeasureOptions) -> Result<()> {
+    if !options.scenarios.is_empty() && (selected.len() != 1 || selected[0].tool != "resources") {
+        bail!("--scenario only applies to a resources run; it cannot narrow a promise review");
+    }
     if options.fail_on_slow
         && !selected
             .iter()
@@ -427,6 +437,33 @@ mod tests {
     use super::{run_producer, LensConfig, MeasureOptions, ProducerSpec};
     use crate::provenance;
     use anyhow::{bail, Result};
+
+    #[test]
+    fn focused_resource_selection_cannot_narrow_promise_verification() {
+        let options = MeasureOptions {
+            skip_bench: false,
+            fail_on_slow: false,
+            index_only: false,
+            scenarios: vec!["session_persist_cost".into()],
+        };
+        assert!(
+            super::validate_measure_options(&super::selected_producers("resources"), &options)
+                .is_ok()
+        );
+        for selection in [
+            "promises",
+            "all",
+            "performance-review",
+            "capacity",
+            "search",
+        ] {
+            assert!(super::validate_measure_options(
+                &super::selected_producers(selection),
+                &options
+            )
+            .is_err());
+        }
+    }
 
     #[test]
     fn promise_run_keeps_measurements_and_reports_in_dependency_order() {
@@ -472,6 +509,7 @@ mod tests {
             skip_bench: true,
             fail_on_slow: false,
             index_only: false,
+            scenarios: Vec::new(),
         };
         let early = ProducerSpec::new(
             "test",
@@ -479,7 +517,7 @@ mod tests {
             |_, _| bail!("typed decode failed"),
             &[],
         );
-        assert!(run_producer(&config, &early, options).is_err());
+        assert!(run_producer(&config, &early, options.clone()).is_err());
         assert!(!path.exists());
         assert!(!provenance::sidecar(&path).exists());
         let fresh = ProducerSpec::new(

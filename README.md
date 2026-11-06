@@ -56,6 +56,19 @@ remain unchanged. It omits unrelated capacity/resource diagnostics and code
 history analysis. `measure all` retains the complete diagnostic suite. Use separate
 output directories to retain both runs; each command replaces selected artifacts.
 
+For a targeted resource cycle, keep the full workload sweep and select scenarios:
+
+```console
+splens measure resources --scenario session_persist_cost --scenario session_restore_cost --config cycle.toml
+```
+
+This preserves budgets, validation, adaptive repetitions and provenance, and
+records a `focused` selection in the artifact and requested scenarios in
+`measure_run.json`. Unknown scenario IDs fail before launching a probe. Use a
+separate output directory: the resulting resource artifact contains only the
+selected scenarios and cannot establish coverage for omitted operations.
+`--scenario` is rejected for `promises` and other producers.
+
 Export artifact schemas:
 
 ```console

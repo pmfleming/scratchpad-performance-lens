@@ -546,8 +546,9 @@ mod tests {
             skip_bench: true,
             fail_on_slow: false,
             index_only: false,
+            scenarios: Vec::new(),
         };
-        speed_efficiency_report(&config, options)?;
+        speed_efficiency_report(&config, options.clone())?;
         let path = config.output_dir.join("speed_efficiency_report.json");
         let report: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
         assert_eq!(report["summary"]["measurement_status"], "valid");

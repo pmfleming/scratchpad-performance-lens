@@ -45,6 +45,7 @@ impl RunReport {
         row["started_at"] = json!(crate::provenance::timestamp());
         row["criterion_cache_requested"] =
             json!(!producer.benchmarks.is_empty() && options.skip_bench);
+        row["requested_scenarios"] = json!(options.scenarios);
         self.save()
     }
 
@@ -111,8 +112,9 @@ mod tests {
             skip_bench: true,
             fail_on_slow: false,
             index_only: false,
+            scenarios: Vec::new(),
         };
-        report.begin(&first, options)?;
+        report.begin(&first, options.clone())?;
         report.finish(
             &first,
             Duration::from_secs(2),

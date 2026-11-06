@@ -477,8 +477,9 @@ mod tests {
             skip_bench: true,
             fail_on_slow: false,
             index_only: false,
+            scenarios: Vec::new(),
         };
-        let error = super::performance_review(&config, options).unwrap_err();
+        let error = super::performance_review(&config, options.clone()).unwrap_err();
         assert!(error
             .to_string()
             .contains("capacity_report.json has an incompatible capacity schema"));

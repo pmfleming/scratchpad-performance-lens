@@ -196,3 +196,29 @@ over budget. Temporary isolation code is archived under ignored target output;
 it is not part of the shipped application. Evidence: Scratchpad
 `target/co-development/cycle-6/`. Validation: 700 app tests passed (seven
 ignored), 85 lens tests passed, and strict Clippy passed in both repositories.
+
+## Cycle 7: bounded body preparation and focused lens runs
+
+Persistence queues up to 64 small document captures before draining body writes,
+stopping sooner at 1 MiB pending text. Existing transaction and commit behavior
+is retained. The serial database actor also keeps a bounded cache of reusable
+statement execution objects. Scalar queries exhaust their cursors; any query
+decoding or execution failure evicts its statement before recovery proceeds.
+A 130-document regression injects manifest failure, retries, restores every
+document, and verifies initial-content undo and redo.
+
+The lens accepts repeatable `measure resources --scenario ID` selections. It
+runs each selected scenario's full sweep with normal contracts, adaptive repeats,
+controls and provenance. Selection is recorded as focused; unknown names fail
+before launch, and scenario filtering cannot narrow `measure promises`. Missing
+operations remain missing coverage. Runner cost metadata records the selection.
+
+The final focused run has stable controls but still fails both session budgets:
+10,000-tab initial persistence 4,406.867 ms and full restore 344.056 ms, versus
+180 ms each. The persistence sample records roughly 7.3 GB cumulative allocation
+and 822 MB process writes for its 40 MiB text fixture; storage work remains the
+next target. Do not interpret this as a completed promise. Evidence is in
+Scratchpad `target/analysis/co-development/cycle-7-vm/`; the body-batching-only
+diagnostic is in `cycle-7/`. Validation: 701 app tests passed (seven ignored),
+then all 96 database tests passed after final failure cleanup (three ignored).
+87 lens tests and strict Clippy passed in both repositories.
