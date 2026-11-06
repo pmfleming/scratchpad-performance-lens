@@ -92,7 +92,13 @@ const GAP_CONTRACTS: &[GapContract] = &[
     (
         &["provenance_retained_memory"],
         100_000,
-        &["retained_live_bytes_before_teardown", "baseline_live_bytes"],
+        &[
+            "retained_live_bytes_before_teardown",
+            "baseline_live_bytes",
+            "history_entries",
+            "document_bytes",
+            "history_byte_usage",
+        ],
     ),
     (
         &["session_persist_cost", "session_steady_persist_cost"],
@@ -245,6 +251,9 @@ fn sample_requirements<'a>(event: &Value, fields: &'a [&str]) -> Vec<&'a str> {
 
 fn scenario_requirement(scenario: &str, event: &Value) -> Option<&'static str> {
     match scenario {
+        "provenance_retained_memory" if !retained_history(event) => {
+            Some("completed_retained_edit_history")
+        }
         "aged_store_forget"
             if event["workload_details"]["fixture_revision"] != 2
                 || event["workload_details"]["edit_preparation"]
@@ -296,6 +305,23 @@ fn scenario_requirement(scenario: &str, event: &Value) -> Option<&'static str> {
         }
         _ => None,
     }
+}
+
+fn retained_history(event: &Value) -> bool {
+    let Some(edits) = event["workload_value"].as_u64().filter(|count| *count > 0) else {
+        return false;
+    };
+    let phase = &event["phase_elapsed_ns"];
+    event["measurement_scope"] == "scenario_including_fixture_work"
+        && phase["history_fixture_revision"] == 2
+        && phase["history_entries"].as_u64() == Some(edits)
+        && event["result_value"].as_u64() == Some(edits)
+        && edits
+            .checked_mul(2)
+            .is_some_and(|bytes| phase["document_bytes"].as_u64() == Some(bytes))
+        && phase["history_byte_usage"]
+            .as_u64()
+            .is_some_and(|bytes| bytes > 0)
 }
 
 fn published_paste(phase: &Value) -> bool {
@@ -489,7 +515,23 @@ mod tests {
             "measurement_scope":"scenario_including_fixture_work","baseline_live_bytes":100,"live_bytes":100,"live_growth_bytes":0});
         assert!(!proven("provenance_retained_memory", &retained));
         retained["retained_live_bytes_before_teardown"] = json!(1000);
+        assert!(!proven("provenance_retained_memory", &retained));
+        retained["result_value"] = json!(100000);
+        retained["phase_elapsed_ns"] = json!({"history_fixture_revision":2,"history_entries":100000,"document_bytes":200000,"history_byte_usage":1000});
         assert!(proven("provenance_retained_memory", &retained));
+        for (key, value) in [
+            ("history_fixture_revision", 1),
+            ("history_entries", 99999),
+            ("document_bytes", 199998),
+            ("history_byte_usage", 0),
+        ] {
+            let mut incomplete = retained.clone();
+            incomplete["phase_elapsed_ns"][key] = json!(value);
+            assert!(!proven("provenance_retained_memory", &incomplete));
+        }
+        let mut cleared = retained.clone();
+        cleared["result_value"] = json!(0);
+        assert!(!proven("provenance_retained_memory", &cleared));
         let mut save = json!({"workload_value":50 * shared::MB,"status":"ok","elapsed_ns":10,
             "measurement_scope":"prepared_operation","phase_elapsed_ns":{"save_ns":9},
             "fixture_contract":{"equals":{"fixture_revision":2,"history_retention":"unbounded","inserted_bytes":1,"synchronous":"FULL"},"minimum":{"history_payload_bytes":50 * shared::MB,"history_entries":1025}},

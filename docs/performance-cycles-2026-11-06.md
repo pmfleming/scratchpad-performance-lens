@@ -542,3 +542,33 @@ retains one 195.0 ms outlier against 180 ms and remains uncertain. Initial save
 (2,563.5 ms) and full restore (304.9 ms) at 10,000 tabs still fail. The 100,000-edit
 history fixture measured 1,314.5 ms and allocated 20.25 GB during construction,
 providing the baseline for the next copying investigation.
+
+## Cycle 20: prevent mutation preflight from copying every RAM tail
+
+Mutation preflight no longer retains an extra Arc for text already owned in RAM.
+That reference forced copy-on-write of the growing add tail on every tiny append.
+Stored chunks still retain verified bodies across cache eviction. Text extraction
+continues collecting every required body in order; it has a separate internal
+collection mode from mutation preflight. UTF-8, bounds and read-fault checks remain
+in both paths, and real snapshots still force copy-on-write when needed.
+
+The retained-history probe reports actual history entries, text bytes and history
+byte usage instead of the obsolete zero-count provenance result. It asserts that
+all requested edits remain available. The lens requires those values and fixture
+revision 2, rejecting missing, undersized or cleared histories. The measurement
+still includes construction and teardown of the entire history; its 180 ms limit
+and 100,000-edit workload are unchanged.
+
+Validation: 719 app tests passed (seven ignored), 102 lens tests passed, and strict
+Clippy passed in both repositories. Tests explicitly preserve a real snapshot,
+reject invalid UTF-8 spans and verify that a temporary boundary pin does not force
+a RAM-tail copy. The full replay, persistence, corruption and Unicode suites pass.
+
+`cycle-20/` completed four scenarios in 10.00 seconds. Full construction of 100,000
+edits measured 91.6 ms with stable controls, versus 1,314.5 ms in cycle 19; allocation
+traffic fell from 20.25 GB to 230.0 MB. Both retained-history workloads now pass,
+with exactly 100,000 retained entries and 200,000 text bytes at the largest scale.
+Edited previews pass. Fragmented editing timings pass but their launch controls
+were noisy. Production paste still fails: adaptive repetition retained all three
+launches, including large writer delays, and 128 MiB publication ranged from
+377.3 to 1,810.0 ms against 150 ms. This cycle does not claim full-promise success.
