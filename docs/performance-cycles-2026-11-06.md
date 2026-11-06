@@ -572,3 +572,35 @@ Edited previews pass. Fragmented editing timings pass but their launch controls
 were noisy. Production paste still fails: adaptive repetition retained all three
 launches, including large writer delays, and 128 MiB publication ranged from
 377.3 to 1,810.0 ms against 150 ms. This cycle does not claim full-promise success.
+
+## Cycle 21: retained search results expose and remove quadratic delivery work
+
+Search-result resource measurement now prepares the app/workspace before the
+operation, dispatches one production query, waits for completion and retains the
+results until after allocation snapshots. It no longer measures fixture creation
+and reset queries that clear the stored results. A fixture cannot be reused as a
+cached trial. Target count, actual input bytes, expected/actual matches, completion
+and endpoint are recorded. The lens requires this evidence and a prepared scope;
+the existing 180 ms budget and 128/1,000-target sweeps remain unchanged.
+
+The corrected baseline in `cycle-21/` still failed: 1,000 targets took 1,151.3 ms
+and allocated 1.45 GB inside the actual search operation. This disproved the
+initial suspicion that setup was the main cost. The worker cloned every accumulated
+match/group prefix after each fixed 64-match increment. It now publishes the first
+available matches, then geometrically growing prefixes, followed by the complete
+final result. Cumulative prefix copying is bounded to linear work. Cancellation
+also gets a final generation check before returning a completed result.
+
+Tests exercise serial and parallel delivery, early matches after an empty target,
+exact match ordering, cumulative copied-prefix bounds, cancellation and fixture
+single-use. The 17-test search suite, production search workflow test and new
+resource fixture test passed; the final cancellation refinement passed its two
+focused tests. All 103 lens tests and strict Clippy in both repositories passed.
+
+`cycle-21-final/` measured dense-result search at 2.54 ms for 128 targets and
+16.26 ms for 1,000 targets, with stable controls and all 49,110 matches retained
+at the larger size. Allocation traffic there was 22.13 MB. All twelve production
+workflow medians passed with stable controls; 10,000-target first render measured
+24.83 ms and completion 24.85 ms. Many-file baselines remain failing: lazy open
+949.3 ms and constructing 50,000 buffers 414.0 ms. Full-promise verification is
+still required after the remaining storage, search-capacity and paste work.

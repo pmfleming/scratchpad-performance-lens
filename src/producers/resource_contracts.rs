@@ -147,7 +147,15 @@ const GAP_CONTRACTS: &[GapContract] = &[
     (
         &["search_app_result_tracking"],
         1_000,
-        &["allocated_bytes", "live_bytes"],
+        &[
+            "allocated_bytes",
+            "live_bytes",
+            "retained_live_bytes_before_teardown",
+            "target_count",
+            "result_matches",
+            "expected_matches",
+            "actual_total_bytes",
+        ],
     ),
     (
         &["anchor_heavy_view_editing"],
@@ -251,6 +259,9 @@ fn sample_requirements<'a>(event: &Value, fields: &'a [&str]) -> Vec<&'a str> {
 
 fn scenario_requirement(scenario: &str, event: &Value) -> Option<&'static str> {
     match scenario {
+        "search_app_result_tracking" if !retained_search_results(event) => {
+            Some("completed_search_results_retained_in_app")
+        }
         "provenance_retained_memory" if !retained_history(event) => {
             Some("completed_retained_edit_history")
         }
@@ -305,6 +316,30 @@ fn scenario_requirement(scenario: &str, event: &Value) -> Option<&'static str> {
         }
         _ => None,
     }
+}
+
+fn retained_search_results(event: &Value) -> bool {
+    let phase = &event["phase_elapsed_ns"];
+    let Some(targets) = event["workload_value"].as_u64().filter(|n| *n > 0) else {
+        return false;
+    };
+    let Some(expected) = phase["expected_matches"].as_u64().filter(|n| *n > 0) else {
+        return false;
+    };
+    event["measurement_scope"] == "prepared_operation"
+        && event["measurement_contract"]["production_path"] == true
+        && phase["fixture_revision"] == 2
+        && phase["target_count"].as_u64() == Some(targets)
+        && phase["bytes_per_target_requested"] == 4096
+        && targets.checked_mul(4096 - 128).is_some_and(|minimum| {
+            phase["actual_total_bytes"]
+                .as_u64()
+                .is_some_and(|bytes| bytes >= minimum)
+        })
+        && phase["result_matches"].as_u64() == Some(expected)
+        && event["result_value"].as_u64() == Some(expected)
+        && phase["search_complete"] == true
+        && phase["publication_endpoint"] == "completed_results_retained_in_app"
 }
 
 fn retained_history(event: &Value) -> bool {
@@ -563,5 +598,27 @@ mod tests {
         );
         frame["status"] = json!("panic");
         assert!(!proven("tab_strip_frame_rendering", &frame));
+    }
+    #[test]
+    fn result_storage_requires_prepared_complete_retained_production_results() {
+        let mut row = json!({"workload_value":1000,"status":"ok","elapsed_ns":10,"allocated_bytes":100,"live_bytes":200,
+            "retained_live_bytes_before_teardown":200,"result_value":40000,"measurement_scope":"prepared_operation",
+            "measurement_contract":{"production_path":true},"phase_elapsed_ns":{"fixture_revision":2,"target_count":1000,
+                "bytes_per_target_requested":4096,"actual_total_bytes":4000000,"expected_matches":40000,"result_matches":40000,
+                "search_complete":true,"publication_endpoint":"completed_results_retained_in_app"}});
+        assert!(proven("search_app_result_tracking", &row));
+        for (key, value) in [
+            ("target_count", json!(999)),
+            ("result_matches", json!(0)),
+            ("search_complete", json!(false)),
+            ("actual_total_bytes", json!(1)),
+            ("fixture_revision", json!(1)),
+        ] {
+            let mut incomplete = row.clone();
+            incomplete["phase_elapsed_ns"][key] = value;
+            assert!(!proven("search_app_result_tracking", &incomplete));
+        }
+        row["measurement_scope"] = json!("scenario_including_fixture_work");
+        assert!(!proven("search_app_result_tracking", &row));
     }
 }
