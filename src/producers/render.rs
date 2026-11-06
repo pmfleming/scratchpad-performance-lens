@@ -30,14 +30,25 @@ pub(super) fn render_search_workflows(payload: &Value) -> String {
     let rows = scenarios_array(payload)
         .iter()
         .map(|row| {
-            format!(
+            let mut line = format!(
                 "- {}: median={} ms | max={} ms | budget={} ms | status={}",
                 text(row, "name", "unknown"),
                 measured_ms(row, "median_ms", 1.0),
                 measured_ms(row, "max_ms", 1.0),
                 measured_ms(row, "threshold_ms", 1.0),
                 text(row, "budget_status", "unmeasured"),
-            )
+            );
+            if row["render_diagnostics"].is_object() {
+                let d = &row["render_diagnostics"];
+                line.push_str(&format!(
+                    " | delivery-to-render={} ms | layout={} ms | groups rendered={} skipped={}",
+                    measured_ms(&d["delivery_to_render_ms"], "median", 1.0),
+                    measured_ms(&d["layout_ms"], "median", 1.0),
+                    measured_ms(&d["result_groups_rendered"], "median", 1.0),
+                    measured_ms(&d["result_groups_skipped"], "median", 1.0)
+                ));
+            }
+            line
         })
         .collect();
     render_lines(

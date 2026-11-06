@@ -3,6 +3,8 @@ use crate::{cli::MeasureOptions, config::LensConfig};
 use anyhow::Result;
 use serde_json::json;
 
+mod diagnostics;
+
 fn valid_trials(row: &serde_json::Value) -> bool {
     let (Some(samples), Some(count), Some(budget), Some(probe)) = (
         row["sample_elapsed_ms"].as_array(),
@@ -100,6 +102,7 @@ pub fn search_workflows(config: &LensConfig, _: MeasureOptions) -> Result<()> {
                 merge_trials(&mut payload, &more)?;
             }
         }
+        diagnostics::annotate(&mut payload);
         Ok(payload)
     })();
     let (payload, failure) = match result {
