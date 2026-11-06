@@ -604,3 +604,34 @@ workflow medians passed with stable controls; 10,000-target first render measure
 24.83 ms and completion 24.85 ms. Many-file baselines remain failing: lazy open
 949.3 ms and constructing 50,000 buffers 414.0 ms. Full-promise verification is
 still required after the remaining storage, search-capacity and paste work.
+
+## Cycle 22: validated database phase attribution
+
+Scratchpad now measures history preparation, content capture/flush/preparation,
+document/history writes, content-reference writes, layout writes and the durable
+commit separately. Restore separates orphan checks, layouts, content validation
+and history/text reconstruction. Existing aggregate fields remain compatible:
+`manifest_serialize_ns` includes all database preparation, not just serialization;
+`history_write_ns` includes document metadata; `history_read_ns` includes lazy text
+tree reconstruction. These are wall intervals, not physical disk-time estimates.
+
+The lens reports validated parent/child subdivisions and the unattributed
+remainder per workload. It withholds aggregate fractions when any observed trial
+is missing, failed, overflowing or inconsistent with its parent/outer interval.
+Fractions require positive parent intervals; an unchanged save's zero write time
+therefore has no write fractions. Budgets and operation endpoints are unchanged.
+
+Validation: 723 app tests passed (seven ignored), 104 lens tests passed and strict
+Clippy passed in both repositories. The app checks subdivision bounds and the
+zero-write unchanged-save path; lens tests reject missing/inconsistent/overflowed
+and failed observations.
+
+`cycle-22/` completed the four shared session scenarios in 5.62 seconds, with
+stable launch controls. At 10,000 tabs, first save was 3,695.2 ms and full restore
+297.3 ms, both failing 180 ms. Save attributed 1,359.1 ms to document/history
+writes, 1,177.0 ms to content preparation, 599.1 ms to commit, 252.2 ms to layouts
+and 125.8 ms to content-reference writes. Restore attributed 143.0 ms to history
+and text trees, 85.5 ms to layouts, 8.5 ms to orphan validation and 6.3 ms to content
+validation. Unchanged save (99.6 ms) and startup-visible restore (15.3 ms) passed.
+This diagnostic cycle makes no optimization or full-promise success claim; it
+identifies the next storage work and preserves the complete observed intervals.

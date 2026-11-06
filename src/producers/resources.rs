@@ -197,7 +197,7 @@ fn resource_scenario(scenario: &str, mut events: Vec<Value>, gap: Option<&str>) 
     let first = events.first().unwrap_or(&Value::Null);
     let last = events.last().unwrap_or(&Value::Null);
     let evidence = gap_evidence(scenario, &events, false);
-    json!({
+    let mut result = json!({
         "scenario": scenario,
         "probe_class": "targeted_path",
         "measurement_role": "change_validation",
@@ -240,7 +240,9 @@ fn resource_scenario(scenario: &str, mut events: Vec<Value>, gap: Option<&str>) 
         "page_fault_growth": shared::safe_delta(last["page_fault_count"].as_i64(), first["page_fault_count"].as_i64()),
         "handle_growth": shared::safe_delta(last["handle_count"].as_i64(), first["handle_count"].as_i64()),
         "samples": events.iter().map(resource_sample).collect::<Vec<_>>(),
-    })
+    });
+    result["phase_subdivisions"] = super::resource_diagnostics::subdivisions(&events);
+    result
 }
 
 fn resource_sample(event: &Value) -> Value {

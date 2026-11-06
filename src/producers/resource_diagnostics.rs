@@ -84,6 +84,66 @@ pub(super) fn storage(events: &[Value]) -> Value {
         "interpretation":"observed_store_settings_only_no_inferred_defaults_or_budget_override"})
 }
 
+/// Only complete, non-overlapping subdivisions can explain a parent interval.
+/// Legacy totals remain useful when the finer measurements are unavailable.
+pub(super) fn subdivisions(events: &[Value]) -> Value {
+    let definitions: &[(&str, &[&str])] = &[
+        (
+            "manifest_serialize_ns",
+            &["history_prepare_ns", "content_prepare_ns"],
+        ),
+        (
+            "file_write_ns",
+            &[
+                "history_write_ns",
+                "content_write_ns",
+                "layout_write_ns",
+                "commit_ns",
+            ],
+        ),
+        (
+            "manifest_read_parse_ns",
+            &[
+                "orphan_validation_ns",
+                "layout_read_ns",
+                "content_validation_ns",
+                "history_read_ns",
+            ],
+        ),
+    ];
+    let mut workloads: BTreeMap<u64, Vec<&Value>> = BTreeMap::new();
+    for event in events {
+        if let Some(size) = event["workload_value"].as_u64() {
+            workloads.entry(size).or_default().push(event);
+        }
+    }
+    json!(workloads.into_iter().map(|(size, trials)| {
+        let parents: Vec<_> = definitions.iter().filter_map(|(parent, children)| {
+            if !trials.iter().any(|e| e["phase_elapsed_ns"].get(*parent).is_some()) { return None; }
+            let mut residuals = Vec::new();
+            let mut fractions: BTreeMap<&str, Vec<f64>> = children.iter().map(|key| (*key, Vec::new())).collect();
+            for event in &trials {
+                let phase = &event["phase_elapsed_ns"];
+                let Some(total) = phase[*parent].as_u64().filter(|n| *n > 0) else { continue; };
+                if event["status"] != "ok" || event["elapsed_ns"].as_u64().is_none_or(|n| n < total) { continue; }
+                let Some(values) = children.iter().map(|key| phase[*key].as_u64()).collect::<Option<Vec<_>>>() else { continue; };
+                let Some(sum) = values.iter().try_fold(0u64, |sum, n| sum.checked_add(*n)).filter(|sum| *sum <= total) else { continue; };
+                residuals.push((total - sum) as f64 / 1e6);
+                for (key, value) in children.iter().zip(values) {
+                    fractions.get_mut(key).unwrap().push(value as f64 / total as f64);
+                }
+            }
+            let complete = !residuals.is_empty() && residuals.len() == trials.len();
+            let median = |values: &mut Vec<f64>| { values.sort_by(f64::total_cmp); complete.then(|| (values[values.len()/2] + values[(values.len()-1)/2])/2.0) };
+            Some(json!({"parent":parent,"trial_count":trials.len(),"valid_count":residuals.len(),
+                "complete_for_observed_trials":complete,"median_unattributed_ms":median(&mut residuals),
+                "median_child_fraction":fractions.into_iter().map(|(key, mut values)| (key,median(&mut values))).collect::<BTreeMap<_,_>>() }))
+        }).collect();
+        json!({"workload_value":size,"parents":parents,
+            "interpretation":"validated_nonoverlapping_child_intervals_with_unattributed_remainder_no_budget_override"})
+    }).collect::<Vec<_>>())
+}
+
 pub(super) fn phases(events: &[Value]) -> Value {
     let mut workloads: BTreeMap<i64, Vec<&Value>> = BTreeMap::new();
     for event in events {
@@ -133,6 +193,33 @@ pub(super) fn phases(events: &[Value]) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn subdivisions_require_complete_consistent_intervals() {
+        let good = json!({"workload_value":10,"status":"ok","elapsed_ns":20000000,
+            "phase_elapsed_ns":{"manifest_serialize_ns":10000000,"history_prepare_ns":2000000,"content_prepare_ns":6000000}});
+        let valid = subdivisions(std::slice::from_ref(&good));
+        assert_eq!(valid[0]["parents"][0]["median_unattributed_ms"], 2.0);
+        assert_eq!(
+            valid[0]["parents"][0]["median_child_fraction"]["content_prepare_ns"],
+            0.6
+        );
+        for value in [Value::Null, json!(9000000), json!(u64::MAX)] {
+            let mut invalid = good.clone();
+            invalid["phase_elapsed_ns"]["content_prepare_ns"] = value;
+            let result = subdivisions(&[good.clone(), invalid]);
+            assert_eq!(result[0]["parents"][0]["valid_count"], 1);
+            assert!(result[0]["parents"][0]["median_unattributed_ms"].is_null());
+            assert!(
+                result[0]["parents"][0]["median_child_fraction"]["history_prepare_ns"].is_null()
+            );
+        }
+        let mut failed = good.clone();
+        failed["status"] = json!("panic");
+        assert_eq!(subdivisions(&[failed])[0]["parents"][0]["valid_count"], 0);
+        let mut short = good;
+        short["elapsed_ns"] = json!(1);
+        assert_eq!(subdivisions(&[short])[0]["parents"][0]["valid_count"], 0);
+    }
     #[test]
     fn scaling_keeps_scopes_separate_and_does_not_hide_failed_trials() {
         let row = |size, ns, scope| json!({"workload_value":size,"elapsed_ns":ns,"workload_unit":"tabs","measurement_scope":scope,"status":"ok"});
