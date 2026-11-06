@@ -193,8 +193,8 @@ fn headroom_workload(minimum: i64, last_successful_workload: Option<i64>) -> Opt
 }
 
 fn row_scenario_matches(row: &Value, scenario_ids: &[&str]) -> bool {
-    row.get("scenario")
-        .and_then(Value::as_str)
+    row["scenario"]
+        .as_str()
         .is_some_and(|id| scenario_ids.contains(&id))
 }
 
@@ -214,16 +214,14 @@ fn max_resource_workload_value(row: &Value) -> Option<i64> {
     ]
     .into_iter()
     .filter_map(|key| row.get(key).and_then(Value::as_i64));
-    let samples = row
-        .get("samples")
-        .and_then(Value::as_array)
+    let samples = row["samples"]
+        .as_array()
         .into_iter()
         .flatten()
         .filter_map(|sample| {
-            sample
-                .get("workload_value")
-                .and_then(Value::as_i64)
-                .or_else(|| sample.get("result_value").and_then(Value::as_i64))
+            sample["workload_value"]
+                .as_i64()
+                .or_else(|| sample["result_value"].as_i64())
         });
     direct.chain(samples).max()
 }

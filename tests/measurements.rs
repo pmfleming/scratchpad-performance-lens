@@ -51,7 +51,157 @@ fn probes_use_cargo_executables_with_environment_or_configured_target_directorie
             std::path::Path::new(payload["meta"]["probe_executable"].as_str().unwrap())
                 .starts_with(&destination)
         );
+        if via_environment {
+            exercise_event_probes(root.path(), &destination)?;
+        }
     }
+    Ok(())
+}
+
+fn exercise_event_probes(root: &std::path::Path, target: &std::path::Path) -> anyhow::Result<()> {
+    use std::fs;
+    let event = |scenario: &str, workload: u64, status: &str| {
+        json!({"scenario":scenario,"step_index":0,
+        "workload_value":workload,"elapsed_ns":95_000_000,"status":status,"measurement_scope":"prepared_operation",
+            "live_growth_bytes":-100,"retained_live_bytes_before_teardown":350,"process_resources":{"read_bytes":1024},
+            "phase_elapsed_ns":{"retained_cache_bytes":4194304,"cache_limit_bytes":4194304}})
+    };
+    let mut partial = event("partial", 1, "ok");
+    partial["elapsed_ns"] = json!(10);
+    let active = |scenario| json!({"event":"step_started","scenario":scenario,"step_index":1,"workload_value":2});
+    let mut arms = Vec::new();
+    for (id, text, ending) in [
+        ("near", event("near", 1, "ok").to_string(), ""),
+        (
+            "partial",
+            format!("{partial}\n{{}}\n{}\n{{truncated", active("partial")),
+            "std::process::exit(7);",
+        ),
+        (
+            "timeout",
+            active("timeout").to_string(),
+            "std::thread::sleep(std::time::Duration::from_secs(60));",
+        ),
+        ("later", partial.to_string().replace("partial", "later"), ""),
+    ] {
+        arms.push(format!("{id:?} => {{println!(\"{{}}\",{text:?});std::io::Write::flush(&mut std::io::stdout()).unwrap();{ending}}}"));
+    }
+    let stub = |arms: Vec<String>| {
+        format!("fn main() {{match std::env::args().nth(2).unwrap().as_str() {{{}, _ => panic!(\"unknown scenario\")}}}}",arms.join(","))
+    };
+    arms.push("\"omitted\" => {}".into());
+    fs::write(root.join("src/bin/resource_probe.rs"), stub(arms))?;
+    let definitions = [
+        ("large_file_first_visible_ceiling", 1_073_741_824, "bytes"),
+        (
+            "large_file_background_index_ceiling",
+            1_073_741_824,
+            "bytes",
+        ),
+        ("in_memory_text_ingest_ceiling", 1_073_741_824, "bytes"),
+        ("text_layout_ceiling", 134_217_728, "bytes"),
+        ("many_file_first_visible_ceiling", 50_000, "files"),
+        ("many_file_background_hydration_ceiling", 50_000, "files"),
+        ("search_file_size_ceiling", 1_073_741_824, "bytes"),
+        ("search_target_count_ceiling", 10_000, "files"),
+        ("tab_count_ceiling", 10_000, "tabs"),
+        ("split_count_ceiling", 1_000, "splits"),
+        ("view_count_ceiling", 1_000, "views"),
+        ("paste_size_ceiling", 134_217_728, "bytes"),
+    ];
+    let mut manifest = json!({"probes":{"resource_probe":["near","partial","timeout","later","omitted"]},"resource_budgets":{},"capacity_budgets":{}});
+    for id in ["near", "partial", "timeout", "later"] {
+        manifest["resource_budgets"][id] = json!({"metric":"/elapsed_ns","max":100_000_000});
+    }
+    let arms = definitions
+        .into_iter()
+        .map(|(id, workload, unit)| {
+            manifest["capacity_budgets"][id] = json!({"threshold_ms":100});
+            let lines = (0..3)
+                .map(|repeat| {
+                    let mut row = event(id, workload, "ok");
+                    row["repeat_index"] = json!(repeat);
+                    row["workload_unit"] = json!(unit);
+                    row["expected_repetition_count"] = json!(3);
+                    row.to_string()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("{id:?} => println!(\"{{}}\",{lines:?})")
+        })
+        .collect();
+    fs::write(root.join("src/bin/capacity_probe.rs"), stub(arms))?;
+    fs::create_dir_all(root.join("benches"))?;
+    fs::write(
+        root.join("benches/measurement_manifest.json"),
+        manifest.to_string(),
+    )?;
+    for (tool, success, file) in [
+        ("resources", false, "resource_profiles.json"),
+        ("capacity", true, "capacity_report.json"),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_splens"))
+            .args(["measure", tool])
+            .current_dir(root)
+            .env("CARGO_TARGET_DIR", target)
+            .env("SPLENS_PROBE_TIMEOUT_SECS", "1")
+            .output()?;
+        assert_eq!(
+            output.status.success(),
+            success,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: Value =
+            serde_json::from_slice(&fs::read(root.join("target/analysis").join(file))?)?;
+        let rows = report["scenarios"].as_array().unwrap();
+        if success {
+            assert_eq!(rows.len(), 12);
+            assert!(rows
+                .iter()
+                .all(|row| row["samples"][0]["repetition_count"] == 9
+                    && row["samples"][0]["complete"] == true));
+        } else {
+            assert_eq!(report["meta"]["probe_status"], "partial");
+            assert_eq!(rows.len(), 4);
+            assert_eq!(report["meta"]["missing_scenarios"], json!(["omitted"]));
+            let near = rows.iter().find(|row| row["scenario"] == "near").unwrap();
+            assert_eq!(near["samples"].as_array().unwrap().len(), 3);
+            let sample = &near["samples"][0];
+            assert_eq!(sample["retained_live_bytes_before_teardown"], 350);
+            assert_eq!(sample["live_growth_bytes"], -100);
+            assert_eq!(sample["process_resources"]["read_bytes"], 1024);
+            assert_eq!(sample["cache_bound_held"], true);
+            for id in ["partial", "timeout"] {
+                assert!(
+                    rows.iter().find(|row| row["scenario"] == id).unwrap()["samples"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|sample| sample["status"] == "error")
+                );
+            }
+        }
+    }
+    manifest["probes"]["resource_probe"] = json!(["near", "later"]);
+    fs::write(
+        root.join("benches/measurement_manifest.json"),
+        manifest.to_string(),
+    )?;
+    let output = Command::new(env!("CARGO_BIN_EXE_splens"))
+        .args(["measure", "resources"])
+        .current_dir(root)
+        .env("CARGO_TARGET_DIR", target)
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&fs::read(
+        root.join("target/analysis/resource_profiles.json"),
+    )?)?;
+    assert_eq!(report["meta"]["probe_status"], "completed");
     Ok(())
 }
 

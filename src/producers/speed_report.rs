@@ -132,9 +132,9 @@ pub fn speed_efficiency_report(config: &LensConfig, _options: MeasureOptions) ->
             "tabs_and_splits_scenarios": tabs_rows.len(),
             "capacity_scenarios": capacity_rows.len(),
             "resource_profile_scenarios": resource_rows.len(),
-            "over_budget_latency": latency_rows.iter().filter(|row| row.get("over_budget").and_then(Value::as_bool).unwrap_or(false)).count(),
-            "coverage_gaps": latency_rows.iter().filter(|row| row.get("over_budget").and_then(Value::as_bool).unwrap_or(false) && !row.get("has_profile_coverage").and_then(Value::as_bool).unwrap_or(false)).count(),
-            "near_failure_ceilings": capacity_rows.iter().filter(|row| row.get("ceiling_reached").and_then(Value::as_bool).unwrap_or(false)).count(),
+            "over_budget_latency": latency_rows.iter().filter(|row| row["over_budget"].as_bool().unwrap_or(false)).count(),
+            "coverage_gaps": latency_rows.iter().filter(|row| row["over_budget"].as_bool().unwrap_or(false) && !row["has_profile_coverage"].as_bool().unwrap_or(false)).count(),
+            "near_failure_ceilings": capacity_rows.iter().filter(|row| row["ceiling_reached"].as_bool().unwrap_or(false)).count(),
         },
         "triage_summary": triage_summary(&latency_rows, &capacity_rows),
         "triage": triage,
@@ -175,45 +175,39 @@ fn normalize_latency_row(row: &Value, capacity_lookup: &HashMap<&str, &Value>) -
         "split-layout" => capacity_lookup.get("split_count_ceiling"),
         _ => None,
     };
-    let mean_ms = row.get("mean_ms").and_then(Value::as_f64).or_else(|| {
-        row.get("mean_ns")
-            .and_then(Value::as_f64)
-            .map(|ns| ns / 1_000_000.0)
-    });
+    let mean_ms = super::common::mean_ms(row);
     let budget_probe_ms = budget_probe_ms(row).or(mean_ms);
     let budget_ms = row
         .get("threshold_ms")
         .or_else(|| row.get("budget_ms"))
         .and_then(Value::as_f64);
-    let matching = row
-        .get("matching_flamegraphs")
-        .cloned()
-        .unwrap_or_else(|| json!([]));
+    let empty = json!([]);
+    let matching = row.get("matching_flamegraphs").unwrap_or(&empty);
     json!({
-        "scenario_id": row.get("name").or_else(|| row.get("scenario_id")).or_else(|| row.get("benchmark_key")).cloned(),
-        "probe_class": row.get("probe_class").and_then(Value::as_str).unwrap_or("targeted_path"),
-        "measurement_role": row.get("measurement_role").and_then(Value::as_str).unwrap_or("change_validation"),
-        "scenario_label": row.get("scenario_label").or_else(|| row.get("name")).cloned(),
+        "scenario_id": row.get("name").or_else(|| row.get("scenario_id")).or_else(|| row.get("benchmark_key")),
+        "probe_class": row["probe_class"].as_str().unwrap_or("targeted_path"),
+        "measurement_role": row["measurement_role"].as_str().unwrap_or("change_validation"),
+        "scenario_label": row.get("scenario_label").or_else(|| row.get("name")),
         "family": family,
-        "measurement_scope": row.get("measurement_scope").cloned(),
-        "present_included": row.get("present_included").cloned(),
+        "measurement_scope": row.get("measurement_scope"),
+        "present_included": row.get("present_included"),
         "mean_ms": mean_ms,
         "budget_probe_ms": budget_probe_ms,
-        "budget_probe_label": row.get("budget_probe_label").and_then(Value::as_str).unwrap_or("mean"),
+        "budget_probe_label": row["budget_probe_label"].as_str().unwrap_or("mean"),
         "budget_ms": budget_ms,
-        "stability": row.get("stability").and_then(Value::as_str).unwrap_or("stable"),
-        "targets": row.get("targets").cloned().unwrap_or_else(|| json!([])),
+        "stability": row["stability"].as_str().unwrap_or("stable"),
+        "targets": row.get("targets").unwrap_or(&json!([])),
         "matching_flamegraphs": matching,
         "has_profile_coverage": matching.as_array().is_some_and(|items| !items.is_empty()),
-        "last_known_failure_ceiling": ceiling.and_then(|row| row.get("last_successful_label").or_else(|| row.get("first_failure_label"))).cloned(),
-        "suspected_limiting_resource": row.get("suspected_limiting_resource").and_then(Value::as_str).unwrap_or("unknown"),
-        "signals": row.get("signals").and_then(Value::as_str).unwrap_or(match row["budget_status"].as_str() {
+        "last_known_failure_ceiling": ceiling.and_then(|row| row.get("last_successful_label").or_else(|| row.get("first_failure_label"))),
+        "suspected_limiting_resource": row["suspected_limiting_resource"].as_str().unwrap_or("unknown"),
+        "signals": row["signals"].as_str().unwrap_or(match row["budget_status"].as_str() {
             Some("fail") => "observed budget violation", Some("pass") => "within observed budget",
             Some("uncertain") => "budget uncertain", _ => "budget status unknown",
         }),
-        "budget_status": row.get("budget_status").cloned().unwrap_or(json!("unmeasured")),
-        "mean_confidence_interval_ns": row.get("mean_confidence_interval_ns").cloned(),
-        "measurement_status": row.get("measurement_status").cloned().unwrap_or(json!("unmeasured")),
+        "budget_status": row.get("budget_status").unwrap_or(&json!("unmeasured")),
+        "mean_confidence_interval_ns": row.get("mean_confidence_interval_ns"),
+        "measurement_status": row.get("measurement_status").unwrap_or(&json!("unmeasured")),
         "over_budget": if row["measurement_status"] != "valid" { None } else { match row["budget_status"].as_str() {
             Some("pass") => Some(false), Some("fail") => Some(true), _ => None,
         } },
@@ -228,90 +222,88 @@ fn normalize_capacity_row(row: &Value, synthetic: bool) -> Value {
             Some("unmeasured" | "incomplete")
         );
     json!({
-        "scenario_id": row.get("scenario").cloned(),
-        "probe_class": row.get("probe_class").and_then(Value::as_str).unwrap_or("ceiling_health"),
-        "measurement_role": row.get("measurement_role").and_then(Value::as_str).unwrap_or("promise_health"),
-        "scenario_label": row.get("scenario_label").or_else(|| row.get("scenario")).cloned(),
-        "family": row.get("workload_family").and_then(Value::as_str).unwrap_or("capacity-stress"),
-        "failure_mode": row.get("failure_mode").and_then(Value::as_str).unwrap_or("unmeasured"),
+        "scenario_id": row.get("scenario"),
+        "probe_class": row["probe_class"].as_str().unwrap_or("ceiling_health"),
+        "measurement_role": row["measurement_role"].as_str().unwrap_or("promise_health"),
+        "scenario_label": row.get("scenario_label").or_else(|| row.get("scenario")),
+        "family": row["workload_family"].as_str().unwrap_or("capacity-stress"),
+        "failure_mode": row["failure_mode"].as_str().unwrap_or("unmeasured"),
         "synthetic": synthetic,
         "measurement_status": if known { "valid" } else { "unmeasured" },
-        "ceiling_reached": if known { row.get("ceiling_reached").cloned() } else { None },
-        "last_successful_label": if synthetic { None } else { row.get("last_successful_label").cloned() },
-        "first_failure_label": if synthetic { None } else { row.get("first_failure_label").cloned() },
-        "matching_flamegraphs": row.get("matching_flamegraphs").cloned().unwrap_or_else(|| json!([])),
-        "suspected_limiting_resource": row.get("suspected_limiting_resource").and_then(Value::as_str).unwrap_or("unknown"),
-        "peak_working_set_bytes": row.get("peak_working_set_bytes").cloned(),
-        "working_set_growth_bytes": row.get("working_set_growth_bytes").cloned(),
-        "diagnosis_guidance": row.get("diagnosis_guidance").cloned().unwrap_or_else(|| json!([])),
+        "ceiling_reached": if known { row.get("ceiling_reached") } else { None },
+        "last_successful_label": if synthetic { None } else { row.get("last_successful_label") },
+        "first_failure_label": if synthetic { None } else { row.get("first_failure_label") },
+        "matching_flamegraphs": row.get("matching_flamegraphs").unwrap_or(&json!([])),
+        "suspected_limiting_resource": row["suspected_limiting_resource"].as_str().unwrap_or("unknown"),
+        "peak_working_set_bytes": row.get("peak_working_set_bytes"),
+        "working_set_growth_bytes": row.get("working_set_growth_bytes"),
+        "diagnosis_guidance": row.get("diagnosis_guidance").unwrap_or(&json!([])),
     })
 }
 
 fn normalize_frame_row(row: &Value) -> Value {
     let valid = super::common::valid_frame(row);
-    let budget_ms = row.get("budget_ms").and_then(Value::as_f64).unwrap_or(8.33);
-    let p99_budget_ms = row
-        .get("p99_budget_ms")
-        .and_then(Value::as_f64)
-        .unwrap_or(12.0);
-    let p95_ms = row.get("p95_ms").and_then(Value::as_f64).unwrap_or(0.0);
-    let p99_ms = row.get("p99_ms").and_then(Value::as_f64).unwrap_or(0.0);
+    let budget_ms = row["budget_ms"].as_f64().unwrap_or(8.33);
+    let p99_budget_ms = row["p99_budget_ms"].as_f64().unwrap_or(12.0);
+    let p95_ms = row["p95_ms"].as_f64().unwrap_or(0.0);
+    let p99_ms = row["p99_ms"].as_f64().unwrap_or(0.0);
     json!({
-        "scenario_id": row.get("scenario_id").and_then(Value::as_str).unwrap_or("ui_render_frame_120hz"),
+        "scenario_id": row["scenario_id"].as_str().unwrap_or("ui_render_frame_120hz"),
         "probe_class": "targeted_path",
         "measurement_role": "change_validation",
-        "scenario_label": row.get("scenario_label").or_else(|| row.get("scenario_id")).cloned(),
-        "family": row.get("workload_family").and_then(Value::as_str).unwrap_or("scroll"),
-        "mean_ms": row.get("mean_ms").and_then(Value::as_f64).unwrap_or(0.0),
-        "p50_ms": row.get("p50_ms").cloned(),
+        "scenario_label": row.get("scenario_label").or_else(|| row.get("scenario_id")),
+        "family": row["workload_family"].as_str().unwrap_or("scroll"),
+        "mean_ms": row["mean_ms"].as_f64().unwrap_or(0.0),
+        "p50_ms": row.get("p50_ms"),
         "p95_ms": p95_ms,
         "p99_ms": p99_ms,
-        "max_ms": row.get("max_ms").cloned(),
+        "max_ms": row.get("max_ms"),
         "budget_ms": budget_ms,
         "p99_budget_ms": p99_budget_ms,
         "stability": "unknown",
         "measurement_status": if valid { "valid" } else { "unmeasured" },
-        "percentile_method": row.get("percentile_method").cloned(),
-        "percentile_resolution_ms": row.get("percentile_resolution_ms").cloned(),
-        "measurement_scope": row.get("measurement_scope").and_then(Value::as_str).unwrap_or("measured_frame_path_cpu"),
-        "metric_role": row.get("metric_role").and_then(Value::as_str).unwrap_or("theoretical_frame_production_capacity"),
-        "present_included": row.get("present_included").and_then(Value::as_bool).unwrap_or(false),
-        "vsync": row.get("vsync").and_then(Value::as_bool).unwrap_or(false),
-        "included_work": row.get("included_work").cloned().unwrap_or_else(|| json!([])),
-        "omitted_work": row.get("omitted_work").cloned().unwrap_or_else(|| json!([])),
-        "theoretical_fps_p99": row.get("theoretical_fps_p99").cloned(),
-        "refresh_budget_utilization": row.get("refresh_budget_utilization").cloned(),
+        "percentile_method": row.get("percentile_method"),
+        "percentile_resolution_ms": row.get("percentile_resolution_ms"),
+        "measurement_scope": row["measurement_scope"].as_str().unwrap_or("measured_frame_path_cpu"),
+        "metric_role": row["metric_role"].as_str().unwrap_or("theoretical_frame_production_capacity"),
+        "present_included": row["present_included"].as_bool().unwrap_or(false),
+        "vsync": row["vsync"].as_bool().unwrap_or(false),
+        "included_work": row.get("included_work").unwrap_or(&json!([])),
+        "omitted_work": row.get("omitted_work").unwrap_or(&json!([])),
+        "theoretical_fps_p99": row.get("theoretical_fps_p99"),
+        "refresh_budget_utilization": row.get("refresh_budget_utilization"),
         "targets": ["src/app/app_state/frame.rs", "src/app/ui"],
         "matching_flamegraphs": ["ui_render_frame_profile"],
         "has_profile_coverage": true,
         "suspected_limiting_resource": "unknown",
         "signals": format!("p95 {p95_ms:.2} ms vs {budget_ms:.2} ms budget; p99 {p99_ms:.2} ms vs {p99_budget_ms:.2} ms budget"),
         "over_budget": valid.then_some(p95_ms > budget_ms || p99_ms > p99_budget_ms),
-        "phases": row.get("phases").cloned().unwrap_or_else(|| json!([])),
+        "phases": row.get("phases").unwrap_or(&json!([])),
     })
 }
 
 fn flamegraph_coverage_rows(flamegraphs: &[Value], latency_rows: &[&Value]) -> Vec<Value> {
     let covered_keys: HashSet<_> = latency_rows
         .iter()
-        .filter_map(|row| row.get("scenario_id").and_then(Value::as_str))
+        .filter_map(|row| row["scenario_id"].as_str())
         .map(shared::benchmark_key)
         .collect();
     flamegraphs
         .iter()
         .map(|item| {
-            let covered: Vec<_> = values_array(&item["benchmark_keys"]).iter()
+            let covered: Vec<_> = values_array(&item["benchmark_keys"])
+                .iter()
                 .filter(|key| key.as_str().is_some_and(|key| covered_keys.contains(key)))
                 .collect();
             json!({
-                "id": item.get("id").cloned(),
-                "name": item.get("name").cloned(),
-                "available": item.get("available").and_then(Value::as_bool).unwrap_or(false),
-                "coverage_role": item.get("coverage_role").and_then(Value::as_str).unwrap_or("report-driven"),
-                "benchmark_keys": item.get("benchmark_keys").cloned().unwrap_or_else(|| json!([])),
-                "workload_families": item.get("workload_families").cloned().unwrap_or_else(|| json!([])),
+                "id": item.get("id"),
+                "name": item.get("name"),
+                "available": item["available"].as_bool().unwrap_or(false),
+                "coverage_role": item["coverage_role"].as_str().unwrap_or("report-driven"),
+                "benchmark_keys": item.get("benchmark_keys").unwrap_or(&json!([])),
+                "workload_families": item.get("workload_families").unwrap_or(&json!([])),
                 "covered_scenarios": covered,
-                "issue": item.get("issue").cloned(),
+                "issue": item.get("issue"),
             })
         })
         .collect()
@@ -323,39 +315,28 @@ fn build_triage(latency_rows: &[&Value], capacity_rows: &[Value]) -> Vec<Value> 
         if row["over_budget"].is_null() {
             continue;
         }
-        let over_budget = row
-            .get("over_budget")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let unstable = row
-            .get("stability")
-            .and_then(Value::as_str)
-            .unwrap_or("stable")
-            != "stable";
+        let over_budget = row["over_budget"].as_bool().unwrap_or(false);
+        let unstable = row["stability"].as_str().unwrap_or("stable") != "stable";
         if over_budget || unstable {
             rows.push(json!({
-                "scenario_id": row.get("scenario_id").cloned(),
-                "scenario_label": row.get("scenario_label").cloned(),
-                "family": row.get("family").cloned(),
-                "reason": row.get("signals").cloned(),
-                "suspected_limiting_resource": row.get("suspected_limiting_resource").cloned(),
+                "scenario_id": row.get("scenario_id"),
+                "scenario_label": row.get("scenario_label"),
+                "family": row.get("family"),
+                "reason": row.get("signals"),
+                "suspected_limiting_resource": row.get("suspected_limiting_resource"),
                 "recommended_action": recommended_action(row),
                 "rank_score": latency_rank(row),
             }));
         }
     }
     for row in capacity_rows {
-        if row
-            .get("ceiling_reached")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
+        if row["ceiling_reached"].as_bool().unwrap_or(false) {
             rows.push(json!({
-                "scenario_id": row.get("scenario_id").cloned(),
-                "scenario_label": row.get("scenario_label").cloned(),
-                "family": row.get("family").cloned(),
-                "reason": format!("{} at {}", row.get("failure_mode").and_then(Value::as_str).unwrap_or("measured"), row.get("first_failure_label").or_else(|| row.get("last_successful_label")).and_then(Value::as_str).unwrap_or("-")),
-                "suspected_limiting_resource": row.get("suspected_limiting_resource").cloned(),
+                "scenario_id": row.get("scenario_id"),
+                "scenario_label": row.get("scenario_label"),
+                "family": row.get("family"),
+                "reason": format!("{} at {}", row["failure_mode"].as_str().unwrap_or("measured"), row.get("first_failure_label").or_else(|| row.get("last_successful_label")).and_then(Value::as_str).unwrap_or("-")),
+                "suspected_limiting_resource": row.get("suspected_limiting_resource"),
                 "recommended_action": recommended_action(row),
                 "rank_score": capacity_rank(row),
             }));
@@ -378,23 +359,21 @@ fn build_triage(latency_rows: &[&Value], capacity_rows: &[Value]) -> Vec<Value> 
 }
 
 fn recommended_action(row: &Value) -> String {
-    if let Some(first) = row
-        .get("diagnosis_guidance")
-        .and_then(Value::as_array)
+    if let Some(first) = row["diagnosis_guidance"]
+        .as_array()
         .and_then(|rows| rows.first())
         .and_then(Value::as_str)
     {
         return first.to_string();
     }
-    if let Some(first) = row
-        .get("matching_flamegraphs")
-        .and_then(Value::as_array)
+    if let Some(first) = row["matching_flamegraphs"]
+        .as_array()
         .and_then(|rows| rows.first())
         .and_then(Value::as_str)
     {
         return format!("Inspect {first} against the over-budget scenario.");
     }
-    if row.get("family").and_then(Value::as_str) == Some("search") {
+    if row["family"].as_str() == Some("search") {
         "Add or compare a search flamegraph before broad optimization work.".to_string()
     } else {
         "Add diagnosis coverage before prioritizing an optimization.".to_string()
@@ -402,11 +381,10 @@ fn recommended_action(row: &Value) -> String {
 }
 
 fn latency_rank(row: &Value) -> f64 {
-    let budget = row.get("budget_ms").and_then(Value::as_f64).unwrap_or(0.0);
-    let budget_probe = row
-        .get("budget_probe_ms")
-        .and_then(Value::as_f64)
-        .or_else(|| row.get("mean_ms").and_then(Value::as_f64))
+    let budget = row["budget_ms"].as_f64().unwrap_or(0.0);
+    let budget_probe = row["budget_probe_ms"]
+        .as_f64()
+        .or_else(|| row["mean_ms"].as_f64())
         .unwrap_or(0.0);
     let overrun = if let (Some(p95), Some(p99), Some(p99_budget)) = (
         row["p95_ms"].as_f64(),
@@ -423,25 +401,12 @@ fn latency_rank(row: &Value) -> f64 {
     } else {
         budget_probe / 25.0
     };
-    family_priority(
-        row.get("family")
-            .and_then(Value::as_str)
-            .unwrap_or("unmapped"),
-    ) * 10.0
-        + overrun
+    family_priority(row["family"].as_str().unwrap_or("unmapped")) * 10.0 + overrun
 }
 
 fn capacity_rank(row: &Value) -> f64 {
-    family_priority(
-        row.get("family")
-            .and_then(Value::as_str)
-            .unwrap_or("capacity-stress"),
-    ) * 10.0
-        + if row
-            .get("ceiling_reached")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
+    family_priority(row["family"].as_str().unwrap_or("capacity-stress")) * 10.0
+        + if row["ceiling_reached"].as_bool().unwrap_or(false) {
             2.0
         } else {
             0.0

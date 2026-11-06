@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 pub const SCHEMA_ID: &str = "performance_review";
 pub const SCHEMA_FILE: &str = "performance_review.schema.json";
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct PerformanceReviewArtifact {
     pub meta: PerformanceReviewMeta,
     pub summary: PerformanceReviewSummary,
@@ -19,7 +19,7 @@ pub struct PerformanceReviewArtifact {
     pub coordinated_triage: Vec<Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct PerformanceReviewMeta {
     #[serde(default)]
     pub noisy_sources: Vec<String>,
@@ -29,7 +29,7 @@ pub struct PerformanceReviewMeta {
     pub probe_classes: BTreeMap<String, ProbeClass>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct SourceArtifactStatus {
     pub id: String,
     pub path: String,
@@ -41,13 +41,13 @@ pub struct SourceArtifactStatus {
     pub error: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct ProbeClass {
     pub label: String,
     pub purpose: String,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct PerformanceReviewSummary {
     pub scenario_count: usize,
     pub covered_scenarios: usize,
@@ -67,7 +67,7 @@ pub struct PerformanceReviewSummary {
     pub promise_health: PromiseHealthSummary,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct PromiseHealthSummary {
     pub pass: usize,
     #[serde(default)]
@@ -77,7 +77,7 @@ pub struct PromiseHealthSummary {
     pub unmeasured: usize,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct PromiseRegistryEntry {
     pub scenario_id: String,
     pub title: String,
@@ -85,7 +85,7 @@ pub struct PromiseRegistryEntry {
     pub scale_targets: Vec<PromisedScale>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct PerformanceReviewScenario {
     pub id: String,
     pub title: String,
@@ -130,7 +130,7 @@ pub enum CoverageStatus {
     Missing,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct CoverageAxes {
     pub speed: CoverageAxis,
     pub capacity: CoverageAxis,
@@ -138,7 +138,7 @@ pub struct CoverageAxes {
     pub profiles: CoverageAxis,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct CoverageAxis {
     pub required: bool,
     pub covered: bool,
@@ -153,7 +153,7 @@ pub struct CoverageAxis {
     pub missing_evidence: Vec<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct PromisedScale {
     pub id: String,
     pub label: String,
@@ -163,7 +163,7 @@ pub struct PromisedScale {
     pub resource_scenarios: Vec<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct ScaleCheck {
     pub id: String,
     pub label: String,
@@ -199,14 +199,14 @@ pub enum CeilingStatus {
     Unmeasured,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct MeasurementSplit {
     pub ceiling_health: MeasurementClassSummary,
     pub targeted_path: MeasurementClassSummary,
     pub diagnostic_profile: MeasurementClassSummary,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct MeasurementClassSummary {
     pub label: String,
     pub purpose: String,
@@ -219,7 +219,7 @@ pub struct MeasurementClassSummary {
     pub available: Option<usize>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct ScenarioEvidence {
     pub latency: Vec<Value>,
     pub capacity: Vec<Value>,
@@ -227,7 +227,7 @@ pub struct ScenarioEvidence {
     pub profiles: Vec<Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct Presentation {
     pub notes: Vec<String>,
     pub primary_view: String,

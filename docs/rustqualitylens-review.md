@@ -203,3 +203,145 @@ coverage, locality and leverage inputs are complete. Coverage includes test code
 branch coverage remains unavailable. Fixture probes are not full Scratchpad
 benchmark or GUI validation. See the reproduction commands above; the same
 `cargo-llvm-cov` and matching LLVM tools are required for both snapshots.
+
+## Review of the current lens: 2026-11-06, baseline `0cfba9f`
+
+This campaign measures the lens after the ten Scratchpad measurement-accuracy
+changes. Earlier campaign numbers above describe older implementations.
+The local tool is `../rust-quality-lens`, corresponding to the requested
+`rustqualitylens` project. Both snapshots use its existing
+`target/campaign-tool-build/debug/rqlens` executable, SHA-256
+`3e3704d2731ab916f6c64c6c44b39b6feaaa5a73df9de4b7a9b7193aef629915`.
+The tool checkout is at `d137d8d8f219b4ee788935aff27115374626d2f8`;
+the existing executable was not rebuilt from that checkout for this campaign.
+Both runs use Rust 1.95.0 and LLVM 21.1.8 from that project's Nix shell.
+
+Evidence is retained under `target/quality-review/refactor-2026-11-06/`:
+`before/`, `after/`, the two resolved TOML configurations, measurement logs,
+`verify.log`, `refactor-tests.log`, and `before-summary.json` /
+`after-summary.json`. Both configurations retain this project's metadata
+fingerprint inputs and automatic identity resolution.
+
+| Measurement | Before | After |
+| --- | ---: | ---: |
+| Production function cognitive complexity, sum | 708 | 623 |
+| Production function cyclomatic complexity, sum | 1,170 | 1,162 |
+| Production function Halstead effort, sum, rounded | 6,277,501 | 5,730,517 |
+| Maximum production cognitive complexity | 41 | 13 |
+| Maximum production cyclomatic complexity | 30 | 23 |
+| Total Rust lines, including blanks, source and tests | 11,341 | 11,334 |
+| RQLens source nonblank lines | 10,806 | 10,788 |
+| Duplicated lines | 450 | 421 |
+| Duplication percentage | 4.16% | 3.90% |
+| Explicit `.clone()` / `.cloned()` calls, source and tests | 108 | 50 |
+| Escape-hatch records | 6 | 0 |
+| Production panic-path findings | 15 | 8 |
+| Executed tests | 85 | 71 |
+| Test/helper function lines, summed spans | 2,446 | 2,498 |
+| LLVM line coverage | 84.58% | 90.21% |
+| Covered executable lines | 7,191 / 8,502 | 7,411 / 8,215 |
+| LLVM function coverage | 82.85% | 87.33% |
+| LLVM region coverage | 83.62% | 88.70% |
+| Mean module locality score, all modules | 96.160 | 96.135 |
+| Mean module observed-reuse leverage, all modules | 33.600 | 33.846 |
+| Mean production module locality | 95.867 | 95.851 |
+| Mean production module observed-reuse leverage | 37.333 | 37.447 |
+
+Complexity sums count function records once. Production excludes names containing
+`::tests::` or `registry_tests::`, integration-test paths, and files ending in
+`_tests.rs`. Test/helper volume sums the excluded function spans. Panic findings
+use the same test spans after normalizing the tool's relative and absolute paths.
+LOC and clone-call counts include every `.rs` file under `src/` and `tests/`,
+including the two added modules. Halstead effort is a syntax heuristic, not
+estimated developer hours.
+
+### Findings addressed
+
+- Baseline extraction mixed three evidence shapes, cloned capacity reports into
+  a typed round trip, and used fallible serialization through `unwrap`/`expect`.
+  Borrowed measurement views now keep eligibility, metric selection, and
+  observation identity together. Baseline fingerprint serialization borrows its
+  content and preserves the existing canonical field order. Legacy fingerprint
+  compatibility is covered explicitly. Snapshot cognitive complexity falls
+  41 to 3; this also distributes work into smaller named operations.
+- Probe sweeps mixed scenario execution, retries, launch identity, and error
+  accumulation. These responsibilities now have separate functions; the manifest
+  is read once per sweep. Planned launch counts remain fixed when a retry fails,
+  so missing repetitions cannot reduce the required sample count. The sweep's
+  cognitive complexity falls 37 to 0; the helpers still carry the actual work.
+- Probe output was serialized and reparsed to validate each event. Validation
+  now reads the parsed value directly. Probe builds share one Cargo invocation
+  and resolve the executable from Cargo's artifact messages.
+- Producer probes and session measurements duplicated deadline and child cleanup
+  behavior. A shared process module now handles deadlines, process groups on
+  Unix, and reaping after timeout or wait failure. Environment and provenance
+  commands also share successful-output decoding.
+- Promise definitions contained filesystem inventory validation. Inventory now
+  owns those checks; validation cognitive complexity falls 31 to 3. Named gap
+  requirements are declarative data, with identical contracts grouped together;
+  gap-evidence cyclomatic complexity falls 30 to 7.
+- Resource-budget groups cloned samples and repeatedly decoded already checked
+  numbers. Groups now borrow samples and share checked observations. Workload
+  ordering, uncertainty, and authoritative-budget rules are retained.
+- Report projections cloned JSON subtrees before serializing them again. Speed
+  and capacity projections now borrow their fields, including raw capacity
+  repetitions. Mean-latency conversion is shared by its consumers. All six glob
+  imports and unused artifact `Clone` implementations were removed.
+- Capacity specs retained unused fallback timing thresholds. Those fields and
+  their constant were deleted; project-supplied thresholds remain authoritative.
+  Code-history reporting now derives current counts and commit metadata from
+  the already computed latest history entry, removing repeated Git commands and
+  a second count of the same revision.
+- Thin parser and summary tests were replaced by broader lifecycle and CLI
+  assertions. The baseline lifecycle covers acceptance, regression, overlapping
+  observations, environment/evidence mismatch, rejected evidence, archival,
+  fingerprint/version corruption, and current-artifact tampering. Self-contained
+  Rust probe fixtures cover relocated Cargo output, repeated resource/capacity
+  launches, counters, timeouts, truncated/invalid output, omitted scenarios,
+  successful publication, and continuation after failure. Session summary
+  assertions now exercise the actual CLI artifact instead of a duplicate unit
+  success test.
+
+### Trade-offs and validation
+
+The total source reduction is small: seven physical lines and eighteen nonblank
+lines. The executed suite is smaller by fourteen tests, but test/helper source
+grows by 52 lines to cover the previously untested baseline lifecycle and real
+probe processes. This is a reduction in test count, not test/helper source volume.
+All-function cyclomatic complexity rises 1,484 to 1,520 as these error paths gain
+coverage; all-function cognitive complexity falls 791 to 717 and effort falls
+8,355,329 to 8,235,553.
+
+Observed reuse improves slightly. Mean locality is essentially flat with a small
+decline: review orchestration now depends on the extracted inventory and shared
+statistics; evidence checks reuse the common array accessor. Responsibility
+placement and shared process ownership improve, but the aggregate locality score
+does not show a numerical win. These advisory scores are not proof of maintenance
+cost or runtime performance.
+
+`cargo fmt`, `cargo check --all-targets`, strict all-target Clippy, and all 71 tests
+pass. `rqlens verify` reports six passed gates, eight project-policy warnings,
+fourteen skipped optional checks, and no error-level failures. The warnings cover
+missing MSRV, license text, repository metadata, contribution instructions, code
+of conduct, Rust toolchain file, security instructions, and changelog.
+
+Static syntax metrics remain partial because the existing `thread_local!` in
+`provenance.rs` is not expanded by this tool. Identity uses Cargo metadata; no
+source files are missing or unparsable. Coverage includes test code and does not
+provide branch coverage. The fixture probes do not run Scratchpad's full workload
+suite or GUI. Artifact schemas and project budget authority are preserved; no
+Scratchpad or RustQualityLens source was changed.
+
+Reproduce from this repository, retaining the baseline directory:
+
+```sh
+nix develop ../rust-quality-lens --command cargo check --all-targets
+nix develop ../rust-quality-lens --command cargo clippy --all-targets -- -D warnings
+nix develop ../rust-quality-lens --command cargo test
+nix develop ../rust-quality-lens --command \
+  ../rust-quality-lens/target/campaign-tool-build/debug/rqlens measure all \
+  --config target/quality-review/refactor-2026-11-06/after.toml
+nix develop ../rust-quality-lens --command \
+  ../rust-quality-lens/target/campaign-tool-build/debug/rqlens verify \
+  --config target/quality-review/refactor-2026-11-06/after.toml
+```

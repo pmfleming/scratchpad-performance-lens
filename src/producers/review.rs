@@ -1,11 +1,12 @@
 mod coverage;
 mod evidence;
 mod health;
+mod inventory;
 mod registry;
 #[cfg(test)]
 mod scale_tests;
 
-use super::common::{scenarios_array, valid_frame, values_array, AnalysisInputs};
+use super::common::{mean_ms, scenarios_array, valid_frame, values_array, AnalysisInputs};
 use super::flamegraphs::fallback_flamegraphs;
 use super::render::render_performance_review;
 use crate::artifacts::capacity_report::{CapacityReportArtifact, CapacityScenario};
@@ -19,13 +20,33 @@ use crate::config::LensConfig;
 use crate::shared;
 use anyhow::{Context, Result};
 use evidence::{
-    mean_ms, over_budget_latency, payload_synthetic, resource_contract_failed, review_row_matches,
+    over_budget_latency, payload_synthetic, resource_contract_failed, review_row_matches,
     source_status, unique_rows,
 };
 use health::{promise_health, scale_checks, scenario_gaps, scenario_opportunities};
-pub use registry::validate as validate_registry;
+pub use inventory::validate as validate_registry;
 use registry::{probe_classes, promised_scale_payload, review_scenarios, ReviewScenario};
 use serde_json::{json, Value};
+
+/// Both coverage and scale dependencies participate in a promise-focused run.
+pub(super) fn required_probe_scenarios(capacity: bool) -> std::collections::BTreeSet<&'static str> {
+    let mut ids = std::collections::BTreeSet::new();
+    for promise in review_scenarios() {
+        ids.extend(if capacity {
+            promise.capacity_scenarios
+        } else {
+            promise.resource_scenarios
+        });
+        for target in promise.scale_targets {
+            ids.extend(if capacity {
+                target.capacity_scenarios
+            } else {
+                target.resource_scenarios
+            });
+        }
+    }
+    ids
+}
 
 pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
     let inputs = AnalysisInputs::new(config);
@@ -253,8 +274,8 @@ fn build_review_scenario(
     let resource_rows: Vec<_> = resources
         .iter()
         .filter(|row| {
-            row.get("scenario")
-                .and_then(Value::as_str)
+            row["scenario"]
+                .as_str()
                 .is_some_and(|id| scenario.resource_scenarios.contains(&id))
         })
         .cloned()
@@ -262,8 +283,8 @@ fn build_review_scenario(
     let profile_rows: Vec<_> = flamegraphs
         .iter()
         .filter(|row| {
-            row.get("id")
-                .and_then(Value::as_str)
+            row["id"]
+                .as_str()
                 .is_some_and(|id| scenario.profile_ids.contains(&id))
         })
         .cloned()
@@ -391,11 +412,7 @@ fn build_review_scenario(
                 available: Some(
                     profile_rows
                         .iter()
-                        .filter(|row| {
-                            row.get("available")
-                                .and_then(Value::as_bool)
-                                .unwrap_or(false)
-                        })
+                        .filter(|row| row["available"].as_bool().unwrap_or(false))
                         .count(),
                 ),
             },
@@ -413,9 +430,9 @@ fn build_review_scenario(
             .iter()
             .filter_map(|row| row.peak_working_set_bytes)
             .chain(resource_rows.iter().filter_map(|row| {
-                row.get("peak_working_set_bytes")
-                    .and_then(Value::as_i64)
-                    .or_else(|| row.get("max_working_set_bytes").and_then(Value::as_i64))
+                row["peak_working_set_bytes"]
+                    .as_i64()
+                    .or_else(|| row["max_working_set_bytes"].as_i64())
             }))
             .max(),
         evidence: ScenarioEvidence {

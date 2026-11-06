@@ -142,33 +142,30 @@ pub(in crate::producers) fn over_threshold(row: &Value) -> bool {
         return false;
     }
     let budget_probe_ms = budget_probe_ms(row).unwrap_or(0.0);
-    let threshold_ms = row
-        .get("threshold_ms")
-        .and_then(Value::as_f64)
-        .unwrap_or(0.0);
+    let threshold_ms = row["threshold_ms"].as_f64().unwrap_or(0.0);
     threshold_ms > 0.0 && budget_probe_ms > threshold_ms
 }
 
+pub(in crate::producers) fn mean_ms(row: &Value) -> Option<f64> {
+    row["mean_ms"]
+        .as_f64()
+        .or_else(|| row["mean_ns"].as_f64().map(|ns| ns / 1_000_000.0))
+}
+
 pub(in crate::producers) fn budget_probe_ms(row: &Value) -> Option<f64> {
-    row.get("p99_ms")
-        .and_then(Value::as_f64)
-        .or_else(|| row.get("p95_ms").and_then(Value::as_f64))
+    row["p99_ms"]
+        .as_f64()
+        .or_else(|| row["p95_ms"].as_f64())
         .or_else(|| {
-            row.get("budget_probe_ns")
-                .and_then(Value::as_f64)
+            row["budget_probe_ns"]
+                .as_f64()
                 .map(|value| value / 1_000_000.0)
         })
-        .or_else(|| {
-            row.get("mean_ms").and_then(Value::as_f64).or_else(|| {
-                row.get("mean_ns")
-                    .and_then(Value::as_f64)
-                    .map(|value| value / 1_000_000.0)
-            })
-        })
+        .or_else(|| mean_ms(row))
 }
 
 pub(in crate::producers) fn score_of(row: &Value) -> f64 {
-    row.get("score").and_then(Value::as_f64).unwrap_or(0.0)
+    row["score"].as_f64().unwrap_or(0.0)
 }
 
 #[cfg(test)]

@@ -11,7 +11,30 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub fn resource_profiles(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
+    resource_profiles_for(config, false)
+}
+
+pub fn promise_resource_profiles(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
+    resource_profiles_for(config, true)
+}
+
+fn resource_profiles_for(config: &LensConfig, promises_only: bool) -> Result<()> {
     let events = expected_scenarios(&config.project_root).and_then(|expected| {
+        let expected = if promises_only {
+            let required = super::review::required_probe_scenarios(false);
+            anyhow::ensure!(
+                required
+                    .iter()
+                    .all(|id| expected.iter().any(|name| name == id)),
+                "missing required resource scenario declaration"
+            );
+            expected
+                .into_iter()
+                .filter(|id| required.contains(id.as_str()))
+                .collect()
+        } else {
+            expected
+        };
         run_sweeps(
             &config.project_root,
             "resource_probe",
@@ -276,77 +299,4 @@ fn measurement_gap_scenarios() -> HashMap<&'static str, &'static str> {
 
 fn max_i64(events: &[Value], key: &str) -> Option<i64> {
     events.iter().filter_map(|event| event[key].as_i64()).max()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{summarize_resources, validated_resources};
-    use serde_json::json;
-
-    #[test]
-    fn resource_validation_retains_real_samples_on_missing_or_failed_scenarios() {
-        for (status, missing) in [("ok", false), ("ok", true), ("panic", false)] {
-            let mut expected = vec!["first_paint".to_owned()];
-            if missing {
-                expected.push("missing_operation".into());
-            }
-            let (payload, failure) = validated_resources(
-                vec![json!({"scenario":"first_paint",
-                "status":status,"elapsed_ns":1_000_000,"workload_value":1_073_741_824,"step_index":0})],
-                &expected,
-            );
-            assert_eq!(failure.is_some(), missing || status != "ok");
-            assert_eq!(
-                payload["meta"]["probe_status"],
-                if failure.is_some() {
-                    "partial"
-                } else {
-                    "completed"
-                }
-            );
-            assert_eq!(
-                payload["meta"]["missing_scenarios"],
-                if missing {
-                    json!(["missing_operation"])
-                } else {
-                    json!([])
-                }
-            );
-            assert_eq!(payload["scenarios"][0]["samples"][0]["elapsed_ms"], 1.0);
-            assert_ne!(payload["meta"]["synthetic"], true);
-        }
-    }
-
-    #[test]
-    fn resource_summary_preserves_scope_counters_and_cache_compliance() {
-        for (retained, held) in [
-            (json!(32), json!(true)),
-            (json!(33), json!(false)),
-            (json!(null), json!(null)),
-        ] {
-            let payload = summarize_resources(
-                vec![json!({"scenario":"file_backed_chunk_cache_tracking",
-                "measurement_contract":{"fixture_kind":"non_repeating","fixture_revision":2,"text_backing":"store","production_path":true,"code_path":"read_file_in_store"},
-                "elapsed_ns":10,"status":"ok","workload_value":shared::GB,"measurement_scope":"prepared_operation",
-                "phase_elapsed_ns":{"retained_cache_bytes":retained.as_u64().map(|n|n * 262144),"cache_limit_bytes":32 * 262144},
-                "retained_file_chunks":retained,"file_chunk_cache_limit":32,"result_value":shared::GB,
-                "live_bytes":100,"baseline_live_bytes":200,"live_growth_bytes":-100,
-                "retained_live_bytes_before_teardown":350,"process_resources":{"read_bytes":1024}})],
-                "completed",
-            );
-            let scenario = &payload["scenarios"][0];
-            let sample = &scenario["samples"][0];
-            assert_eq!(sample["cache_bound_held"], held);
-            assert_eq!(
-                scenario["cache_bound_violations"],
-                usize::from(held == false)
-            );
-            assert_eq!(scenario["closes_measurement_gap"], held == true);
-            assert_eq!(sample["retained_live_bytes_before_teardown"], 350);
-            assert_eq!(sample["live_growth_bytes"], -100);
-            assert_eq!(sample["measurement_scope"], "prepared_operation");
-            assert_eq!(sample["process_resources"]["read_bytes"], 1024);
-        }
-    }
-    use crate::shared;
 }

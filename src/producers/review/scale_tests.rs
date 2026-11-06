@@ -119,3 +119,31 @@ fn session_promise_uses_real_resource_output_and_separate_latency_budgets() {
         }
     }
 }
+#[test]
+fn every_scale_dependency_is_in_the_promises_evidence_inventory() {
+    for promise in super::registry::review_scenarios() {
+        for target in promise.scale_targets {
+            for (kind, required, collected) in [
+                (
+                    "capacity",
+                    target.capacity_scenarios,
+                    promise.capacity_scenarios,
+                ),
+                (
+                    "resource",
+                    target.resource_scenarios,
+                    promise.resource_scenarios,
+                ),
+            ] {
+                for id in required {
+                    assert!(
+                        collected.contains(id),
+                        "{} scale {} requires {kind} {id}, but its evidence is not collected",
+                        promise.id,
+                        target.id
+                    );
+                }
+            }
+        }
+    }
+}

@@ -128,7 +128,8 @@ fn summarize(text: &str, launch: u8, contract: &Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use anyhow::Result;
+    use serde_json::{json, Value};
     const SCENARIOS: &[&str] = &[
         "stored_usage",
         "closed_token_lookup",
@@ -172,20 +173,6 @@ mod tests {
         }
         assert!(super::summarize(&lines(&rows), 0, &declaration).is_ok());
         assert!(super::summarize(&lines(&rows), 0, &contract()).is_err());
-    }
-    #[test]
-    fn summarizes_each_scenario_without_inventing_io_or_budgets() {
-        let result = summarize(&lines(&samples()), 2).unwrap();
-        assert_eq!(result["launch"], 2);
-        assert_eq!(
-            result["scenarios"].as_array().unwrap().len(),
-            SCENARIOS.len()
-        );
-        for row in result["scenarios"].as_array().unwrap() {
-            assert_eq!(row["median_elapsed_ms"], 3.0);
-            assert_eq!(row["median_snapshot_bytes_hashed"], 65536);
-            assert!(row["median_write_bytes"].is_null());
-        }
     }
     #[test]
     fn rejects_incomplete_failed_duplicate_wrong_fixture_and_missing_metrics() {

@@ -55,7 +55,7 @@ pub fn import_fixture_valid(event: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::eligible;
     use serde_json::json;
     #[test]
     fn dedup_fixtures_and_disproportionately_small_imports_are_not_proof() {

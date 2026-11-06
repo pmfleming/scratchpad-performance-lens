@@ -7,9 +7,8 @@ use std::{
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
-    thread,
-    time::{Duration, Instant},
+    process::Command,
+    time::Duration,
 };
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
@@ -176,34 +175,20 @@ fn run_probe(
 ) -> Result<()> {
     // Direct-to-file output cannot deadlock on a full pipe and preserves evidence
     // on failure/timeout without buffering an unbounded subprocess in memory.
-    let mut child = Command::new(binary)
-        .arg(flag)
-        .stdin(Stdio::null())
-        .stdout(File::create_new(stdout)?)
-        .stderr(File::create_new(stderr)?)
-        .spawn()
-        .with_context(|| format!("start {}", binary.display()))?;
-    let started = Instant::now();
-    let result = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Ok(status),
-            Err(error) => break Err(error.into()),
-            Ok(None) if started.elapsed() >= timeout => {
-                break Err(anyhow::anyhow!(
-                    "probe timed out after {} seconds",
-                    timeout.as_secs_f64()
-                ));
-            }
-            Ok(None) => thread::sleep(Duration::from_millis(10)),
-        }
-    };
-    // Reap the process on every error path. No background probe should outlive a
-    // failed run and contaminate subsequent measurements.
-    if result.is_err() {
-        let _ = child.kill();
-        let _ = child.wait();
-    }
-    let status = result?;
+    let exit = crate::process::run(
+        Command::new(binary)
+            .arg(flag)
+            .stdout(File::create_new(stdout)?)
+            .stderr(File::create_new(stderr)?),
+        timeout,
+    )
+    .with_context(|| format!("start {}", binary.display()))?;
+    ensure!(
+        !exit.timed_out,
+        "probe timed out after {} seconds",
+        timeout.as_secs_f64()
+    );
+    let status = exit.status;
     ensure!(
         status.success(),
         "probe exited with {status}; see {}",

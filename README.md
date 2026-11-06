@@ -48,6 +48,14 @@ Run the standard producer set:
 cargo run --bin splens -- measure all --config splens.toml
 ```
 
+For development cycles focused on the seven promises, use `measure promises`.
+It runs the same Criterion suites, frames, production search workflows, and
+reports, with capacity/resource scenarios selected from the union of the promise
+coverage and scale requirements. All required workload sizes and repetitions
+remain unchanged. It omits unrelated capacity/resource diagnostics and code
+history analysis. `measure all` retains the complete diagnostic suite. Use separate
+output directories to retain both runs; each command replaces selected artifacts.
+
 Export artifact schemas:
 
 ```console
@@ -271,6 +279,14 @@ standalone probes such as `search-workflows`, capacity, resources, or frames.
 `--fail-on-slow` applies only to slowspots/search, and `--index-only` applies
 only to flamegraphs; the CLI rejects either flag when no selected producer can
 use it.
+
+Each measurement invocation writes `measure_run.json` with per-producer wall
+time, execution status, errors, and whether Criterion cache reuse was requested.
+The report is updated between producers, so an interrupted run retains its
+completed costs and identifies the active producer. These costs include build,
+fixture setup, probes, and reporting; they are diagnostics for improving the
+lens, not application latency or promise evidence. A completed execution still
+does not imply that performance budgets passed.
 
 ```console
 cargo run --bin splens -- measure search --skip-bench --config examples/scratchpad.toml

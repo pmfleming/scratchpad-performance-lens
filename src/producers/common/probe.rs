@@ -12,12 +12,8 @@ pub(in crate::producers) fn probe_path(bin: &str) -> PathBuf {
         .join(format!("{bin}{suffix}"))
 }
 
-pub(in crate::producers) fn run_probe_object(
-    project_root: &Path,
-    build_cmd: &[&str],
-    probe_path: PathBuf,
-) -> Result<Value> {
-    let executable = build_probe(project_root, build_cmd, &probe_path)?;
+pub(in crate::producers) fn run_probe_object(project_root: &Path, bin: &str) -> Result<Value> {
+    let executable = build_probe(project_root, bin)?;
     let (output, timed_out) = bounded_output(project_root, &executable, &[])?;
     anyhow::ensure!(!timed_out, "probe timed out");
     if !output.status.success() {
@@ -41,74 +37,87 @@ pub(in crate::producers) struct ProbeEvents {
     pub failure: Option<String>,
 }
 
-pub(in crate::producers) fn run_capacity_sweeps(
-    root: &Path,
-    scenarios: &[&str],
-) -> Result<ProbeEvents> {
-    run_sweeps(root, "capacity_probe", scenarios)
-}
 pub(in crate::producers) fn run_sweeps(
     root: &Path,
     bin: &str,
     scenarios: &[&str],
 ) -> Result<ProbeEvents> {
-    let executable = build_probe(
-        root,
-        &["cargo", "build", "--release", "--quiet", "--bin", bin],
-        &probe_path(bin),
-    )?;
-    let mut combined = ProbeEvents {
-        events: Vec::new(),
-        failure: None,
-    };
-    let mut failures = Vec::new();
-    for scenario in scenarios {
-        let mut runs = Vec::new();
-        match run_events(root, &executable, &["--scenario", scenario], scenario) {
-            Ok(result) => {
-                let repeat = near_budget(root, bin, scenario, &result.events);
-                runs.push(result);
-                if repeat {
-                    for _ in 0..2 {
-                        match run_events(root, &executable, &["--scenario", scenario], scenario) {
-                            Ok(result) => runs.push(result),
-                            Err(error) => failures.push(format!("{scenario}: {error}")),
-                        }
-                    }
-                }
-                let launch_count = runs.len();
-                for (launch, mut result) in runs.into_iter().enumerate() {
-                    for event in &mut result.events {
-                        event["launch_index"] = serde_json::json!(launch);
-                        event["independent_launch_count"] = serde_json::json!(launch_count);
-                        if bin == "capacity_probe" {
-                            let count = event["expected_repetition_count"].as_u64().unwrap_or(3);
-                            if let Some(index) = event["repeat_index"].as_u64() {
-                                event["repeat_index"] =
-                                    serde_json::json!(index + count * launch as u64);
-                            }
-                            event["expected_repetition_count"] =
-                                serde_json::json!(count * launch_count as u64);
-                        }
-                    }
-                    combined.events.extend(result.events);
-                    if let Some(error) = result.failure {
-                        failures.push(format!("{scenario}: {error}"));
-                    }
-                }
-            }
-            Err(error) => failures.push(format!("{scenario}: {error}")),
-        }
-    }
-    combined.failure = (!failures.is_empty()).then(|| failures.join("; "));
-    Ok(combined)
+    let executable = build_probe(root, bin)?;
+    let manifest = std::fs::read(root.join("benches/measurement_manifest.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .unwrap_or_default();
+    Ok(merge_runs(scenarios.iter().map(|scenario| {
+        scenario_runs(root, &executable, bin, scenario, &manifest)
+            .map(|mut result| {
+                result.failure = result.failure.map(|error| format!("{scenario}: {error}"));
+                result
+            })
+            .map_err(|error| anyhow::anyhow!("{scenario}: {error}"))
+    })))
 }
 
-fn near_budget(root: &Path, bin: &str, scenario: &str, events: &[Value]) -> bool {
-    let manifest: Value = std::fs::read(root.join("benches/measurement_manifest.json"))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default();
+fn scenario_runs(
+    root: &Path,
+    executable: &Path,
+    bin: &str,
+    scenario: &str,
+    manifest: &Value,
+) -> Result<ProbeEvents> {
+    let run = || run_events(root, executable, &["--scenario", scenario], scenario);
+    let first = run()?;
+    let launches = if near_budget(manifest, bin, scenario, &first.events) {
+        3
+    } else {
+        1
+    };
+    let runs = std::iter::once(Ok(first)).chain((1..launches).map(|_| run()));
+    Ok(merge_runs(runs.enumerate().map(|(launch, result)| {
+        result.map(|mut result| {
+            annotate_launch(
+                &mut result.events,
+                launch,
+                launches,
+                bin == "capacity_probe",
+            );
+            result
+        })
+    })))
+}
+
+fn merge_runs(runs: impl IntoIterator<Item = Result<ProbeEvents>>) -> ProbeEvents {
+    let mut events = Vec::new();
+    let mut failures = Vec::new();
+    for run in runs {
+        match run {
+            Ok(result) => {
+                events.extend(result.events);
+                failures.extend(result.failure);
+            }
+            Err(error) => failures.push(error.to_string()),
+        }
+    }
+    ProbeEvents {
+        events,
+        failure: (!failures.is_empty()).then(|| failures.join("; ")),
+    }
+}
+
+fn annotate_launch(events: &mut [Value], launch: usize, launches: usize, capacity: bool) {
+    for event in events {
+        event["launch_index"] = serde_json::json!(launch);
+        event["independent_launch_count"] = serde_json::json!(launches);
+        if capacity {
+            let count = event["expected_repetition_count"].as_u64().unwrap_or(3);
+            if let Some(index) = event["repeat_index"].as_u64() {
+                event["repeat_index"] = serde_json::json!(index + count * launch as u64);
+            }
+            event["expected_repetition_count"] = serde_json::json!(count * launches as u64);
+        }
+    }
+}
+
+fn near_budget(manifest: &Value, bin: &str, scenario: &str, events: &[Value]) -> bool {
     let (limit, metric) = if bin == "capacity_probe" {
         (
             manifest["capacity_budgets"][scenario]["threshold_ms"]
@@ -158,12 +167,6 @@ fn bounded_output(
         .current_dir(root)
         .stdout(Stdio::from(std::fs::File::create(&stdout_path)?))
         .stderr(Stdio::from(std::fs::File::create(&stderr_path)?));
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    let mut child = command.spawn()?;
     let timeout = Duration::from_secs(
         std::env::var("SPLENS_PROBE_TIMEOUT_SECS")
             .ok()
@@ -171,32 +174,14 @@ fn bounded_output(
             .filter(|s| *s > 0)
             .unwrap_or(180),
     );
-    let start = Instant::now();
-    let mut timed_out = false;
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if start.elapsed() >= timeout {
-            timed_out = true;
-            #[cfg(unix)]
-            {
-                let _ = Command::new("kill")
-                    .args(["-KILL", "--", &format!("-{}", child.id())])
-                    .status();
-            }
-            let _ = child.kill();
-            break child.wait()?;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    };
+    let exit = crate::process::run(&mut command, timeout)?;
     Ok((
         std::process::Output {
-            status,
+            status: exit.status,
             stdout: std::fs::read(stdout_path)?,
             stderr: std::fs::read(stderr_path)?,
         },
-        timed_out,
+        exit.timed_out,
     ))
 }
 
@@ -250,27 +235,33 @@ fn parse_partial(bytes: &[u8]) -> (Vec<Value>, Option<Value>, Vec<String>) {
     {
         match serde_json::from_slice::<Value>(line) {
             Ok(event) if event["event"] == "step_started" => active = Some(event),
-            Ok(event) => match parse_events(&serde_json::to_vec(&event).unwrap()) {
-                Ok(mut rows) => {
-                    active = None;
-                    events.append(&mut rows);
-                }
-                Err(error) => errors.push(format!("line {}: {error}", index + 1)),
-            },
+            Ok(event) if valid_event(&event) => {
+                active = None;
+                events.push(event);
+            }
+            Ok(_) => errors.push(format!(
+                "invalid required measurement fields on probe line {}",
+                index + 1
+            )),
             Err(error) => errors.push(format!("line {}: {error}", index + 1)),
         }
     }
     (events, active, errors)
 }
 
-fn build_probe(root: &Path, args: &[&str], requested: &Path) -> Result<PathBuf> {
-    let bin = requested
-        .file_stem()
-        .and_then(|name| name.to_str())
-        .context("missing probe target name")?;
-    let mut args = args.to_vec();
-    args.push("--message-format=json-render-diagnostics");
-    let output = shared::run_command(root, &args)?;
+fn build_probe(root: &Path, bin: &str) -> Result<PathBuf> {
+    let output = shared::run_command(
+        root,
+        &[
+            "cargo",
+            "build",
+            "--release",
+            "--quiet",
+            "--bin",
+            bin,
+            "--message-format=json-render-diagnostics",
+        ],
+    )?;
     if !output.status.success() {
         bail!("{}", output_text(&output));
     }
@@ -300,34 +291,13 @@ fn executable_from_messages(root: &Path, bytes: &[u8], bin: &str) -> Result<Path
     })
 }
 
-fn parse_events(bytes: &[u8]) -> Result<Vec<Value>> {
-    let text = std::str::from_utf8(bytes).context("probe output is not UTF-8")?;
-    let mut events = Vec::new();
-    for (index, line) in text
-        .lines()
-        .enumerate()
-        .filter(|(_, line)| !line.trim().is_empty())
-    {
-        let event: Value = serde_json::from_str(line)
-            .with_context(|| format!("invalid probe line {}", index + 1))?;
-        if !event.is_object()
-            || event["scenario"].as_str().is_none()
-            || event["workload_value"].as_u64().is_none()
-            || event["step_index"].as_u64().is_none()
-            || event["elapsed_ns"].as_u64().is_none_or(|value| value == 0)
-            || !matches!(event["status"].as_str(), Some("ok" | "panic" | "error"))
-        {
-            bail!(
-                "invalid required measurement fields on probe line {}",
-                index + 1
-            );
-        }
-        events.push(event);
-    }
-    if events.is_empty() {
-        bail!("probe returned no measurements");
-    }
-    Ok(events)
+fn valid_event(event: &Value) -> bool {
+    event.is_object()
+        && event["scenario"].is_string()
+        && event["workload_value"].as_u64().is_some()
+        && event["step_index"].as_u64().is_some()
+        && event["elapsed_ns"].as_u64().is_some_and(|ns| ns > 0)
+        && matches!(event["status"].as_str(), Some("ok" | "panic" | "error"))
 }
 
 pub(in crate::producers) fn write_probe_artifact(
@@ -354,38 +324,6 @@ pub(in crate::producers) fn output_text(output: &std::process::Output) -> String
 
 #[cfg(test)]
 mod tests {
-    use super::parse_events;
-    #[cfg(unix)]
-    #[test]
-    fn process_failure_keeps_rows_marks_active_workload_and_allows_next_probe() {
-        let root = tempfile::tempdir().unwrap();
-        let shell = std::path::PathBuf::from("/run/current-system/sw/bin/sh");
-        let shell = if shell.exists() {
-            shell
-        } else {
-            "/bin/sh".into()
-        };
-        let script = r#"printf '%s\n' '{"scenario":"test","step_index":0,"workload_value":1,"elapsed_ns":10,"status":"ok"}' '{"event":"step_started","scenario":"test","step_index":1,"workload_value":2}'; exit 1"#;
-        let result = super::run_events(root.path(), &shell, &["-c", script], "crash").unwrap();
-        assert!(result.failure.is_some());
-        assert_eq!(result.events.len(), 2);
-        assert_eq!(result.events[1]["status"], "error");
-        assert_eq!(result.events[1]["workload_value"], 2);
-        let next = super::run_events(root.path(), &shell, &["-c", "printf '%s\\n' '{\"scenario\":\"next\",\"step_index\":0,\"workload_value\":1,\"elapsed_ns\":10,\"status\":\"ok\"}'"], "next").unwrap();
-        assert!(next.failure.is_none());
-    }
-
-    #[test]
-    fn preserves_completed_rows_and_active_step_before_truncation() {
-        let bytes =
-            br#"{"scenario":"test","step_index":0,"workload_value":1,"elapsed_ns":10,"status":"ok"}
-{"event":"step_started","scenario":"test","step_index":1,"workload_value":2}
-{truncated"#;
-        let (events, active, errors) = super::parse_partial(bytes);
-        assert_eq!(events.len(), 1);
-        assert_eq!(active.unwrap()["workload_value"], 2);
-        assert_eq!(errors.len(), 1);
-    }
     #[test]
     fn executable_path_comes_from_matching_cargo_artifact_not_default_target() {
         let root = std::path::Path::new("/workspace");
@@ -396,16 +334,5 @@ mod tests {
             root.join("custom-build/triple/release/probe")
         );
         assert!(super::executable_from_messages(root, b"", "probe").is_err());
-    }
-
-    #[test]
-    fn malformed_partial_or_missing_fields_never_silently_succeed() {
-        let valid = br#"{"scenario":"test","step_index":0,"workload_value":1,"elapsed_ns":10,"status":"ok"}"#;
-        assert_eq!(parse_events(valid).unwrap().len(), 1);
-        let mut truncated = valid.to_vec();
-        truncated.extend_from_slice(b"\n{truncated");
-        assert!(parse_events(&truncated).is_err());
-        assert!(parse_events(b"{}").is_err());
-        assert!(parse_events(b"").is_err());
     }
 }

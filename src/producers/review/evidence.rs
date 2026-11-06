@@ -1,4 +1,4 @@
-use super::super::common::budget_probe_ms;
+use super::super::common::{budget_probe_ms, values_array};
 use super::registry::ReviewScenario;
 use crate::artifacts::performance_review::SourceArtifactStatus;
 use crate::config::LensConfig;
@@ -47,33 +47,16 @@ pub(super) fn over_budget_latency(row: &&Value) -> bool {
 
 pub(super) fn resource_contract_failed(row: &Value) -> bool {
     row["budget_status"] == "fail"
-        || row["samples"]
-            .as_array()
-            .is_some_and(|samples| samples.iter().any(|s| s["fixture_valid"] == false))
-        || row.get("cache_bound_held").and_then(Value::as_bool) == Some(false)
-        || row
-            .get("cache_bound_violations")
-            .and_then(Value::as_u64)
-            .is_some_and(|violations| violations > 0)
-        || row
-            .get("samples")
-            .and_then(Value::as_array)
-            .is_some_and(|samples| {
-                samples.iter().any(|sample| {
-                    sample
-                        .get("status")
-                        .and_then(Value::as_str)
-                        .is_some_and(|status| status != "ok")
-                })
-            })
-}
-
-pub(super) fn mean_ms(row: &Value) -> Option<f64> {
-    row.get("mean_ms").and_then(Value::as_f64).or_else(|| {
-        row.get("mean_ns")
-            .and_then(Value::as_f64)
-            .map(|value| value / 1_000_000.0)
-    })
+        || row["cache_bound_held"] == false
+        || row["cache_bound_violations"]
+            .as_u64()
+            .is_some_and(|count| count > 0)
+        || values_array(&row["samples"]).iter().any(|sample| {
+            sample["fixture_valid"] == false
+                || sample["status"]
+                    .as_str()
+                    .is_some_and(|status| status != "ok")
+        })
 }
 
 pub(super) fn unique_rows(rows: Vec<Value>) -> Vec<Value> {

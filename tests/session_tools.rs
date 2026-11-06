@@ -123,6 +123,20 @@ fn write_measurement_contract(root: &std::path::Path) -> anyhow::Result<()> {
 }
 
 #[cfg(unix)]
+fn measurement_command(kind: &str, binary: &Path, archive: &Path, launches: u8) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_splens"));
+    command
+        .arg(kind)
+        .arg("--binary")
+        .arg(binary)
+        .arg("--output")
+        .arg(archive)
+        .arg("--launches")
+        .arg(launches.to_string());
+    command
+}
+
+#[cfg(unix)]
 #[test]
 fn maintenance_cli_runs_the_selected_probe_and_requires_all_scenarios() -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -139,15 +153,8 @@ fn maintenance_cli_runs_the_selected_probe_and_requires_all_scenarios() -> anyho
     fs::write(&binary, format!("#!/bin/sh\ntest \"$1\" = --session-maintenance || exit 2\ncat <<'SAMPLES'\n{samples}\nSAMPLES\n"))?;
     fs::set_permissions(&binary, fs::Permissions::from_mode(0o755))?;
     let archive = dir.path().join("archive");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_splens"));
-    let output = command
-        .arg("measure-session-maintenance")
-        .arg("--binary")
-        .arg(&binary)
-        .arg("--output")
-        .arg(&archive)
-        .args(["--launches", "1"])
-        .output()?;
+    let mut command = measurement_command("measure-session-maintenance", &binary, &archive, 1);
+    let output = command.output()?;
     assert!(
         output.status.success(),
         "{}",
@@ -155,10 +162,12 @@ fn maintenance_cli_runs_the_selected_probe_and_requires_all_scenarios() -> anyho
     );
     let summary: Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(summary[0]["scenarios"].as_array().unwrap().len(), 6);
-    assert_eq!(
-        summary[0]["scenarios"][3]["median_snapshot_bytes_hashed"],
-        65536
-    );
+    assert_eq!(summary[0]["launch"], 0);
+    for row in summary[0]["scenarios"].as_array().unwrap() {
+        assert_eq!(row["median_elapsed_ms"], 3.0);
+        assert_eq!(row["median_snapshot_bytes_hashed"], 65536);
+        assert!(row["median_write_bytes"].is_null());
+    }
     let metadata: Value = serde_json::from_slice(&fs::read(archive.join("metadata.json"))?)?;
     assert_eq!(metadata["probe_flag"], "--session-maintenance");
     assert!(!command.output()?.status.success());
@@ -187,15 +196,8 @@ fn dirty_save_cli_archives_independent_launches_and_refuses_overwrite() -> anyho
     fs::write(&binary, format!("#!/bin/sh\ntest \"$1\" = --large-dirty-save || exit 2\necho $$ >> '{}'\nprintf diagnostic >&2\ncat <<'SAMPLES'\n{samples}\nSAMPLES\n", pids_path.display()))?;
     fs::set_permissions(&binary, fs::Permissions::from_mode(0o755))?;
     let archive = dir.path().join("archive");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_splens"));
-    let output = command
-        .arg("measure-large-dirty-save")
-        .arg("--binary")
-        .arg(&binary)
-        .arg("--output")
-        .arg(&archive)
-        .args(["--launches", "3"])
-        .output()?;
+    let mut command = measurement_command("measure-large-dirty-save", &binary, &archive, 3);
+    let output = command.output()?;
     assert!(
         output.status.success(),
         "{}",

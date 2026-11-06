@@ -26,34 +26,31 @@ pub(super) fn attach(root: &Path, events: &mut [Value]) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn status(sample: &Value) -> &'static str {
+fn observation(sample: &Value) -> Option<(f64, f64)> {
     let budget = &sample["resource_budget"];
-    if budget["authoritative"] != true {
+    let value = sample
+        .pointer(budget["metric"].as_str()?)?
+        .as_f64()
+        .filter(|value| value.is_finite() && *value >= 0.0)?;
+    let limit = budget["max"]
+        .as_f64()
+        .filter(|limit| limit.is_finite() && *limit > 0.0)?;
+    Some((value, limit))
+}
+
+pub(super) fn status(sample: &Value) -> &'static str {
+    if sample["resource_budget"]["authoritative"] != true {
         return "unbudgeted";
     }
-    let Some(metric) = budget["metric"]
-        .as_str()
-        .and_then(|path| sample.pointer(path))
-        .and_then(Value::as_f64)
-        .filter(|value| value.is_finite() && *value >= 0.0)
-    else {
-        return "invalid";
-    };
-    let Some(limit) = budget["max"]
-        .as_f64()
-        .filter(|limit| limit.is_finite() && *limit > 0.0)
-    else {
-        return "invalid";
-    };
-    if metric > limit {
-        "fail"
-    } else {
-        "pass"
+    match observation(sample) {
+        Some((value, limit)) if value > limit => "fail",
+        Some(_) => "pass",
+        None => "invalid",
     }
 }
 
 /// Preserve uncertainty when independent observations straddle the limit.
-pub(super) fn group_status(samples: &[Value]) -> &'static str {
+pub(super) fn group_status<'a>(samples: impl IntoIterator<Item = &'a Value>) -> &'static str {
     let mut groups: std::collections::BTreeMap<String, Vec<&Value>> =
         std::collections::BTreeMap::new();
     for sample in samples {
@@ -65,35 +62,44 @@ pub(super) fn group_status(samples: &[Value]) -> &'static str {
     if groups.is_empty() {
         return "unmeasured";
     }
-    let mut uncertain = false;
-    for group in groups.values() {
-        if group
-            .iter()
-            .any(|sample| matches!(status(sample), "invalid" | "unbudgeted"))
-        {
-            return "unbudgeted";
-        }
-        let budget = &group[0]["resource_budget"];
-        if group
-            .iter()
-            .any(|sample| &sample["resource_budget"] != budget)
-        {
-            return "invalid";
-        }
-        let metric = budget["metric"].as_str().unwrap();
-        let limit = budget["max"].as_f64().unwrap();
-        let mut values: Vec<_> = group
-            .iter()
-            .map(|sample| sample.pointer(metric).and_then(Value::as_f64).unwrap())
-            .collect();
-        values.sort_by(f64::total_cmp);
-        let median = (values[values.len() / 2] + values[(values.len() - 1) / 2]) / 2.0;
-        if median > limit {
-            return "fail";
-        }
-        uncertain |= values.last().is_some_and(|v| *v > limit);
+    match groups
+        .values()
+        .try_fold(false, |uncertain, group| match workload_status(group) {
+            "pass" => Ok(uncertain),
+            "uncertain" => Ok(true),
+            failure => Err(failure),
+        }) {
+        Ok(true) => "uncertain",
+        Ok(false) => "pass",
+        Err(failure) => failure,
     }
-    if uncertain {
+}
+
+fn workload_status(group: &[&Value]) -> &'static str {
+    let parsed: Option<Vec<_>> = group
+        .iter()
+        .filter(|sample| sample["resource_budget"]["authoritative"] == true)
+        .map(|sample| observation(sample))
+        .collect();
+    let Some(parsed) = parsed.filter(|parsed| parsed.len() == group.len()) else {
+        return "unbudgeted";
+    };
+    let Some(first) = group.first() else {
+        return "unmeasured";
+    };
+    if group
+        .iter()
+        .any(|sample| sample["resource_budget"] != first["resource_budget"])
+    {
+        return "invalid";
+    }
+    let mut values: Vec<_> = parsed.iter().map(|(value, _)| *value).collect();
+    values.sort_by(f64::total_cmp);
+    let limit = parsed[0].1;
+    let median = (values[values.len() / 2] + values[(values.len() - 1) / 2]) / 2.0;
+    if median > limit {
+        "fail"
+    } else if values.last().is_some_and(|value| *value > limit) {
         "uncertain"
     } else {
         "pass"
@@ -102,36 +108,28 @@ pub(super) fn group_status(samples: &[Value]) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{group_status, status};
+    use serde_json::{json, Value};
     #[test]
-    fn repeated_borderline_work_keeps_uncertainty_and_never_selects_the_fastest_sample() {
-        let sample = |n| {
-            json!({"workload_value":10000,"elapsed_ns":n,
-            "resource_budget":{"metric":"/elapsed_ns","max":100,"authoritative":true}})
-        };
-        assert_eq!(
-            super::group_status(&[sample(90), sample(95), sample(110)]),
-            "uncertain"
-        );
-        assert_eq!(
-            super::group_status(&[sample(90), sample(110), sample(120)]),
-            "fail"
-        );
-        assert_eq!(
-            super::group_status(&[sample(80), sample(90), sample(95)]),
-            "pass"
-        );
-    }
-    #[test]
-    fn first_save_cannot_pass_on_workload_alone_or_on_another_operations_budget() {
-        let mut sample = json!({"elapsed_ns":5_200_000_000u64,"phase_elapsed_ns":{"save_ns":10}});
-        assert_eq!(status(&sample), "unbudgeted");
-        sample["resource_budget"] =
-            json!({"metric":"/elapsed_ns","max":180_000_000,"authoritative":true});
-        assert_eq!(status(&sample), "fail");
-        sample["elapsed_ns"] = json!(100_000_000);
-        assert_eq!(status(&sample), "pass");
-        sample["resource_budget"]["metric"] = json!("/missing");
-        assert_eq!(status(&sample), "invalid");
+    fn budgets_keep_uncertainty_and_cannot_select_the_fastest_observation() {
+        let sample = |n| json!({"workload_value":10000,"elapsed_ns":n,"resource_budget":{"metric":"/elapsed_ns","max":100,"authoritative":true}});
+        for (times, expected) in [
+            ([90, 95, 110], "uncertain"),
+            ([90, 110, 120], "fail"),
+            ([80, 90, 95], "pass"),
+        ] {
+            assert_eq!(
+                group_status(times.iter().map(|n| sample(*n)).collect::<Vec<_>>().iter()),
+                expected
+            );
+        }
+        let mut row = sample(5200);
+        assert_eq!(status(&row), "fail");
+        row["elapsed_ns"] = json!(10);
+        assert_eq!(status(&row), "pass");
+        row["resource_budget"]["metric"] = json!("/missing");
+        assert_eq!(status(&row), "invalid");
+        row["resource_budget"] = Value::Null;
+        assert_eq!(status(&row), "unbudgeted");
     }
 }

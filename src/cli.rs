@@ -8,6 +8,8 @@ use serde_json::json;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+mod run_report;
+
 type ProducerRun = fn(&LensConfig, MeasureOptions) -> Result<()>;
 
 const PRODUCERS: &[ProducerSpec] = &[
@@ -76,6 +78,19 @@ const PRODUCERS: &[ProducerSpec] = &[
         &[],
     ),
 ];
+
+static PROMISE_CAPACITY: ProducerSpec = ProducerSpec::new(
+    "capacity",
+    "capacity_report.json",
+    producers::promise_capacity_report,
+    &[],
+);
+static PROMISE_RESOURCES: ProducerSpec = ProducerSpec::new(
+    "resources",
+    "resource_profiles.json",
+    producers::promise_resource_profiles,
+    &[],
+);
 
 #[derive(Clone, Copy, Debug)]
 struct ProducerSpec {
@@ -155,7 +170,7 @@ struct MeasureArgs {
 
 fn measure_selection_values() -> PossibleValuesParser {
     PossibleValuesParser::new(
-        ["all", "all-with-flamegraphs"]
+        ["all", "promises", "all-with-flamegraphs"]
             .into_iter()
             .chain(PRODUCERS.iter().map(|producer| producer.tool)),
     )
@@ -267,12 +282,16 @@ fn measure(args: MeasureArgs) -> Result<()> {
     };
     let selected = selected_producers(&args.tool);
     validate_measure_options(&selected, options)?;
+    let mut run_report = run_report::RunReport::start(&config.output_dir, &args.tool, &selected)?;
 
     if matches!(
         args.tool.as_str(),
-        "all" | "all-with-flamegraphs" | "performance-review"
+        "all" | "promises" | "all-with-flamegraphs" | "performance-review"
     ) {
-        producers::validate_registry(&config.project_root)?;
+        if let Err(error) = producers::validate_registry(&config.project_root) {
+            run_report.abort(&error)?;
+            return Err(error);
+        }
     }
     let mut failures = Vec::new();
     let mut completed_benchmarks = HashSet::new();
@@ -286,7 +305,22 @@ fn measure(args: MeasureArgs) -> Result<()> {
         {
             producer_options.skip_bench = true;
         }
+        run_report.begin(producer, producer_options)?;
+        eprintln!("Starting {}...", producer.tool);
+        let start = std::time::Instant::now();
         let result = run_producer(&config, producer, producer_options);
+        let elapsed = start.elapsed();
+        run_report.finish(producer, elapsed, &result)?;
+        eprintln!(
+            "{} finished in {:.2}s ({})",
+            producer.tool,
+            elapsed.as_secs_f64(),
+            if result.is_ok() {
+                "completed"
+            } else {
+                "failed"
+            }
+        );
         match result {
             Ok(()) => {
                 if !options.skip_bench {
@@ -299,6 +333,7 @@ fn measure(args: MeasureArgs) -> Result<()> {
             }
         }
     }
+    run_report.complete(failures.is_empty())?;
     if !failures.is_empty() {
         bail!(
             "{} measure producer(s) failed:\n- {}",
@@ -344,6 +379,15 @@ fn run_producer(
 
 fn selected_producers(selection: &str) -> Vec<&'static ProducerSpec> {
     match selection {
+        "promises" => PRODUCERS
+            .iter()
+            .filter(|producer| producer.standard_run && producer.tool != "project-code")
+            .map(|producer| match producer.tool {
+                "capacity" => &PROMISE_CAPACITY,
+                "resources" => &PROMISE_RESOURCES,
+                _ => producer,
+            })
+            .collect(),
         "all" => PRODUCERS
             .iter()
             .filter(|producer| producer.standard_run)
@@ -383,6 +427,27 @@ mod tests {
     use super::{run_producer, LensConfig, MeasureOptions, ProducerSpec};
     use crate::provenance;
     use anyhow::{bail, Result};
+
+    #[test]
+    fn promise_run_keeps_measurements_and_reports_in_dependency_order() {
+        let selected = super::selected_producers("promises");
+        assert_eq!(
+            selected.iter().map(|p| p.tool).collect::<Vec<_>>(),
+            [
+                "slowspots",
+                "frame-metrics",
+                "search",
+                "search-workflows",
+                "capacity",
+                "resources",
+                "speed-report",
+                "performance-review"
+            ]
+        );
+        assert!(std::ptr::eq(selected[4], &super::PROMISE_CAPACITY));
+        assert!(std::ptr::eq(selected[5], &super::PROMISE_RESOURCES));
+        assert_eq!(super::selected_producers("all").len(), 9);
+    }
 
     #[test]
     fn early_failure_cannot_restamp_old_partial_and_new_output_binds_post_run_inputs() -> Result<()>

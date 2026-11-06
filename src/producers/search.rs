@@ -100,14 +100,14 @@ fn build_search_row(name: &str, key: &str, meta: &Value, estimates: &Value) -> V
         "query": shared::string_field(meta, "query", ""),
         "targets": shared::array_strings(meta, "targets"),
         "threshold_ms": threshold_ms,
-        "fixed_item_count": meta.get("fixed_item_count").and_then(Value::as_i64),
+        "fixed_item_count": meta["fixed_item_count"].as_i64(),
         "item_count": item_count,
         "bytes_per_item": bytes_per_item,
         "total_bytes": total_bytes,
         "processed_bytes": processed_bytes,
         "throughput_unit": "MiB/s",
         "throughput_scope": "actual_scanned_bytes_only",
-        "response_match_limit": meta.get("response_match_limit").and_then(Value::as_i64),
+        "response_match_limit": meta["response_match_limit"].as_i64(),
         "mean_ns": mean_ns,
         "std_dev_ns": std_dev_ns,
         "median_ns": median_ns,
@@ -134,7 +134,7 @@ fn search_workload(
     parameter_value: Option<i64>,
     parameter_unit: &str,
 ) -> (Option<i64>, Option<i64>, Option<i64>) {
-    let fixed_count = meta.get("fixed_item_count").and_then(Value::as_i64);
+    let fixed_count = meta["fixed_item_count"].as_i64();
     if parameter_unit == "bytes" {
         (
             fixed_count.or(Some(1)),
@@ -142,7 +142,7 @@ fn search_workload(
             parameter_value.and_then(|value| value.checked_mul(fixed_count.unwrap_or(1))),
         )
     } else {
-        let bytes_per_item = meta.get("bytes_per_item").and_then(Value::as_i64);
+        let bytes_per_item = meta["bytes_per_item"].as_i64();
         (
             parameter_value,
             bytes_per_item,

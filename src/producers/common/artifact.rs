@@ -32,5 +32,5 @@ pub(in crate::producers) fn values_array(value: &Value) -> &[Value] {
 }
 
 pub(in crate::producers) fn scenarios_array(value: &Value) -> &[Value] {
-    value.get("scenarios").map(values_array).unwrap_or(&[])
+    values_array(&value["scenarios"])
 }

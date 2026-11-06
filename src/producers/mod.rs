@@ -16,9 +16,11 @@ mod workflows;
 pub use workflows::search_workflows;
 
 pub use capacity::capacity_report;
+pub use capacity::promise_capacity_report;
 pub use flamegraphs::flamegraphs;
 pub use frame_metrics::frame_metrics;
 pub use project_code::project_code_metrics;
+pub use resources::promise_resource_profiles;
 pub use resources::resource_profiles;
 pub use review::{performance_review, validate_registry};
 pub use search::search_speed;

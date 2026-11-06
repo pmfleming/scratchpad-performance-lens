@@ -1,4 +1,4 @@
-use super::common::{probe_path, run_probe_object, write_probe_artifact};
+use super::common::{run_probe_object, write_probe_artifact};
 use crate::{cli::MeasureOptions, config::LensConfig};
 use anyhow::Result;
 use serde_json::json;
@@ -81,20 +81,7 @@ fn valid_workflows(payload: &serde_json::Value) -> bool {
 
 pub fn search_workflows(config: &LensConfig, _: MeasureOptions) -> Result<()> {
     let result = (|| -> Result<serde_json::Value> {
-        let run = || {
-            run_probe_object(
-                &config.project_root,
-                &[
-                    "cargo",
-                    "build",
-                    "--release",
-                    "--quiet",
-                    "--bin",
-                    "search_workflow_metrics",
-                ],
-                probe_path("search_workflow_metrics"),
-            )
-        };
+        let run = || run_probe_object(&config.project_root, "search_workflow_metrics");
         let mut payload = run()?;
         anyhow::ensure!(
             valid_workflows(&payload),

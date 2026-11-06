@@ -150,6 +150,18 @@ fn all_rejects_unsatisfiable_registry_before_running_and_rejects_inapplicable_fl
     assert!(!output.status.success());
     let analysis = root.path().join("target/analysis");
     assert!(!analysis.join("performance_review.json").exists());
+    let execution: Value =
+        serde_json::from_slice(&std::fs::read(analysis.join("measure_run.json")).unwrap()).unwrap();
+    assert_eq!(execution["status"], "failed");
+    assert!(execution["error"]
+        .as_str()
+        .unwrap()
+        .contains("missing project measurement manifest"));
+    assert!(execution["producers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|row| row["status"] == "pending"));
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("missing project measurement manifest")
     );

@@ -7,7 +7,7 @@ use super::render::render_project_code;
 use crate::cli::MeasureOptions;
 use crate::config::LensConfig;
 use crate::shared;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use classifier::{classify_path, rust_test_line_mask};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -42,24 +42,9 @@ pub fn project_code_metrics(config: &LensConfig, _options: MeasureOptions) -> Re
 
 fn project_code_payload(config: &LensConfig) -> Result<Value> {
     let ref_name = remote_ref(&config.project_root);
-    let latest_sha = git(&config.project_root, &["rev-parse", &ref_name])?
-        .trim()
-        .to_string();
-    let latest_subject = git(
-        &config.project_root,
-        &["log", "-1", "--pretty=%s", &ref_name],
-    )?
-    .trim()
-    .to_string();
-    let latest_date = git(
-        &config.project_root,
-        &["log", "-1", "--date=iso-strict", "--pretty=%cI", &ref_name],
-    )?
-    .trim()
-    .to_string();
     let mut cache = HashMap::new();
-    let current = count_ref(&config.project_root, &ref_name, &mut cache)?;
     let history = commit_history(&config.project_root, &ref_name, 40, &mut cache)?;
+    let latest = history.last().context("Git history contains no commits")?;
     let payload = json!({
         "version": 1,
         "source": "rust_git_first_parent_history",
@@ -68,12 +53,12 @@ fn project_code_payload(config: &LensConfig) -> Result<Value> {
         "counting_method": "exact_nonblank_rust_lines_with_embedded_test_classification",
         "timestamp_semantics": "commit_timestamp_not_push_time",
         "latest_push": {
-            "sha": latest_sha,
-            "short_sha": latest_sha.chars().take(8).collect::<String>(),
-            "date": latest_date,
-            "subject": latest_subject,
+            "sha": latest["sha"],
+            "short_sha": latest["short_sha"],
+            "date": latest["date"],
+            "subject": latest["subject"],
         },
-        "current": current.to_json(),
+        "current": latest["lines"],
         "history": history,
     });
     Ok(payload)
@@ -87,14 +72,6 @@ struct CodeCounts {
 }
 
 impl CodeCounts {
-    fn zero() -> Self {
-        Self {
-            application: 0,
-            test: 0,
-            other: 0,
-        }
-    }
-
     fn total(self) -> i64 {
         self.application + self.test + self.other
     }
@@ -115,15 +92,12 @@ fn git(project_root: &Path, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn git_ok(project_root: &Path, args: &[&str]) -> Option<String> {
-    git(project_root, args).ok()
-}
-
 fn remote_ref(project_root: &Path) -> String {
-    git_ok(
+    git(
         project_root,
         &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
     )
+    .ok()
     .map(|value| value.trim().to_string())
     .filter(|value| !value.is_empty())
     .unwrap_or_else(|| "HEAD".to_string())
@@ -154,7 +128,7 @@ fn count_content(path: &str, content: &str) -> CodeCounts {
     } else {
         Vec::new()
     };
-    let mut counts = CodeCounts::zero();
+    let mut counts = CodeCounts::default();
     for (index, line) in content.lines().enumerate() {
         if line.trim().is_empty() {
             continue;
@@ -174,7 +148,7 @@ type CountCache = HashMap<(String, String), CodeCounts>;
 
 fn count_ref(project_root: &Path, ref_name: &str, cache: &mut CountCache) -> Result<CodeCounts> {
     let tree = git(project_root, &["ls-tree", "-r", "-z", ref_name])?;
-    let mut totals = CodeCounts::zero();
+    let mut totals = CodeCounts::default();
     for record in tree.split('\0').filter(|record| !record.is_empty()) {
         let (header, path) = record
             .split_once('\t')

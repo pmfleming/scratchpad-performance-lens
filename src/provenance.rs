@@ -23,15 +23,7 @@ pub fn fingerprint(bytes: &[u8]) -> String {
 }
 
 fn command(root: &Path, program: &str, args: &[&str]) -> Option<String> {
-    let output = Command::new(program)
-        .args(args)
-        .current_dir(root)
-        .output()
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    crate::process::text(Command::new(program).args(args).current_dir(root))
 }
 
 fn executable_fingerprint() -> Option<&'static str> {

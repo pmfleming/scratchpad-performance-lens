@@ -1,4 +1,4 @@
-use super::common::{probe_path, run_probe_object, write_probe_artifact};
+use super::common::{run_probe_object, write_probe_artifact};
 use super::render::render_frame_metrics;
 use crate::cli::MeasureOptions;
 use crate::config::LensConfig;
@@ -8,18 +8,7 @@ use serde_json::{json, Value};
 const REALISTIC_FRAME_PROBE: &str = "realistic_frame_metrics";
 
 pub fn frame_metrics(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
-    let mut payload = match run_probe_object(
-        &config.project_root,
-        &[
-            "cargo",
-            "build",
-            "--release",
-            "--quiet",
-            "--bin",
-            "frame_metrics",
-        ],
-        probe_path("frame_metrics"),
-    ) {
+    let mut payload = match run_probe_object(&config.project_root, "frame_metrics") {
         Ok(mut value) => {
             value["meta"]["generated_from"] = json!("rust:frame_metrics");
             value["meta"]["probe_status"] = json!("completed");
@@ -64,18 +53,7 @@ fn add_realistic_frame_metrics(payload: &mut Value, config: &LensConfig) {
             "reason": format!("Scratchpad does not define a {REALISTIC_FRAME_PROBE} binary target"),
         })
     } else {
-        match run_probe_object(
-            &config.project_root,
-            &[
-                "cargo",
-                "build",
-                "--release",
-                "--quiet",
-                "--bin",
-                REALISTIC_FRAME_PROBE,
-            ],
-            probe_path(REALISTIC_FRAME_PROBE),
-        ) {
+        match run_probe_object(&config.project_root, REALISTIC_FRAME_PROBE) {
             Ok(realistic) => {
                 append_realistic_scenarios(payload, realistic);
                 json!({"status": "completed", "binary": REALISTIC_FRAME_PROBE})

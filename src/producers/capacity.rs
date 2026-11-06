@@ -1,5 +1,5 @@
 use super::capacity_repetitions::aggregate as aggregate_capacity_repetitions;
-use super::common::{probe_path, run_capacity_sweeps, values_array, write_probe_artifact};
+use super::common::{probe_path, run_sweeps, values_array, write_probe_artifact};
 use super::render::render_capacity;
 use crate::artifacts::capacity_report::CapacityReportArtifact;
 use crate::cli::MeasureOptions;
@@ -9,7 +9,6 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
-const DEFAULT_CAPACITY_THRESHOLD_MS: f64 = 180.0;
 const CAPACITY_STRESS_FAMILY: &str = "capacity-stress";
 const TEXT_LAYOUT_FAMILY: &str = "text-layout";
 
@@ -36,7 +35,6 @@ struct CapacityScenarioSpec {
     label: &'static str,
     fallback_values: &'static [i64],
     unit: &'static str,
-    threshold_ms: f64,
     family: &'static str,
     profile_id: Option<&'static str>,
 }
@@ -47,7 +45,6 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
         label: "Large-file first-visible window sweep",
         fallback_values: FILE_SIZE_SWEEP,
         unit: "bytes",
-        threshold_ms: DEFAULT_CAPACITY_THRESHOLD_MS,
         family: "file-load",
         profile_id: Some("viewport_extraction_profile"),
     },
@@ -56,7 +53,6 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
         label: "Large-file background indexing sweep",
         fallback_values: FILE_SIZE_SWEEP,
         unit: "bytes",
-        threshold_ms: 5_000.0,
         family: "file-load",
         profile_id: Some("document_snapshot_profile"),
     },
@@ -65,7 +61,6 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
         label: "In-memory text ingest diagnostic sweep",
         fallback_values: FILE_SIZE_SWEEP,
         unit: "bytes",
-        threshold_ms: DEFAULT_CAPACITY_THRESHOLD_MS,
         family: CAPACITY_STRESS_FAMILY,
         profile_id: None,
     },
@@ -74,7 +69,6 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
         label: "Text Layout",
         fallback_values: TEXT_LAYOUT_SWEEP,
         unit: "bytes",
-        threshold_ms: DEFAULT_CAPACITY_THRESHOLD_MS,
         family: TEXT_LAYOUT_FAMILY,
         profile_id: None,
     },
@@ -83,7 +77,6 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
         label: "Many-file first-visible workspace sweep",
         fallback_values: MANY_FILE_SWEEP,
         unit: "files",
-        threshold_ms: DEFAULT_CAPACITY_THRESHOLD_MS,
         family: CAPACITY_STRESS_FAMILY,
         profile_id: None,
     },
@@ -92,7 +85,6 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
         label: "Many-file background hydration completion sweep",
         fallback_values: MANY_FILE_SWEEP,
         unit: "files",
-        threshold_ms: 5_000.0,
         family: CAPACITY_STRESS_FAMILY,
         profile_id: None,
     },
@@ -101,7 +93,6 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
         label: "Search file-size ceiling sweep",
         fallback_values: FILE_SIZE_SWEEP,
         unit: "bytes",
-        threshold_ms: DEFAULT_CAPACITY_THRESHOLD_MS,
         family: CAPACITY_STRESS_FAMILY,
         profile_id: Some("search_capacity_profile"),
     },
@@ -110,7 +101,6 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
         label: "Search target-count ceiling sweep",
         fallback_values: SEARCH_TARGET_SWEEP,
         unit: "files",
-        threshold_ms: DEFAULT_CAPACITY_THRESHOLD_MS,
         family: CAPACITY_STRESS_FAMILY,
         profile_id: Some("search_dispatch_profile"),
     },
@@ -119,7 +109,6 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
         label: "Tab count ceiling sweep",
         fallback_values: TAB_COUNT_SWEEP,
         unit: "tabs",
-        threshold_ms: 140.0,
         family: CAPACITY_STRESS_FAMILY,
         profile_id: Some("tab_operations_profile"),
     },
@@ -128,7 +117,6 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
         label: "Split count ceiling sweep",
         fallback_values: SPLIT_COUNT_SWEEP,
         unit: "splits",
-        threshold_ms: 120.0,
         family: CAPACITY_STRESS_FAMILY,
         profile_id: Some("split_stress_profile"),
     },
@@ -137,7 +125,6 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
         label: "View count ceiling sweep",
         fallback_values: VIEW_COUNT_SWEEP,
         unit: "views",
-        threshold_ms: 120.0,
         family: CAPACITY_STRESS_FAMILY,
         profile_id: Some("view_navigation_profile"),
     },
@@ -146,19 +133,35 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
         label: "Paste size ceiling sweep",
         fallback_values: PASTE_SIZE_SWEEP,
         unit: "bytes",
-        threshold_ms: 150.0,
         family: CAPACITY_STRESS_FAMILY,
         profile_id: Some("paste_stress_profile"),
     },
 ];
 
 pub fn capacity_report(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
-    let events = run_capacity_sweeps(
-        &config.project_root,
+    capacity_report_for(config, &CAPACITY_SCENARIOS.iter().collect::<Vec<_>>())
+}
+
+pub fn promise_capacity_report(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
+    let required = super::review::required_probe_scenarios(true);
+    anyhow::ensure!(
+        required.iter().all(|id| capacity_scenario(id).is_some()),
+        "unknown required capacity scenario"
+    );
+    capacity_report_for(
+        config,
         &CAPACITY_SCENARIOS
             .iter()
-            .map(|spec| spec.id)
+            .filter(|spec| required.contains(spec.id))
             .collect::<Vec<_>>(),
+    )
+}
+
+fn capacity_report_for(config: &LensConfig, scenarios: &[&CapacityScenarioSpec]) -> Result<()> {
+    let events = run_sweeps(
+        &config.project_root,
+        "capacity_probe",
+        &scenarios.iter().map(|spec| spec.id).collect::<Vec<_>>(),
     );
     let (payload, failure) = match events {
         Ok(mut result) if !result.events.is_empty() => {
@@ -171,7 +174,7 @@ pub fn capacity_report(config: &LensConfig, _options: MeasureOptions) -> Result<
                 event["operation_budget"] =
                     manifest["capacity_budgets"][event["scenario"].as_str().unwrap_or("")].clone();
             }
-            let validation = validate_capacity_events(&result.events)
+            let validation = validate_capacity_events_for(&result.events, scenarios)
                 .err()
                 .map(|e| e.to_string());
             let mut payload = summarize_capacity(result.events, "completed");
@@ -210,19 +213,26 @@ pub fn capacity_report(config: &LensConfig, _options: MeasureOptions) -> Result<
     )
 }
 
-fn capacity_config(scenario: &str) -> (f64, &'static str, Option<&'static str>) {
-    capacity_scenario(scenario).map_or(
-        (DEFAULT_CAPACITY_THRESHOLD_MS, CAPACITY_STRESS_FAMILY, None),
-        |spec| (spec.threshold_ms, spec.family, spec.profile_id),
-    )
+fn capacity_config(scenario: &str) -> (&'static str, Option<&'static str>) {
+    capacity_scenario(scenario).map_or((CAPACITY_STRESS_FAMILY, None), |spec| {
+        (spec.family, spec.profile_id)
+    })
 }
 
 fn capacity_scenario(scenario: &str) -> Option<&'static CapacityScenarioSpec> {
     CAPACITY_SCENARIOS.iter().find(|spec| spec.id == scenario)
 }
 
+#[cfg(test)]
 fn validate_capacity_events(events: &[Value]) -> Result<()> {
-    for spec in CAPACITY_SCENARIOS {
+    validate_capacity_events_for(events, &CAPACITY_SCENARIOS.iter().collect::<Vec<_>>())
+}
+
+fn validate_capacity_events_for(
+    events: &[Value],
+    scenarios: &[&CapacityScenarioSpec],
+) -> Result<()> {
+    for spec in scenarios {
         let matching: Vec<_> = events
             .iter()
             .filter(|event| {
@@ -281,11 +291,7 @@ fn summarize_capacity(events: Vec<Value>, status: &str) -> Value {
         .count();
     let memory = scenarios
         .iter()
-        .filter(|row| {
-            row.get("suspected_limiting_resource")
-                .and_then(Value::as_str)
-                == Some("memory")
-        })
+        .filter(|row| row["suspected_limiting_resource"].as_str() == Some("memory"))
         .count();
     let cpu = scenarios
         .iter()
@@ -305,12 +311,12 @@ fn summarize_capacity(events: Vec<Value>, status: &str) -> Value {
 fn group_capacity_events(events: Vec<Value>) -> BTreeMap<String, Vec<Value>> {
     let mut grouped: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     for mut event in events {
-        if event.get("scenario").and_then(Value::as_str) == Some("layout_bytes_ceiling") {
+        if event["scenario"].as_str() == Some("layout_bytes_ceiling") {
             event["scenario"] = json!("text_layout_ceiling");
             event["scenario_label"] = json!("Text Layout");
             event["workload_family"] = json!("text-layout");
         }
-        if let Some(scenario) = event.get("scenario").and_then(Value::as_str) {
+        if let Some(scenario) = event["scenario"].as_str() {
             grouped.entry(scenario.to_string()).or_default().push(event);
         }
     }
@@ -319,8 +325,8 @@ fn group_capacity_events(events: Vec<Value>) -> BTreeMap<String, Vec<Value>> {
 
 fn capacity_scenario_summary(scenario: String, events: Vec<Value>) -> Value {
     let mut events = aggregate_capacity_repetitions(events);
-    events.sort_by_key(|event| event.get("step_index").and_then(Value::as_i64).unwrap_or(0));
-    let (_, family, profile_id) = capacity_config(&scenario);
+    events.sort_by_key(|event| event["step_index"].as_i64().unwrap_or(0));
+    let (family, profile_id) = capacity_config(&scenario);
     let threshold_ms = events
         .first()
         .and_then(|event| event["operation_budget"]["threshold_ms"].as_f64())
@@ -351,10 +357,9 @@ fn capacity_scenario_summary(scenario: String, events: Vec<Value>) -> Value {
     let peak = events
         .iter()
         .filter_map(|event| {
-            event
-                .get("peak_working_set_bytes")
-                .and_then(Value::as_i64)
-                .or_else(|| event.get("working_set_bytes").and_then(Value::as_i64))
+            event["peak_working_set_bytes"]
+                .as_i64()
+                .or_else(|| event["working_set_bytes"].as_i64())
         })
         .max();
     let scenario_label = first
@@ -399,12 +404,7 @@ fn capacity_step_failed(event: &Value, threshold_ms: f64) -> bool {
         .is_some_and(|count| count > 0)
         || threshold_ms > 0.0
             && event["complete"] == true
-            && event
-                .get("elapsed_ns")
-                .and_then(Value::as_f64)
-                .unwrap_or(0.0)
-                / 1_000_000.0
-                > threshold_ms
+            && event["elapsed_ns"].as_f64().unwrap_or(0.0) / 1_000_000.0 > threshold_ms
 }
 
 fn infer_limiting_resource(events: &[Value]) -> String {
@@ -445,31 +445,31 @@ fn resource_checklist(limiting: &str, events: &[Value]) -> Vec<Value> {
 fn capacity_sample(event: &Value) -> Value {
     json!({
         "measurement_contract": event["measurement_contract"],
-        "workload_value": event.get("workload_value").cloned(),
-        "workload_label": event.get("workload_label").cloned(),
-        "setup_elapsed_ms": event.get("setup_elapsed_ns").and_then(Value::as_f64).map(|value| value / 1_000_000.0),
-        "elapsed_ms": event.get("elapsed_ns").and_then(Value::as_f64).map(|ns| ns / 1_000_000.0),
-        "background_completion_ms": event.get("background_completion_ns").and_then(Value::as_f64).map(|value| value / 1_000_000.0),
-        "completed_workload_value": event.get("completed_workload_value").cloned(),
-        "elapsed_min_ms": event.get("elapsed_min_ns").and_then(Value::as_f64).map(|ns| ns / 1_000_000.0),
-        "elapsed_max_ms": event.get("elapsed_max_ns").and_then(Value::as_f64).map(|ns| ns / 1_000_000.0),
+        "workload_value": event.get("workload_value"),
+        "workload_label": event.get("workload_label"),
+        "setup_elapsed_ms": event["setup_elapsed_ns"].as_f64().map(|value| value / 1_000_000.0),
+        "elapsed_ms": event["elapsed_ns"].as_f64().map(|ns| ns / 1_000_000.0),
+        "background_completion_ms": event["background_completion_ns"].as_f64().map(|value| value / 1_000_000.0),
+        "completed_workload_value": event.get("completed_workload_value"),
+        "elapsed_min_ms": event["elapsed_min_ns"].as_f64().map(|ns| ns / 1_000_000.0),
+        "elapsed_max_ms": event["elapsed_max_ns"].as_f64().map(|ns| ns / 1_000_000.0),
         "complete": event["complete"].as_bool().unwrap_or(false),
         "failure_count": event["failure_count"].as_u64().unwrap_or(0),
         "expected_repetition_count": event["expected_repetition_count"].as_u64(),
         "successful_repetition_count": event["successful_repetition_count"].as_u64(),
-        "raw_repetitions": event["raw_repetitions"].as_array().cloned().unwrap_or_default(),
+        "raw_repetitions": values_array(&event["raw_repetitions"]),
         "statistical_claim": "successful-trial median; no population tail guarantee",
-        "repetition_count": event.get("repetition_count").and_then(Value::as_u64).unwrap_or(1),
-        "measurement_scope": event.get("measurement_scope").cloned(),
-        "metrics": event.get("metrics").cloned(),
-        "memory_budget": event.get("memory_budget").cloned(),
-        "process_resources": event.get("process_resources").cloned(),
-        "peak_working_set_bytes": event.get("peak_working_set_bytes").cloned(),
-        "note": event.get("note").cloned(),
-        "working_set_bytes": event.get("working_set_bytes").cloned(),
-        "page_fault_count": event.get("page_fault_count").cloned(),
-        "handle_count": event.get("handle_count").cloned(),
-        "status": event.get("status").and_then(Value::as_str).unwrap_or("ok"),
+        "repetition_count": event["repetition_count"].as_u64().unwrap_or(1),
+        "measurement_scope": event.get("measurement_scope"),
+        "metrics": event.get("metrics"),
+        "memory_budget": event.get("memory_budget"),
+        "process_resources": event.get("process_resources"),
+        "peak_working_set_bytes": event.get("peak_working_set_bytes"),
+        "note": event.get("note"),
+        "working_set_bytes": event.get("working_set_bytes"),
+        "page_fault_count": event.get("page_fault_count"),
+        "handle_count": event.get("handle_count"),
+        "status": event["status"].as_str().unwrap_or("ok"),
     })
 }
 
@@ -546,7 +546,7 @@ mod tests {
     #[test]
     fn registry_validates_units_workload_and_legacy_layout_alias() {
         let mut events: Vec<_> = CAPACITY_SCENARIOS.iter().map(|spec| {
-            assert_eq!(capacity_config(spec.id), (spec.threshold_ms, spec.family, spec.profile_id));
+            assert_eq!(capacity_config(spec.id), (spec.family, spec.profile_id));
             json!({"scenario":if spec.id == "text_layout_ceiling" { "layout_bytes_ceiling" } else { spec.id },
                 "workload_value":spec.fallback_values.iter().max(),"workload_unit":spec.unit})
         }).collect();
@@ -564,5 +564,32 @@ mod tests {
         assert!(validate_capacity_events(&events).is_err());
         events.remove(0);
         assert!(validate_capacity_events(&events).is_err());
+    }
+
+    #[test]
+    fn focused_capacity_omits_only_diagnostics_and_still_requires_full_sweeps() {
+        let required = super::super::review::required_probe_scenarios(true);
+        let specs: Vec<_> = CAPACITY_SCENARIOS
+            .iter()
+            .filter(|s| required.contains(s.id))
+            .collect();
+        assert_eq!(specs.len(), required.len());
+        assert!(!required.contains("text_layout_ceiling"));
+        assert!(!required.contains("in_memory_text_ingest_ceiling"));
+        let mut events: Vec<_> = specs
+            .iter()
+            .map(|spec| {
+                json!({
+                    "scenario":spec.id, "workload_unit":spec.unit,
+                    "workload_value":spec.fallback_values.iter().max(),
+                })
+            })
+            .collect();
+        assert!(super::validate_capacity_events_for(&events, &specs).is_ok());
+        assert!(validate_capacity_events(&events).is_err());
+        events[0]["workload_value"] = json!(1);
+        assert!(super::validate_capacity_events_for(&events, &specs).is_err());
+        events.remove(0);
+        assert!(super::validate_capacity_events_for(&events, &specs).is_err());
     }
 }

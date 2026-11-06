@@ -8,11 +8,7 @@ fn read(path: impl AsRef<Path>) -> Option<String> {
         .map(|s| s.trim().to_owned())
 }
 fn command(program: &str, args: &[&str]) -> Option<String> {
-    let output = Command::new(program).args(args).output().ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    crate::process::text(Command::new(program).args(args))
 }
 fn filesystem(path: &Path) -> Value {
     let mut existing = path;
@@ -52,11 +48,10 @@ fn filesystem(path: &Path) -> Value {
 }
 
 pub fn identity(root: &Path) -> Value {
-    let policies: Vec<_> = std::fs::read_dir("/sys/devices/system/cpu/cpufreq").into_iter().flatten().filter_map(Result::ok)
+    let governors: std::collections::BTreeMap<_, _> = std::fs::read_dir("/sys/devices/system/cpu/cpufreq").into_iter().flatten().filter_map(Result::ok)
         .map(|entry| (entry.file_name().to_string_lossy().into_owned(),json!({
             "governor":read(entry.path().join("scaling_governor")),"driver":read(entry.path().join("scaling_driver")),
             "min_khz":read(entry.path().join("scaling_min_freq")),"max_khz":read(entry.path().join("scaling_max_freq"))}))).collect();
-    let governors: std::collections::BTreeMap<_, _> = policies.into_iter().collect();
     let power: std::collections::BTreeMap<_, _> = std::fs::read_dir("/sys/class/power_supply")
         .into_iter()
         .flatten()
@@ -124,7 +119,8 @@ pub fn quality(before: &Value, after: &Value) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::quality;
+    use serde_json::{json, Value};
     #[test]
     fn control_drift_flags_noise_without_changing_machine_identity() {
         let control = |n| json!({"median_ns":n,"min_ns":n,"max_ns":n});

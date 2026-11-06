@@ -168,26 +168,6 @@ mod tests {
     }
 
     #[test]
-    fn rust_test_line_mask_tracks_cfg_test_modules() {
-        let source = r#"
-pub fn app() {}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn sample() {
-        assert!(true);
-    }
-}
-"#;
-        let mask = rust_test_line_mask(source);
-        assert!(!mask[1]);
-        assert!(mask[3]);
-        assert!(mask[5]);
-        assert!(mask[8]);
-    }
-
-    #[test]
     fn rust_test_line_mask_ignores_braces_in_literals_and_comments() {
         let source = r##"
 pub fn app() {

@@ -56,11 +56,9 @@ pub fn load_benchmark_metadata(project_root: &Path) -> HashMap<String, Value> {
         object.insert("threshold_source".to_string(), json!("builtin_fallback"));
         object.insert("metadata_source".to_string(), json!("builtin_fallback"));
         object.insert("stale_budget_risk".to_string(), json!(true));
+        object.entry("targets").or_insert_with(|| json!([]));
         object
-            .entry("targets".to_string())
-            .or_insert_with(|| json!([]));
-        object
-            .entry("limiting_resource_hint".to_string())
+            .entry("limiting_resource_hint")
             .or_insert_with(|| json!("cpu"));
         metadata.insert(key, Value::Object(object));
     }
@@ -75,9 +73,7 @@ pub fn load_benchmark_metadata(project_root: &Path) -> HashMap<String, Value> {
         let Ok(Value::Object(entries)) = serde_json::from_str::<Value>(&text) else {
             continue;
         };
-        let is_search_metadata = path
-            .file_name()
-            .is_some_and(|name| name == "search_benchmark_targets.json");
+        let is_search_metadata = relative.ends_with("search_benchmark_targets.json");
         for (key, value) in entries {
             if let Value::Object(mut object) = value {
                 let family = object
@@ -91,7 +87,7 @@ pub fn load_benchmark_metadata(project_root: &Path) -> HashMap<String, Value> {
                         })
                     });
                 object.insert("workload_family".to_string(), family);
-                object.entry("kind".to_string()).or_insert_with(|| {
+                object.entry("kind").or_insert_with(|| {
                     json!(if is_search_metadata {
                         "workflow"
                     } else {
@@ -100,31 +96,25 @@ pub fn load_benchmark_metadata(project_root: &Path) -> HashMap<String, Value> {
                 });
                 let threshold_authoritative =
                     object.get("threshold_ms").and_then(Value::as_f64).is_some();
-                object.insert(
-                    "threshold_authoritative".to_string(),
-                    json!(threshold_authoritative),
-                );
-                object.insert(
-                    "threshold_source".to_string(),
-                    json!(if threshold_authoritative {
-                        relative.replace('\\', "/")
-                    } else {
-                        "missing".to_string()
-                    }),
-                );
-                object.insert(
-                    "metadata_source".to_string(),
-                    json!(relative.replace('\\', "/")),
-                );
-                object.insert(
-                    "stale_budget_risk".to_string(),
-                    json!(!threshold_authoritative),
-                );
+                object.extend([
+                    (
+                        "threshold_authoritative".into(),
+                        json!(threshold_authoritative),
+                    ),
+                    (
+                        "threshold_source".into(),
+                        json!(if threshold_authoritative {
+                            relative
+                        } else {
+                            "missing"
+                        }),
+                    ),
+                    ("metadata_source".into(), json!(relative)),
+                    ("stale_budget_risk".into(), json!(!threshold_authoritative)),
+                ]);
+                object.entry("targets").or_insert_with(|| json!([]));
                 object
-                    .entry("targets".to_string())
-                    .or_insert_with(|| json!([]));
-                object
-                    .entry("limiting_resource_hint".to_string())
+                    .entry("limiting_resource_hint")
                     .or_insert_with(|| json!("cpu"));
                 metadata.insert(key, Value::Object(object));
             }
@@ -135,10 +125,8 @@ pub fn load_benchmark_metadata(project_root: &Path) -> HashMap<String, Value> {
 }
 
 pub fn authoritative_threshold_ms(meta: &Value) -> Option<f64> {
-    meta.get("threshold_authoritative")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-        .then(|| meta.get("threshold_ms").and_then(Value::as_f64))
+    (meta["threshold_authoritative"] == true)
+        .then(|| meta["threshold_ms"].as_f64())
         .flatten()
 }
 

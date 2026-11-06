@@ -3,19 +3,11 @@ use crate::shared;
 use serde_json::Value;
 
 fn text<'a>(value: &'a Value, key: &str, default: &'a str) -> &'a str {
-    value.get(key).and_then(Value::as_str).unwrap_or(default)
+    value[key].as_str().unwrap_or(default)
 }
 
 fn integer(value: &Value, key: &str) -> i64 {
-    value.get(key).and_then(Value::as_i64).unwrap_or(0)
-}
-
-fn array_field<'a>(value: &'a Value, key: &str) -> &'a [Value] {
-    value
-        .get(key)
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or(&[])
+    value[key].as_i64().unwrap_or(0)
 }
 
 fn render_lines(header: &str, rows: Vec<String>, empty: Option<&str>) -> String {
@@ -82,9 +74,8 @@ pub(super) fn render_search(payload: &Value) -> String {
         .take(10)
         .enumerate()
         .map(|(index, item)| {
-            let throughput = item
-                .get("throughput_mb_s")
-                .and_then(Value::as_f64)
+            let throughput = item["throughput_mb_s"]
+                .as_f64()
                 .map_or("-".to_string(), |value| format!("{value:.1} MB/s"));
             format!(
                 "{:>2}. {}/{}/{} | param={} | mean={}ms | throughput={} | budget={} | {}",
@@ -168,32 +159,29 @@ pub(super) fn render_resources(payload: &Value) -> String {
                 "- {}: max_elapsed={:.1} ms | peak_heap={} | total_alloc={} | max_ws={}",
                 text(item, "scenario_label", "-"),
                 shared::f64_field(item, &["max_elapsed_ms"]),
-                shared::human_bytes(item.get("max_peak_live_bytes").and_then(Value::as_i64)),
-                shared::human_bytes(item.get("max_allocated_bytes").and_then(Value::as_i64)),
-                shared::human_bytes(item.get("max_working_set_bytes").and_then(Value::as_i64)),
+                shared::human_bytes(item["max_peak_live_bytes"].as_i64()),
+                shared::human_bytes(item["max_allocated_bytes"].as_i64()),
+                shared::human_bytes(item["max_working_set_bytes"].as_i64()),
             );
-            if let Some(save_ms) = item.get("max_save_ms").and_then(Value::as_f64) {
+            if let Some(save_ms) = item["max_save_ms"].as_f64() {
                 row.push_str(&format!(
                     " | max_save={save_ms:.1} ms | max_write_bytes/save={}",
-                    shared::human_bytes(
-                        item.get("max_write_bytes_per_operation")
-                            .and_then(Value::as_i64)
-                    )
+                    shared::human_bytes(item["max_write_bytes_per_operation"].as_i64())
                 ));
             }
-            if let Some(setup_ms) = item.get("max_setup_elapsed_ms").and_then(Value::as_f64) {
+            if let Some(setup_ms) = item["max_setup_elapsed_ms"].as_f64() {
                 if setup_ms > 0.0 {
                     row.push_str(&format!(" | setup={setup_ms:.1} ms"));
                 }
             }
             if let (Some(retained), Some(limit)) = (
-                item.get("max_retained_file_chunks").and_then(Value::as_i64),
-                item.get("file_chunk_cache_limit").and_then(Value::as_i64),
+                item["max_retained_file_chunks"].as_i64(),
+                item["file_chunk_cache_limit"].as_i64(),
             ) {
                 row.push_str(&format!(
                     " | retained_chunks={retained}/{limit} | cache_bound_held={}",
-                    item.get("cache_bound_held")
-                        .and_then(Value::as_bool)
+                    item["cache_bound_held"]
+                        .as_bool()
                         .map_or("-", |held| if held { "yes" } else { "no" })
                 ));
             }
@@ -211,11 +199,7 @@ pub(super) fn render_flamegraphs(payload: &Value) -> String {
     let rows = values_array(payload)
         .iter()
         .map(|item| {
-            if item
-                .get("available")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
+            if item["available"].as_bool().unwrap_or(false) {
                 format!(
                     "  [x] {}: {}",
                     text(item, "name", "-"),
@@ -234,7 +218,7 @@ pub(super) fn render_flamegraphs(payload: &Value) -> String {
 }
 
 pub(super) fn render_speed_report(payload: &Value) -> String {
-    let rows = array_field(payload, "triage")
+    let rows = values_array(&payload["triage"])
         .iter()
         .enumerate()
         .map(|(index, item)| {
@@ -265,7 +249,7 @@ pub(super) fn render_performance_review(payload: &Value) -> String {
                 text(scenario, "promise_health", "-"),
                 text(scenario, "coverage_status", "-"),
                 shared::f64_field(scenario, &["coverage_score"]),
-                array_field(scenario, "gaps").len(),
+                values_array(&scenario["gaps"]).len(),
             )
         })
         .collect();
