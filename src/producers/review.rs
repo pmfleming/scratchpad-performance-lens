@@ -2,6 +2,7 @@ mod coverage;
 mod evidence;
 mod health;
 mod inventory;
+mod noise;
 mod registry;
 #[cfg(test)]
 mod scale_tests;
@@ -66,13 +67,14 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
     let speed_report = inputs.read("speed_efficiency_report.json", json!({}));
     let frame_metrics = inputs.read("frame_metrics.json", json!({"scenarios": []}));
     let workflows = inputs.read("search_workflow_metrics.json", json!({"scenarios": []}));
+    let frames = frame_rows(&frame_metrics);
     let latency_rows = unique_rows(
         values_array(&slowspots)
             .iter()
             .chain(values_array(&search))
             .chain(scenarios_array(&workflows))
             .cloned()
-            .chain(frame_rows(&frame_metrics))
+            .chain(frames.iter().cloned())
             .collect(),
     );
     let capacity_rows = capacity.scenarios;
@@ -96,7 +98,7 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
         .collect();
     let noisy_sources: Vec<String> = source_status(config, &inputs.context)
         .iter()
-        .filter(|source| source.available)
+        .filter(|source| source.available && noise::is_measurement_source(&source.id))
         .filter_map(|source| {
             let path = std::path::Path::new(&source.path);
             let meta =
@@ -104,19 +106,24 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
             (meta["measurement_quality"]["status"] == "noisy").then(|| source.id.clone())
         })
         .collect();
-    if noisy_sources.is_empty() {
-        crate::baselines::annotate(config, &inputs.context, &mut scenario_payload)?;
-    } else {
-        for scenario in &mut scenario_payload {
-            if scenario.promise_health == PromiseHealth::Pass {
-                scenario.promise_health = PromiseHealth::AtRisk;
-            }
-            scenario.baseline_comparison.status =
-                crate::artifacts::performance_review::RegressionStatus::Noisy;
-            scenario.gaps.push(format!(
-                "Measurement control detected noise in: {}",
-                noisy_sources.join(", ")
-            ));
+    let latency_sources = [
+        ("slowspots", values_array(&slowspots)),
+        ("search_speed", values_array(&search)),
+        ("frame_metrics", frames.as_slice()),
+        ("search_workflows", scenarios_array(&workflows)),
+    ];
+    for (definition, scenario) in scenarios.iter().zip(&mut scenario_payload) {
+        let relevant = noise::relevant_sources(
+            definition,
+            &noisy_sources,
+            &latency_sources,
+            &capacity_rows,
+            resource_rows,
+        );
+        if relevant.is_empty() {
+            crate::baselines::annotate(config, &inputs.context, std::slice::from_mut(scenario))?;
+        } else {
+            noise::flag(scenario, &relevant);
         }
     }
     let target_promises: Vec<_> = scenarios

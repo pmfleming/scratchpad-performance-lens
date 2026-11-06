@@ -300,3 +300,25 @@ store-backed search resource workload also passed its declared five-second
 budget; the stricter capacity search promise remains unresolved. Evidence:
 Scratchpad `target/analysis/co-development/cycle-10/`. Validation: 705 app tests
 passed (seven ignored), 89 lens tests passed, and strict Clippy passed in both.
+
+## Cycle 11: fast ordinary-text inspection and relevant noise attribution
+
+Text inspection uses independent vectorizable passes for ordinary UTF-8, tabs
+and line feeds. CR and possible artifact lead bytes retain the existing decoder.
+Tests compare scalar character spans across control/Unicode boundaries and check
+CRLF spanning a short prefix and a long fast-path span. Temporary construction
+diagnostics were removed from source before the final measurement.
+
+Both 10,000-tab resource paths now pass 140 ms with stable controls: targeted
+construction 101.453 ms and tab-count installation 118.074 ms. Targeted buffer
+construction accounts for 91.315 ms. Production paste still fails and requires
+separate publication/flush attribution. Evidence: Scratchpad
+`target/analysis/co-development/cycle-11/`.
+
+The lens now applies noisy measurement controls only to promises using the
+associated rows. Derived speed-report generation is not treated as an independent
+performance measurement. Relevant noisy sources still prevent a passing verdict
+and whole-run baseline acceptance; real failures remain failures. Tests cover
+search noise leaving unrelated view evidence unaffected, resource dependencies,
+and preservation of failure status. Validation: 706 app tests passed (seven
+ignored), 90 lens tests passed, and strict Clippy passed in both repositories.
