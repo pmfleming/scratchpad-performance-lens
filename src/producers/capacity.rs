@@ -428,6 +428,7 @@ fn resource_checklist(limiting: &str, events: &[Value]) -> Vec<Value> {
 
 fn capacity_sample(event: &Value) -> Value {
     json!({
+        "measurement_contract": event["measurement_contract"],
         "workload_value": event.get("workload_value").cloned(),
         "workload_label": event.get("workload_label").cloned(),
         "setup_elapsed_ms": event.get("setup_elapsed_ns").and_then(Value::as_f64).map(|value| value / 1_000_000.0),

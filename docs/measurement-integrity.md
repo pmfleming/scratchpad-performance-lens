@@ -179,3 +179,13 @@ Successful rows survive crashes and malformed trailing output. Probes emit a
 as an error, never a successful latency. Missing repetitions remain incomplete.
 All probe executions have a 180-second limit, configurable with
 `SPLENS_PROBE_TIMEOUT_SECS`. Raw stdout and stderr remain in `target/splens-probes`.
+
+## Production-path evidence
+
+Storage-sensitive capacity samples and editor-scroll frames carry a
+`measurement_contract` with `text_backing`, `production_path`, and `code_path`.
+Frames also declare `document_bytes`. A large workload label cannot substitute
+for store backing; scroll evidence must exceed the 16 MiB storage threshold.
+Owned-text component rows remain diagnostics. Search uses snapshot chunk windows;
+paste measures the app input/preparation/publication workflow without an injected
+writer pause. GPU submission and presentation remain outside frame scope.

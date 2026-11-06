@@ -302,6 +302,7 @@ mod tests {
         ] {
             let payload = summarize_resources(
                 vec![json!({"scenario":"file_backed_chunk_cache_tracking",
+                "measurement_contract":{"text_backing":"store","production_path":true,"code_path":"read_file_in_store"},
                 "elapsed_ns":10,"status":"ok","workload_value":shared::GB,"measurement_scope":"prepared_operation",
                 "retained_file_chunks":retained,"file_chunk_cache_limit":32,"result_value":shared::GB,
                 "live_bytes":100,"baseline_live_bytes":200,"live_growth_bytes":-100,

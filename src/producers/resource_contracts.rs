@@ -97,6 +97,9 @@ pub(super) fn gap_evidence(scenario: &str, events: &[Value], synthetic: bool) ->
         missing.push(format!("workload_at_least_{minimum}"));
     }
     for event in events {
+        if !crate::measurement_contract::eligible(scenario, &event["measurement_contract"]) {
+            missing.push("production_store_path".into());
+        }
         missing.extend(
             sample_requirements(event, fields)
                 .into_iter()

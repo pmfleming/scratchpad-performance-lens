@@ -78,7 +78,8 @@ impl CapacityScenario {
         self.samples
             .iter()
             .filter(|sample| {
-                sample.status == "ok"
+                crate::measurement_contract::eligible(&self.scenario, &sample.measurement_contract)
+                    && sample.status == "ok"
                     && sample.complete
                     && sample.failure_count == 0
                     && sample.elapsed_ms.is_some_and(|value| {
@@ -109,6 +110,8 @@ impl CapacityScenario {
 
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
 pub struct CapacitySample {
+    #[serde(default)]
+    pub measurement_contract: Value,
     pub workload_value: Option<i64>,
     pub workload_label: Option<String>,
     pub setup_elapsed_ms: Option<f64>,

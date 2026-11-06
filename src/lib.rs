@@ -8,3 +8,5 @@ mod session_tools;
 mod shared;
 
 pub use cli::run_cli;
+
+pub mod measurement_contract;

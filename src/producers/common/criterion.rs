@@ -128,6 +128,9 @@ pub(in crate::producers) fn annotate_measurement(row: &mut Value, estimates: &Va
     let threshold = shared::authoritative_threshold_ms(meta);
     annotate_budget(row, estimates, threshold);
     row["measurement_finished_at"] = json!(estimates["measurement_finished_at"]);
+    row["measurement_contract"] = meta.get("measurement_contract").cloned().unwrap_or_else(
+        || json!({"text_backing":"unknown","production_path":false,"code_path":"undeclared"}),
+    );
     row["threshold_authoritative"] = json!(threshold.is_some());
     row["threshold_source"] = json!(meta["threshold_source"]);
     row["metadata_source"] = json!(meta["metadata_source"]);

@@ -5,6 +5,10 @@ use crate::artifacts::performance_review::CoverageAxes;
 use serde_json::Value;
 
 pub(super) fn valid_latency(row: &Value) -> bool {
+    let id = row["benchmark_key"].as_str().unwrap_or("");
+    if !crate::measurement_contract::eligible(id, &row["measurement_contract"]) {
+        return false;
+    }
     if row["evidence_kind"] == "frame" {
         return super::super::common::valid_frame(row);
     }
@@ -76,7 +80,10 @@ pub(super) fn axes(
                         && row.threshold_ms > 0.0
                         && !row.samples.is_empty()
                         && row.samples.iter().all(|sample| {
-                            sample.complete
+                            crate::measurement_contract::eligible(
+                                &row.scenario,
+                                &sample.measurement_contract,
+                            ) && sample.complete
                                 && sample.repetition_count >= 3
                                 && (sample.elapsed_ms.is_some_and(|ms| ms > 0.0)
                                     || sample.failure_count > 0)
@@ -95,7 +102,18 @@ pub(super) fn axes(
             resources.iter().map(resource_id).collect(),
             resources
                 .iter()
-                .filter(|row| !resources_synthetic && valid_resource(row))
+                .filter(|row| {
+                    !resources_synthetic
+                        && valid_resource(row)
+                        && row["samples"].as_array().is_some_and(|samples| {
+                            samples.iter().all(|s| {
+                                crate::measurement_contract::eligible(
+                                    resource_id(row).as_str(),
+                                    &s["measurement_contract"],
+                                )
+                            })
+                        })
+                })
                 .map(resource_id)
                 .collect(),
         ),

@@ -17,7 +17,8 @@ fn aggregate_step(repetitions: Vec<Value>) -> Value {
     let expected = first["expected_repetition_count"].as_u64().unwrap_or(3);
     let mut identities = HashSet::new();
     let valid_identity = repetitions.iter().all(|event| {
-        event["workload_value"] == first["workload_value"]
+        event["measurement_contract"] == first["measurement_contract"]
+            && event["workload_value"] == first["workload_value"]
             && event["workload_unit"] == first["workload_unit"]
             && event["measurement_scope"] == first["measurement_scope"]
             && event["expected_repetition_count"].as_u64().unwrap_or(3) == expected
