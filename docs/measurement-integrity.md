@@ -170,3 +170,12 @@ relocated Cargo targets, and exact Git history classification. Scratchpad tests
 cover histogram overflow, process-counter units, allocator baselines and actual
 search dispatch/delivery/render preparation. A reduced-size workflow smoke run
 checks the standalone probe protocol; it is not a full performance sweep.
+
+## Probe failure isolation
+
+Capacity sweeps run in separate processes selected by `capacity_probe --scenario ID`.
+Successful rows survive crashes and malformed trailing output. Probes emit a
+`step_started` record before timing; a process failure is attached to that workload
+as an error, never a successful latency. Missing repetitions remain incomplete.
+All probe executions have a 180-second limit, configurable with
+`SPLENS_PROBE_TIMEOUT_SECS`. Raw stdout and stderr remain in `target/splens-probes`.

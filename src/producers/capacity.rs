@@ -1,5 +1,5 @@
 use super::capacity_repetitions::aggregate as aggregate_capacity_repetitions;
-use super::common::{probe_path, run_probe_events, values_array, write_probe_artifact};
+use super::common::{probe_path, run_capacity_sweeps, values_array, write_probe_artifact};
 use super::render::render_capacity;
 use crate::artifacts::capacity_report::CapacityReportArtifact;
 use crate::cli::MeasureOptions;
@@ -153,35 +153,30 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
 ];
 
 pub fn capacity_report(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
-    let events = run_probe_events(
+    let events = run_capacity_sweeps(
         &config.project_root,
-        &[
-            "cargo",
-            "build",
-            "--release",
-            "--quiet",
-            "--bin",
-            "capacity_probe",
-        ],
-        probe_path("capacity_probe"),
-        "capacity probe",
-    )
-    .and_then(|events| {
-        validate_capacity_events(&events)?;
-        Ok(events)
-    });
+        &CAPACITY_SCENARIOS
+            .iter()
+            .map(|spec| spec.id)
+            .collect::<Vec<_>>(),
+    );
     let (payload, failure) = match events {
-        Ok(events) if !events.is_empty() => {
-            let mut payload = summarize_capacity(events, "completed");
+        Ok(result) if !result.events.is_empty() => {
+            let validation = validate_capacity_events(&result.events)
+                .err()
+                .map(|e| e.to_string());
+            let mut payload = summarize_capacity(result.events, "completed");
             let failed = values_array(&payload["scenarios"])
                 .iter()
                 .flat_map(|row| values_array(&row["samples"]))
                 .any(|sample| {
                     sample["complete"] != true || sample["failure_count"].as_u64().unwrap_or(0) > 0
                 });
-            let failure =
-                failed.then(|| "capacity contains incomplete or failed repetitions".to_owned());
-            if failed {
+            let failure = result.failure.or(validation).or_else(|| {
+                failed.then(|| "capacity contains incomplete or failed repetitions".to_owned())
+            });
+            payload["meta"]["error"] = json!(failure);
+            if failure.is_some() {
                 payload["meta"]["probe_status"] = json!("partial");
                 payload["summary"]["probe_status"] = json!("partial");
             }

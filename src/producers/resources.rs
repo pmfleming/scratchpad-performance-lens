@@ -28,7 +28,16 @@ pub fn resource_profiles(config: &LensConfig, _options: MeasureOptions) -> Resul
         .map(|events| (events, expected))
     });
     let (payload, failure) = match events {
-        Ok((events, expected)) => validated_resources(events, &expected),
+        Ok((result, expected)) => {
+            let (mut payload, failure) = validated_resources(result.events, &expected);
+            let failure = result.failure.or(failure);
+            if failure.is_some() {
+                payload["meta"]["probe_status"] = json!("partial");
+                payload["summary"]["probe_status"] = json!("partial");
+                payload["meta"]["error"] = json!(failure);
+            }
+            (payload, failure)
+        }
         Err(error) => {
             let error = error.to_string();
             (empty_resources(&error), Some(error))

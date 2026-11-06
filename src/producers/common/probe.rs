@@ -2,7 +2,8 @@ use crate::shared;
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 pub(in crate::producers) fn probe_path(bin: &str) -> PathBuf {
     let suffix = if cfg!(windows) { ".exe" } else { "" };
@@ -17,9 +18,8 @@ pub(in crate::producers) fn run_probe_object(
     probe_path: PathBuf,
 ) -> Result<Value> {
     let executable = build_probe(project_root, build_cmd, &probe_path)?;
-    let output = Command::new(&executable)
-        .current_dir(project_root)
-        .output()?;
+    let (output, timed_out) = bounded_output(project_root, &executable, &[])?;
+    anyhow::ensure!(!timed_out, "probe timed out");
     if !output.status.success() {
         bail!("{}", output_text(&output));
     }
@@ -36,35 +36,184 @@ pub(in crate::producers) fn run_probe_object(
     }
 }
 
+pub(in crate::producers) struct ProbeEvents {
+    pub events: Vec<Value>,
+    pub failure: Option<String>,
+}
+
 pub(in crate::producers) fn run_probe_events(
-    project_root: &Path,
+    root: &Path,
     build_cmd: &[&str],
-    probe_path: PathBuf,
+    path: PathBuf,
     label: &str,
-) -> Result<Vec<Value>> {
-    let executable = build_probe(project_root, build_cmd, &probe_path)?;
-    let output = Command::new(&executable)
-        .current_dir(project_root)
-        .output()
-        .with_context(|| label.to_string())?;
-    // Preserve even a crashed/truncated probe's evidence for diagnosis.
-    let archive = shared::cargo_target_directory(project_root).join("splens-probes");
-    std::fs::create_dir_all(&archive)?;
-    let run = format!(
-        "{}-{}",
-        label.replace(' ', "-"),
-        crate::provenance::timestamp()
-    );
-    std::fs::write(archive.join(format!("{run}.ndjson")), &output.stdout)?;
-    std::fs::write(archive.join(format!("{run}.stderr")), &output.stderr)?;
-    if !output.status.success() {
-        bail!("{}", output_text(&output));
+) -> Result<ProbeEvents> {
+    let executable = build_probe(root, build_cmd, &path)?;
+    run_events(root, &executable, &[], label)
+}
+
+pub(in crate::producers) fn run_capacity_sweeps(
+    root: &Path,
+    scenarios: &[&str],
+) -> Result<ProbeEvents> {
+    let executable = build_probe(
+        root,
+        &[
+            "cargo",
+            "build",
+            "--release",
+            "--quiet",
+            "--bin",
+            "capacity_probe",
+        ],
+        &probe_path("capacity_probe"),
+    )?;
+    let mut combined = ProbeEvents {
+        events: Vec::new(),
+        failure: None,
+    };
+    let mut failures = Vec::new();
+    for scenario in scenarios {
+        match run_events(root, &executable, &["--scenario", scenario], scenario) {
+            Ok(result) => {
+                combined.events.extend(result.events);
+                if let Some(error) = result.failure {
+                    failures.push(format!("{scenario}: {error}"));
+                }
+            }
+            Err(error) => failures.push(format!("{scenario}: {error}")),
+        }
     }
-    let mut events = parse_events(&output.stdout)?;
-    for event in &mut events {
+    combined.failure = (!failures.is_empty()).then(|| failures.join("; "));
+    Ok(combined)
+}
+
+fn bounded_output(
+    root: &Path,
+    executable: &Path,
+    args: &[&str],
+) -> Result<(std::process::Output, bool)> {
+    // File-backed capture avoids pipe deadlocks and retains output after a kill.
+    let archive = shared::cargo_target_directory(root).join("splens-probes");
+    std::fs::create_dir_all(&archive)?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_nanos();
+    let name = format!(
+        "{}-{}-{stamp}",
+        executable.file_stem().unwrap_or_default().to_string_lossy(),
+        std::process::id()
+    );
+    let stdout_path = archive.join(format!("{name}.ndjson"));
+    let stderr_path = archive.join(format!("{name}.stderr"));
+    let mut command = Command::new(executable);
+    command
+        .args(args)
+        .current_dir(root)
+        .stdout(Stdio::from(std::fs::File::create(&stdout_path)?))
+        .stderr(Stdio::from(std::fs::File::create(&stderr_path)?));
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command.spawn()?;
+    let timeout = Duration::from_secs(
+        std::env::var("SPLENS_PROBE_TIMEOUT_SECS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|s| *s > 0)
+            .unwrap_or(180),
+    );
+    let start = Instant::now();
+    let mut timed_out = false;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if start.elapsed() >= timeout {
+            timed_out = true;
+            #[cfg(unix)]
+            {
+                let _ = Command::new("kill")
+                    .args(["-KILL", "--", &format!("-{}", child.id())])
+                    .status();
+            }
+            let _ = child.kill();
+            break child.wait()?;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    Ok((
+        std::process::Output {
+            status,
+            stdout: std::fs::read(stdout_path)?,
+            stderr: std::fs::read(stderr_path)?,
+        },
+        timed_out,
+    ))
+}
+
+fn run_events(root: &Path, executable: &Path, args: &[&str], label: &str) -> Result<ProbeEvents> {
+    let start = Instant::now();
+    let (output, timed_out) =
+        bounded_output(root, executable, args).with_context(|| label.to_owned())?;
+    let mut result = parse_partial(&output.stdout);
+    if timed_out || !output.status.success() {
+        let reason = if timed_out {
+            "timeout".to_owned()
+        } else {
+            format!(
+                "exit {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            )
+        };
+        if let Some(mut event) = result.1.take() {
+            event["status"] = serde_json::json!("error");
+            event["elapsed_ns"] =
+                serde_json::json!(start.elapsed().as_nanos().min(u64::MAX as u128) as u64);
+            event["measurement_scope"] = serde_json::json!("failed_process_including_setup");
+            event["note"] = serde_json::json!(reason);
+            result.0.push(event);
+        }
+        result.2.push(reason);
+    } else if result.1.is_some() {
+        result.2.push("unfinished step".into());
+    }
+    if result.0.is_empty() {
+        result.2.push("probe returned no measurements".into());
+    }
+    for event in &mut result.0 {
         event["probe_executable"] = serde_json::json!(executable);
     }
-    Ok(events)
+    Ok(ProbeEvents {
+        events: result.0,
+        failure: (!result.2.is_empty()).then(|| result.2.join("; ")),
+    })
+}
+
+fn parse_partial(bytes: &[u8]) -> (Vec<Value>, Option<Value>, Vec<String>) {
+    let mut events = Vec::new();
+    let mut active = None;
+    let mut errors = Vec::new();
+    for (index, line) in bytes
+        .split(|b| *b == b'\n')
+        .filter(|line| !line.is_empty())
+        .enumerate()
+    {
+        match serde_json::from_slice::<Value>(line) {
+            Ok(event) if event["event"] == "step_started" => active = Some(event),
+            Ok(event) => match parse_events(&serde_json::to_vec(&event).unwrap()) {
+                Ok(mut rows) => {
+                    active = None;
+                    events.append(&mut rows);
+                }
+                Err(error) => errors.push(format!("line {}: {error}", index + 1)),
+            },
+            Err(error) => errors.push(format!("line {}: {error}", index + 1)),
+        }
+    }
+    (events, active, errors)
 }
 
 fn build_probe(root: &Path, args: &[&str], requested: &Path) -> Result<PathBuf> {
@@ -159,6 +308,37 @@ pub(in crate::producers) fn output_text(output: &std::process::Output) -> String
 #[cfg(test)]
 mod tests {
     use super::parse_events;
+    #[cfg(unix)]
+    #[test]
+    fn process_failure_keeps_rows_marks_active_workload_and_allows_next_probe() {
+        let root = tempfile::tempdir().unwrap();
+        let shell = std::path::PathBuf::from("/run/current-system/sw/bin/sh");
+        let shell = if shell.exists() {
+            shell
+        } else {
+            "/bin/sh".into()
+        };
+        let script = r#"printf '%s\n' '{"scenario":"test","step_index":0,"workload_value":1,"elapsed_ns":10,"status":"ok"}' '{"event":"step_started","scenario":"test","step_index":1,"workload_value":2}'; exit 1"#;
+        let result = super::run_events(root.path(), &shell, &["-c", script], "crash").unwrap();
+        assert!(result.failure.is_some());
+        assert_eq!(result.events.len(), 2);
+        assert_eq!(result.events[1]["status"], "error");
+        assert_eq!(result.events[1]["workload_value"], 2);
+        let next = super::run_events(root.path(), &shell, &["-c", "printf '%s\\n' '{\"scenario\":\"next\",\"step_index\":0,\"workload_value\":1,\"elapsed_ns\":10,\"status\":\"ok\"}'"], "next").unwrap();
+        assert!(next.failure.is_none());
+    }
+
+    #[test]
+    fn preserves_completed_rows_and_active_step_before_truncation() {
+        let bytes =
+            br#"{"scenario":"test","step_index":0,"workload_value":1,"elapsed_ns":10,"status":"ok"}
+{"event":"step_started","scenario":"test","step_index":1,"workload_value":2}
+{truncated"#;
+        let (events, active, errors) = super::parse_partial(bytes);
+        assert_eq!(events.len(), 1);
+        assert_eq!(active.unwrap()["workload_value"], 2);
+        assert_eq!(errors.len(), 1);
+    }
     #[test]
     fn executable_path_comes_from_matching_cargo_artifact_not_default_target() {
         let root = std::path::Path::new("/workspace");
