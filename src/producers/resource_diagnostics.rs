@@ -2,6 +2,53 @@
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Describe observed scaling without fitting a complexity class or changing budgets.
+pub(super) fn scaling(events: &[Value]) -> Value {
+    let mut groups: BTreeMap<(&str, &str), BTreeMap<u64, Vec<&Value>>> = BTreeMap::new();
+    let mut ungrouped = 0;
+    for event in events {
+        match (
+            event["workload_unit"].as_str(),
+            event["measurement_scope"].as_str(),
+            event["workload_value"].as_u64(),
+        ) {
+            (Some(unit), Some(scope), Some(size))
+                if size > 0 && !unit.is_empty() && !scope.is_empty() =>
+            {
+                groups
+                    .entry((unit, scope))
+                    .or_default()
+                    .entry(size)
+                    .or_default()
+                    .push(event);
+            }
+            _ => ungrouped += 1,
+        }
+    }
+    let observations: Vec<_> = groups.into_iter().map(|((unit,scope), workloads)| {
+        let points: Vec<_> = workloads.into_iter().map(|(size,trials)| {
+            let mut times: Vec<_> = trials.iter().filter(|e| e["status"] == "ok")
+                .filter_map(|e| e["elapsed_ns"].as_u64().filter(|n| *n > 0)).collect();
+            times.sort_unstable();
+            let complete = !times.is_empty() && times.len() == trials.len();
+            let median = complete.then(|| (times[times.len()/2] as f64 + times[(times.len()-1)/2] as f64)/2.0);
+            json!({"workload_value":size,"trial_count":trials.len(),"observed_count":times.len(),
+                "complete_for_observed_trials":complete,"median_elapsed_ms":median.map(|n| n/1e6),
+                "median_ns_per_unit":median.map(|n| n/size as f64)})
+        }).collect();
+        let adjacent: Vec<_> = points.windows(2).map(|pair| {
+            let workload_ratio = pair[1]["workload_value"].as_f64().unwrap()/pair[0]["workload_value"].as_f64().unwrap();
+            let elapsed_ratio = pair[0]["median_elapsed_ms"].as_f64().zip(pair[1]["median_elapsed_ms"].as_f64()).map(|(a,b)| b/a);
+            json!({"from_workload":pair[0]["workload_value"],"to_workload":pair[1]["workload_value"],
+                "workload_multiplier":workload_ratio,"elapsed_multiplier":elapsed_ratio,
+                "per_unit_cost_multiplier":elapsed_ratio.map(|r| r/workload_ratio)})
+        }).collect();
+        json!({"workload_unit":unit,"measurement_scope":scope,"points":points,"adjacent_steps":adjacent})
+    }).collect();
+    json!({"groups":observations,"ungrouped_sample_count":ungrouped,
+        "interpretation":"observed_workload_medians_only_no_extrapolation_or_budget_override"})
+}
+
 pub(super) fn phases(events: &[Value]) -> Value {
     let mut workloads: BTreeMap<i64, Vec<&Value>> = BTreeMap::new();
     for event in events {
@@ -51,6 +98,36 @@ pub(super) fn phases(events: &[Value]) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn scaling_keeps_scopes_separate_and_does_not_hide_failed_trials() {
+        let row = |size, ns, scope| json!({"workload_value":size,"elapsed_ns":ns,"workload_unit":"tabs","measurement_scope":scope,"status":"ok"});
+        let mut events = vec![
+            row(100, 1000000, "prepared_operation"),
+            row(1000, 100000000, "prepared_operation"),
+            row(1000, 1, "scenario_including_fixture_work"),
+        ];
+        let result = scaling(&events);
+        assert_eq!(result["groups"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            result["groups"][0]["adjacent_steps"][0]["workload_multiplier"],
+            10.0
+        );
+        assert_eq!(
+            result["groups"][0]["adjacent_steps"][0]["per_unit_cost_multiplier"],
+            10.0
+        );
+        let mut failed = events[1].clone();
+        failed["status"] = json!("panic");
+        events.push(failed);
+        let result = scaling(&events);
+        assert!(result["groups"][0]["adjacent_steps"][0]["elapsed_multiplier"].is_null());
+        assert_eq!(
+            result["groups"][0]["points"][1]["complete_for_observed_trials"],
+            false
+        );
+        events.push(json!({"workload_value":0,"elapsed_ns":1}));
+        assert_eq!(scaling(&events)["ungrouped_sample_count"], 1);
+    }
     #[test]
     fn keeps_workloads_units_and_incomplete_phases_separate() {
         let events = vec![

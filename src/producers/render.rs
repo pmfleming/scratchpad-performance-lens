@@ -184,6 +184,17 @@ pub(super) fn render_resources(payload: &Value) -> String {
                 shared::human_bytes(item["max_allocated_bytes"].as_i64()),
                 shared::human_bytes(item["max_working_set_bytes"].as_i64()),
             );
+            if let Some(groups) = item["scaling_diagnostics"]["groups"].as_array() {
+                if groups.len() == 1 {
+                    if let Some(ratio) = groups[0]["adjacent_steps"]
+                        .as_array()
+                        .and_then(|steps| steps.last())
+                        .and_then(|step| step["per_unit_cost_multiplier"].as_f64())
+                    {
+                        row.push_str(&format!(" | time/unit change={ratio:.2}x (last step)"));
+                    }
+                }
+            }
             if let Some(save_ms) = item["max_save_ms"].as_f64() {
                 row.push_str(&format!(
                     " | max_save={save_ms:.1} ms | max_write_bytes/save={}",

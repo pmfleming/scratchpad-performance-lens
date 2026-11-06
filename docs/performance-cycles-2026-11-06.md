@@ -413,3 +413,27 @@ Validation: 713 app tests passed (seven ignored), 96 lens tests passed, and stri
 Clippy passed in both repositories. Final targeted evidence is in Scratchpad
 `target/analysis/co-development/cycle-15-indexed/`. Full promise verification is
 still outstanding; restore, search and other known failures remain open.
+
+## Cycle 16: batched content manifests and scaling diagnostics
+
+Restore now reads piece manifests, backing references and RAM tails in indexed
+batches alongside history. Shared decoders retain the single-document checks for
+checksums, contiguous positions, UTF-8, lengths and missing references. Bodies
+remain lazy, cache owners remain distinct, and decoded history moves into the
+restored document instead of being cloned. Query-plan tests require index seeks
+for each content table. Existing recovery, quarantine and exact-replay tests
+exercise the new batch path.
+
+The lens reports observed workload medians, time per unit and adjacent size/time
+multipliers. It separates units and measurement scopes and abstains from a
+comparison when any observed trial is invalid. The CLI includes the final step's
+per-unit change. This is diagnostic evidence, not a fitted complexity guarantee,
+capacity extrapolation or budget override.
+
+Validation: 714 app tests passed (seven ignored), the affected 102 database tests
+passed after the final move-only refinement, 97 lens tests passed, and strict
+Clippy passed in both repositories. Focused evidence in Scratchpad
+`target/analysis/co-development/cycle-16/` completed in 8.54 seconds. Full restore
+at 10,000 tabs measured 294.5 ms and still fails 180 ms; startup-visible restore
+measured 25.5 ms and passes. Full restore's last step had a 1.04x time-per-tab
+multiplier, rather than the rejected candidates' sharply increasing cost.

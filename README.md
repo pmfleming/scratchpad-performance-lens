@@ -75,6 +75,12 @@ The runner honors that floor even away from the adaptive repetition band, and
 resource verdicts reject missing or inconsistent launch coverage. Each launch
 still runs the complete selected workload sweep.
 
+Resource artifacts include `scaling_diagnostics`: observed median time per unit
+and adjacent workload multipliers, separated by unit and measurement scope.
+Incomplete observed trials leave comparisons unknown. The CLI shows the last
+step's change in time per unit when it is available. These diagnostics help
+locate growth in work; they do not extrapolate capacity or override budgets.
+
 Export artifact schemas:
 
 ```console
