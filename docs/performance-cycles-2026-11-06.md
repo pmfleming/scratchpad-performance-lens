@@ -364,3 +364,25 @@ against 4 ms; 128 MiB paste publication was 1111.366 ms. Paste inspection took
 13.104 ms, while mutation/storage waits consumed 1067.051 ms. Controls were
 noisy (max/min 2.285). Subsequent host inspection also found sustained high
 Linux I/O pressure, so these timings are not an accepted clean baseline.
+
+## Cycle 14: bounded search planning and focused capacity sweeps
+
+Scratchpad now produces line-aligned search windows lazily. Production search
+plans at most eight windows ahead of matching; single-thread probes consume the
+same iterator. This avoids planning the whole file before matching and preserves
+line boundaries, context overlap, match ordering and cancellation. Tests cover
+store-backed planning read counts and full-result equivalence for Unicode,
+nonoverlapping plain text and regex with one and four workers.
+
+The lens accepts repeatable `--scenario` selection for capacity runs. It validates
+IDs before launching, preserves complete size sweeps and existing budgets, and
+retains focused-selection metadata through the typed artifact. Promise runs
+cannot be narrowed. Validation: 710 app tests passed (seven ignored), 94 lens
+tests passed, and strict Clippy passed in both repositories.
+
+Evidence: Scratchpad `target/analysis/co-development/cycle-14/`. Focused resources
+completed in 3.76 seconds and capacity in 30.35 seconds. Store-backed search still
+fails the 180 ms capacity budget: observed medians were 247.475 ms at 64 MiB,
+925.218 ms at 256 MiB and 3481.982 ms at 1 GiB. The 64 MiB resource scenario stayed
+within its separate 5-second budget. These are targeted observations, not a full
+promise baseline; other host builds and storage pressure remain relevant.

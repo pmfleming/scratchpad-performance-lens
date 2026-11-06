@@ -138,8 +138,25 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
     },
 ];
 
-pub fn capacity_report(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
-    capacity_report_for(config, &CAPACITY_SCENARIOS.iter().collect::<Vec<_>>())
+pub fn capacity_report(config: &LensConfig, options: MeasureOptions) -> Result<()> {
+    capacity_report_for(
+        config,
+        &selected_scenarios(&options.scenarios)?,
+        &options.scenarios,
+    )
+}
+
+fn selected_scenarios(requested: &[String]) -> Result<Vec<&'static CapacityScenarioSpec>> {
+    for id in requested {
+        anyhow::ensure!(
+            capacity_scenario(id).is_some(),
+            "unknown capacity scenario: {id}"
+        );
+    }
+    Ok(CAPACITY_SCENARIOS
+        .iter()
+        .filter(|spec| requested.is_empty() || requested.iter().any(|id| id == spec.id))
+        .collect())
 }
 
 pub fn promise_capacity_report(config: &LensConfig, _options: MeasureOptions) -> Result<()> {
@@ -154,16 +171,21 @@ pub fn promise_capacity_report(config: &LensConfig, _options: MeasureOptions) ->
             .iter()
             .filter(|spec| required.contains(spec.id))
             .collect::<Vec<_>>(),
+        &[],
     )
 }
 
-fn capacity_report_for(config: &LensConfig, scenarios: &[&CapacityScenarioSpec]) -> Result<()> {
+fn capacity_report_for(
+    config: &LensConfig,
+    scenarios: &[&CapacityScenarioSpec],
+    requested: &[String],
+) -> Result<()> {
     let events = run_sweeps(
         &config.project_root,
         "capacity_probe",
         &scenarios.iter().map(|spec| spec.id).collect::<Vec<_>>(),
     );
-    let (payload, failure) = match events {
+    let (mut payload, failure) = match events {
         Ok(mut result) if !result.events.is_empty() => {
             let manifest: Value = serde_json::from_slice(&std::fs::read(
                 config
@@ -203,6 +225,12 @@ fn capacity_report_for(config: &LensConfig, scenarios: &[&CapacityScenarioSpec])
             (empty_capacity(&error), Some(error))
         }
     };
+    payload["meta"]["selection_scope"] = json!(if requested.is_empty() {
+        "complete"
+    } else {
+        "focused"
+    });
+    payload["meta"]["requested_scenarios"] = json!(requested);
     let payload = serde_json::to_value(serde_json::from_value::<CapacityReportArtifact>(payload)?)?;
     write_probe_artifact(
         &config.output_dir.join("capacity_report.json"),
@@ -481,6 +509,27 @@ mod tests {
         validate_capacity_events, CAPACITY_SCENARIOS,
     };
     use serde_json::json;
+
+    #[test]
+    fn focused_selection_rejects_unknowns_and_preserves_the_full_sweep() {
+        let id = "search_file_size_ceiling";
+        let selected = super::selected_scenarios(&[id.into(), id.into()]).unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].id, id);
+        assert_eq!(selected[0].fallback_values, super::FILE_SIZE_SWEEP);
+        assert_eq!(
+            super::selected_scenarios(&[]).unwrap().len(),
+            CAPACITY_SCENARIOS.len()
+        );
+        assert!(super::selected_scenarios(&["typo".into()]).is_err());
+        let mut payload = super::empty_capacity("test");
+        payload["meta"]["selection_scope"] = json!("focused");
+        payload["meta"]["requested_scenarios"] = json!([id]);
+        let typed: super::CapacityReportArtifact = serde_json::from_value(payload).unwrap();
+        let saved = serde_json::to_value(typed).unwrap();
+        assert_eq!(saved["meta"]["selection_scope"], "focused");
+        assert_eq!(saved["meta"]["requested_scenarios"], json!([id]));
+    }
 
     #[test]
     fn missing_resource_counters_are_unknown_and_raw_counters_survive() {

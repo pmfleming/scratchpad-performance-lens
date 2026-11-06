@@ -168,7 +168,7 @@ struct MeasureArgs {
     index_only: bool,
     #[arg(
         long = "scenario",
-        help = "Run only this resource scenario; repeat for several (resources only)"
+        help = "Run only this scenario; repeat for several (resources or capacity only)"
     )]
     scenarios: Vec<String>,
 }
@@ -409,8 +409,10 @@ fn selected_producers(selection: &str) -> Vec<&'static ProducerSpec> {
 }
 
 fn validate_measure_options(selected: &[&ProducerSpec], options: &MeasureOptions) -> Result<()> {
-    if !options.scenarios.is_empty() && (selected.len() != 1 || selected[0].tool != "resources") {
-        bail!("--scenario only applies to a resources run; it cannot narrow a promise review");
+    if !options.scenarios.is_empty()
+        && (selected.len() != 1 || !matches!(selected[0].tool, "resources" | "capacity"))
+    {
+        bail!("--scenario only applies to a resources or capacity run; it cannot narrow a promise review");
     }
     if options.fail_on_slow
         && !selected
@@ -439,7 +441,7 @@ mod tests {
     use anyhow::{bail, Result};
 
     #[test]
-    fn focused_resource_selection_cannot_narrow_promise_verification() {
+    fn focused_probe_selection_cannot_narrow_promise_verification() {
         let options = MeasureOptions {
             skip_bench: false,
             fail_on_slow: false,
@@ -450,13 +452,11 @@ mod tests {
             super::validate_measure_options(&super::selected_producers("resources"), &options)
                 .is_ok()
         );
-        for selection in [
-            "promises",
-            "all",
-            "performance-review",
-            "capacity",
-            "search",
-        ] {
+        assert!(
+            super::validate_measure_options(&super::selected_producers("capacity"), &options)
+                .is_ok()
+        );
+        for selection in ["promises", "all", "performance-review", "search"] {
             assert!(super::validate_measure_options(
                 &super::selected_producers(selection),
                 &options

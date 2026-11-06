@@ -18,6 +18,10 @@ pub struct CapacityReportMeta {
     pub probe_command: String,
     pub scenario_count: usize,
     pub probe_status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection_scope: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requested_scenarios: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
