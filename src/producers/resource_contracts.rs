@@ -123,7 +123,15 @@ const GAP_CONTRACTS: &[GapContract] = &[
     (
         &["session_restore_cost"],
         10_000,
-        &["manifest_read_parse_ns", "restore_reconstruction_ns"],
+        &[
+            "manifest_read_parse_ns",
+            "restore_reconstruction_ns",
+            "restored_tab_count",
+            "restored_buffer_count",
+            "restored_text_bytes",
+            "retained_live_bytes_before_teardown",
+            "baseline_live_bytes",
+        ],
     ),
     (
         &["startup_visible_restore_cost"],
@@ -252,13 +260,21 @@ fn sample_requirements<'a>(event: &Value, fields: &'a [&str]) -> Vec<&'a str> {
         ]
         .into_iter()
         .find_map(|source| source[*field].as_f64());
-        value.is_none_or(|value| value < 0.0 || (field.ends_with("_ns") && value == 0.0))
+        value.is_none_or(|value| {
+            value < 0.0
+                || (field.ends_with("_ns")
+                    && value == 0.0
+                    && !(*field == "file_write_ns" && verified_unchanged_save(event)))
+        })
     }));
     missing
 }
 
 fn scenario_requirement(scenario: &str, event: &Value) -> Option<&'static str> {
     match scenario {
+        "session_restore_cost" if !retained_restored_session(event) => {
+            Some("fully_reconstructed_session_retained")
+        }
         "search_app_result_tracking" if !retained_search_results(event) => {
             Some("completed_search_results_retained_in_app")
         }
@@ -316,6 +332,45 @@ fn scenario_requirement(scenario: &str, event: &Value) -> Option<&'static str> {
         }
         _ => None,
     }
+}
+
+fn verified_unchanged_save(event: &Value) -> bool {
+    let phase = &event["phase_elapsed_ns"];
+    event["scenario"] == "session_steady_persist_cost"
+        && phase["transaction_committed"] == false
+        && [
+            "file_write_ns",
+            "history_write_ns",
+            "content_write_ns",
+            "layout_write_ns",
+            "commit_ns",
+        ]
+        .iter()
+        .all(|key| phase[*key].as_u64() == Some(0))
+        && event["workload_value"]
+            .as_u64()
+            .filter(|n| *n > 0)
+            .is_some_and(|count| event["result_value"].as_u64() == Some(count))
+}
+
+fn retained_restored_session(event: &Value) -> bool {
+    let Some(tabs) = event["workload_value"].as_u64().filter(|n| *n > 0) else {
+        return false;
+    };
+    let phase = &event["phase_elapsed_ns"];
+    event["measurement_scope"] == "prepared_operation"
+        && event["measurement_contract"]["production_path"] == true
+        && phase["restore_fixture_revision"] == 2
+        && phase["restored_tab_count"].as_u64() == Some(tabs)
+        && phase["restored_buffer_count"].as_u64() == Some(tabs)
+        && tabs
+            .checked_mul(4096)
+            .is_some_and(|bytes| phase["restored_text_bytes"].as_u64() == Some(bytes))
+        && event["result_value"].as_u64() == Some(tabs)
+        && event["retained_live_bytes_before_teardown"]
+            .as_u64()
+            .is_some()
+        && phase["publication_endpoint"] == "fully_reconstructed_session_retained"
 }
 
 fn retained_search_results(event: &Value) -> bool {
@@ -433,13 +488,67 @@ pub(super) fn cache_bound_held(event: &Value) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{cache_bound_held, expected_scenarios, gap_evidence};
+    use super::{cache_bound_held, expected_scenarios, gap_evidence, retained_restored_session};
     use crate::shared;
     use serde_json::{json, Value};
     fn proven(id: &str, row: &Value) -> bool {
         gap_evidence(id, std::slice::from_ref(row), false)["closed"] == true
     }
 
+    #[test]
+    fn zero_write_time_requires_an_explicit_complete_no_transaction_save() {
+        let good = json!({"scenario":"session_steady_persist_cost","status":"ok","elapsed_ns":100,
+            "workload_value":10000,"result_value":10000,"manifest_size_bytes":1,"measurement_scope":"prepared_operation",
+            "measurement_contract":{"fixture_kind":"non_repeating","fixture_revision":2,"text_backing":"store","production_path":true,"code_path":"SessionStore"},
+            "phase_elapsed_ns":{"snapshot_capture_ns":1,"manifest_serialize_ns":1,"file_write_ns":0,
+                "history_write_ns":0,"content_write_ns":0,"layout_write_ns":0,"commit_ns":0,"transaction_committed":false}});
+        assert!(proven("session_steady_persist_cost", &good));
+        for (key, value) in [
+            ("transaction_committed", Value::Null),
+            ("transaction_committed", json!(true)),
+            ("commit_ns", Value::Null),
+            ("history_write_ns", json!(1)),
+        ] {
+            let mut invalid = good.clone();
+            invalid["phase_elapsed_ns"][key] = value;
+            assert!(!proven("session_steady_persist_cost", &invalid));
+        }
+        let mut first = good;
+        first["scenario"] = json!("session_persist_cost");
+        assert!(!proven("session_persist_cost", &first));
+    }
+    #[test]
+    fn restored_session_requires_complete_retained_workspace_and_input() {
+        let good = json!({"workload_value":10000,"result_value":10000,"retained_live_bytes_before_teardown":50000000,
+            "measurement_scope":"prepared_operation","measurement_contract":{"production_path":true},
+            "phase_elapsed_ns":{"restore_fixture_revision":2,"restored_tab_count":10000,"restored_buffer_count":10000,
+                "restored_text_bytes":40960000,"publication_endpoint":"fully_reconstructed_session_retained"}});
+        assert!(retained_restored_session(&good));
+        for (key, value) in [
+            ("restore_fixture_revision", json!(1)),
+            ("restored_tab_count", json!(9999)),
+            ("restored_buffer_count", Value::Null),
+            ("restored_text_bytes", json!(4096)),
+            ("publication_endpoint", json!("session_dropped")),
+        ] {
+            let mut invalid = good.clone();
+            invalid["phase_elapsed_ns"][key] = value;
+            assert!(!retained_restored_session(&invalid));
+        }
+        for (key, value) in [
+            (
+                "measurement_scope",
+                json!("scenario_including_fixture_work"),
+            ),
+            ("retained_live_bytes_before_teardown", Value::Null),
+            ("result_value", json!(9999)),
+            ("workload_value", json!(u64::MAX)),
+        ] {
+            let mut invalid = good.clone();
+            invalid[key] = value;
+            assert!(!retained_restored_session(&invalid));
+        }
+    }
     #[test]
     fn paste_proof_separates_publication_from_flush_and_requires_queued_input() {
         let row = json!({"status":"ok","elapsed_ns":100,"workload_value":128 * shared::MB,

@@ -58,6 +58,7 @@ fn session_promise_uses_real_resource_output_and_separate_latency_budgets() {
         ("missing_metric", PromiseHealth::AtRisk),
         ("undersized", PromiseHealth::AtRisk),
         ("incomplete_history", PromiseHealth::AtRisk),
+        ("dropped_restore", PromiseHealth::AtRisk),
         ("slow", PromiseHealth::Fail),
         ("slow_initial_save", PromiseHealth::Fail),
     ] {
@@ -72,6 +73,20 @@ fn session_promise_uses_real_resource_output_and_separate_latency_budgets() {
             "fixture_contract":{"equals":{"fixture_revision":2,"history_retention":"unbounded","inserted_bytes":1,"synchronous":"FULL"},"minimum":{"history_payload_bytes":50 * crate::shared::MB,"history_entries":1025}},
             "workload_details":{"edit_preparation":"recorded_single_character_insert","fixture_revision":2,"history_retention":"unbounded","database_bytes":3221225472u64,"history_revisions":128,"initial_archives":128,"history_payload_bytes":50 * crate::shared::MB,"history_entries":1025,"inserted_bytes":1,"synchronous":"FULL"}
         })).collect();
+        let restored = events
+            .iter_mut()
+            .find(|e| e["scenario"] == "session_restore_cost")
+            .unwrap();
+        restored["result_value"] = json!(10000);
+        restored["retained_live_bytes_before_teardown"] = json!(50000000);
+        restored["baseline_live_bytes"] = json!(1);
+        restored["phase_elapsed_ns"].as_object_mut().unwrap().extend(json!({
+            "restore_fixture_revision":2,"restored_tab_count":10000,"restored_buffer_count":10000,
+            "restored_text_bytes":40960000,"publication_endpoint":"fully_reconstructed_session_retained"
+        }).as_object().unwrap().clone());
+        if case == "dropped_restore" {
+            restored["phase_elapsed_ns"]["publication_endpoint"] = json!("session_dropped");
+        }
         match case {
             "slow_initial_save" => events[0]["elapsed_ns"] = json!(5_200_000_000u64),
             "panic" => events[2]["status"] = json!("panic"),

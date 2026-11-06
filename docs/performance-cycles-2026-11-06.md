@@ -666,3 +666,45 @@ first-save total was 3,695.2 ms and document/history writes were 1,359.1 ms;
 content preparation and commit also varied substantially, so the entire elapsed
 change must not be attributed solely to batching. Full restore remains failing
 at 296.5 ms. Steady save (104.4 ms) and startup-visible restore (16.1 ms) pass.
+
+## Cycle 24: new-layout batching, retained restore and verified no-op saves
+
+Layouts proven absent by the preparation read now insert their layout, document
+membership and view rows in bounded batches. Tab-position replacement is batched
+after deleting the prior positions, preserving unique-layout constraints during
+reordering. Existing layouts and closed-tab operations retain their incremental
+paths. The shared parameter encoder preserves selections and view metadata.
+
+The restore probe now retains the reconstructed session through both the elapsed
+and heap snapshots. Previously its timer included destruction and its live-heap
+snapshot followed destruction. The prepared-operation contract explicitly requires
+all requested tabs, buffers and exact text-byte totals, fixture revision 2 and the
+retained endpoint. This corrects measurement; the removed teardown interval is
+not a production restore optimization. The existing 180 ms budget is unchanged.
+All four session scenarios now require three independent launches, using their
+shared fixtures, to expose variability instead of relying on one launch.
+
+The new measurements also exposed a lens error: unchanged saves genuinely do not
+commit a transaction and their write interval is zero. Scratchpad now reports
+whether a manifest transaction committed. The lens accepts zero write time only
+for unchanged saves with an explicit false flag, all write subdivisions present
+and zero, and the complete requested tab count. Missing measurements, positive
+write subdivisions, a committed transaction and first-save zero times remain
+invalid. Full review tests still reject slow first saves and now also reject a
+restore whose result has been dropped.
+
+Validation: the 723-test app suite passed (seven ignored), followed by the new
+split-layout rollback/retry/reopen/reordering test, all three resource-probe tests
+and the updated transaction-profile test. All 107 lens tests and strict Clippy in
+both repositories passed.
+
+The initial `cycle-24/` run was noisy and is retained. `cycle-24-final/` introduced
+the three-launch session minimum. After the no-op fix, `cycle-24-verified/`
+completed in 8.22 seconds with all three CPU control pairs stable and all four
+measurement gaps closed. At 10,000 tabs, first saves were 1,209.5, 1,192.7 and
+2,570.4 ms; all still fail. Layout-write intervals were 133.8, 131.6 and 127.7 ms,
+versus 261.4 ms in cycle 23. The large first-save outlier remains visible despite
+stable CPU controls; those controls do not certify disk scheduling stability.
+Retained full restores were 263.5, 261.2 and 269.8 ms, all failing 180 ms with all
+10,000 tabs/buffers and 40,960,000 text bytes present. Unchanged saves (90.4–100.3 ms)
+and startup-visible restores (15.6–15.8 ms) passed every observed launch.
