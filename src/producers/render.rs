@@ -188,6 +188,9 @@ pub(super) fn render_resources(payload: &Value) -> String {
                     shared::human_bytes(item["max_write_bytes_per_operation"].as_i64())
                 ));
             }
+            if let Some(ratio) = item["max_write_amplification"].as_f64() {
+                row.push_str(&format!(" | max_process_write/text={ratio:.2}x"));
+            }
             if let Some(setup_ms) = item["max_setup_elapsed_ms"].as_f64() {
                 if setup_ms > 0.0 {
                     row.push_str(&format!(" | setup={setup_ms:.1} ms"));

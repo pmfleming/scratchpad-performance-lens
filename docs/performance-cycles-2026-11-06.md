@@ -222,3 +222,25 @@ Scratchpad `target/analysis/co-development/cycle-7-vm/`; the body-batching-only
 diagnostic is in `cycle-7/`. Validation: 701 app tests passed (seven ignored),
 then all 96 database tests passed after final failure cleanup (three ignored).
 87 lens tests and strict Clippy passed in both repositories.
+
+## Cycle 8: bound chunk transactions by bytes and order document writes
+
+Small bodies now share a transaction up to 1 MiB, retaining the four-millisecond
+scheduling limit. A next chunk that would exceed the byte limit is returned to
+the front of the queue. A mixed-size regression checks FIFO order, per-drain
+bytes and restored contents. Capture preparation, document metadata and content
+writes follow document-key order to avoid scattered B-tree updates.
+
+Persistence probes report captured live-text bytes. The lens exposes process
+write bytes per captured byte, explicitly distinguishing this denominator from
+changed text. Missing/zero denominators remain unknown. The console surfaces
+the maximum observed ratio alongside latency and allocation measurements.
+
+The focused run had stable controls. At 10,000 tabs, initial save was
+3,267.207 ms with 6.96 process-write bytes per captured text byte; full restore
+was 336.645 ms. Both still exceed 180 ms. Production paste also fails 150 ms.
+Cold reads during concurrent saves straddled 4 ms across independent runs
+(p99 observations 3.943, 4.561 and 3.557 ms), so the lens correctly reports
+uncertain rather than pass. Evidence: Scratchpad
+`target/analysis/co-development/cycle-8/`. Validation: 702 app tests passed
+(seven ignored), 88 lens tests passed, and strict Clippy passed in both repos.

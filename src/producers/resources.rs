@@ -229,6 +229,7 @@ fn resource_scenario(scenario: &str, mut events: Vec<Value>, gap: Option<&str>) 
         "max_manifest_size_bytes": max_i64(&events, "manifest_size_bytes"),
         "max_save_ms": events.iter().filter_map(|e| e["phase_elapsed_ns"]["save_ns"].as_f64()).reduce(f64::max).map(|ns| ns / 1_000_000.0),
         "max_write_bytes_per_operation": events.iter().filter_map(|e| e["process_resources"]["write_bytes"].as_u64()).max(),
+        "max_write_amplification": events.iter().filter_map(write_amplification).reduce(f64::max),
         "max_retained_file_chunks": max_i64(&events, "retained_file_chunks"),
         "file_chunk_cache_limit": max_i64(&events, "file_chunk_cache_limit"),
         "cache_bound_violations": events.iter().filter(|event| cache_bound_held(event) == Some(false)).count(),
@@ -271,15 +272,19 @@ fn resource_sample(event: &Value) -> Value {
         "elapsed_ms".into(),
         json!(event["elapsed_ns"].as_f64().unwrap_or(0.0) / 1e6),
     );
-    let logical = event["phase_elapsed_ns"]["import_logical_bytes"]
-        .as_f64()
-        .or_else(|| event["workload_details"]["inserted_bytes"].as_f64());
     sample.insert(
         "write_amplification".into(),
-        json!(logical
-            .filter(|b| *b > 0.0)
-            .zip(event["process_resources"]["write_bytes"].as_f64())
-            .map(|(logical, physical)| physical / logical)),
+        json!(write_amplification(event)),
+    );
+    sample.insert(
+        "write_amplification_basis".into(),
+        json!(
+            if event["phase_elapsed_ns"]["persist_logical_bytes"].is_number() {
+                "process_write_bytes_per_captured_live_text_byte_not_changed_bytes"
+            } else {
+                "process_write_bytes_per_imported_or_inserted_text_byte"
+            }
+        ),
     );
     sample.insert(
         "fixture_valid".into(),
@@ -291,6 +296,16 @@ fn resource_sample(event: &Value) -> Value {
         json!(event["status"].as_str().unwrap_or("ok")),
     );
     Value::Object(sample)
+}
+
+fn write_amplification(event: &Value) -> Option<f64> {
+    let logical = event["phase_elapsed_ns"]["persist_logical_bytes"]
+        .as_f64()
+        .or_else(|| event["phase_elapsed_ns"]["import_logical_bytes"].as_f64())
+        .or_else(|| event["workload_details"]["inserted_bytes"].as_f64())?;
+    let physical = event["process_resources"]["write_bytes"].as_f64()?;
+    (logical.is_finite() && logical > 0.0 && physical.is_finite() && physical >= 0.0)
+        .then_some(physical / logical)
 }
 
 fn measurement_gap_scenarios() -> HashMap<&'static str, &'static str> {
@@ -329,6 +344,17 @@ fn max_i64(events: &[Value], key: &str) -> Option<i64> {
 
 #[cfg(test)]
 mod selection_tests {
+    #[test]
+    fn persistence_write_ratio_requires_known_positive_logical_bytes() {
+        use serde_json::json;
+        let mut event = json!({"phase_elapsed_ns":{"persist_logical_bytes":100},"process_resources":{"write_bytes":2000}});
+        assert_eq!(super::write_amplification(&event), Some(20.0));
+        event["phase_elapsed_ns"]["persist_logical_bytes"] = json!(0);
+        assert_eq!(super::write_amplification(&event), None);
+        event["phase_elapsed_ns"]["persist_logical_bytes"] = json!(100);
+        event["process_resources"]["write_bytes"] = serde_json::Value::Null;
+        assert_eq!(super::write_amplification(&event), None);
+    }
     #[test]
     fn focused_selection_is_exact_deduplicated_and_rejects_typos() {
         let expected = vec!["one".into(), "two".into(), "three".into()];
