@@ -7,27 +7,38 @@ pub(super) fn attach(root: &Path, events: &mut [Value]) -> Result<()> {
     let manifest: Value = serde_json::from_slice(&std::fs::read(
         root.join("benches/measurement_manifest.json"),
     )?)?;
+    if manifest.get("outcome_contract_version").is_some() {
+        crate::outcomes::validate(&manifest)?;
+    }
     let budgets = manifest["resource_budgets"]
         .as_object()
         .context("missing project resource budgets")?;
     for event in events {
         let id = event["scenario"]
             .as_str()
-            .context("missing resource scenario")?;
-        let mut budget = budgets.get(id).cloned().unwrap_or(Value::Null);
+            .context("missing resource scenario")?
+            .to_owned();
+        let mut budget = budgets.get(&id).cloned().unwrap_or(Value::Null);
         if let Some(object) = budget.as_object_mut() {
             object.insert("authoritative".into(), json!(true));
             object.insert("source".into(), json!("benches/measurement_manifest.json"));
         }
-        event["fixture_contract"] = manifest["fixtures"][id].clone();
+        event["fixture_contract"] = manifest["fixtures"][&id].clone();
         event["resource_budget"] = budget;
+        crate::outcomes::annotate(&manifest, "resource_budgets", &id, event);
+        if manifest.get("durability_policy").is_some() {
+            event["memory_assessment"] = crate::residency::memory_assessment(
+                &event["memory_observation"],
+                &manifest["durability_policy"],
+            )?;
+        }
         event["budget_status"] = json!(status(event));
     }
     Ok(())
 }
 
 fn observation(sample: &Value) -> Option<(f64, f64)> {
-    if sample["status"] != "ok" {
+    if sample["status"] != "ok" || sample["outcome_valid"] == false {
         return None;
     }
     let budget = &sample["resource_budget"];

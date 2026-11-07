@@ -3,7 +3,18 @@ mod evidence;
 mod health;
 mod inventory;
 mod noise;
+pub(crate) mod outcomes;
 mod registry;
+pub fn describe_promises(root: &std::path::Path, output: &std::path::Path) -> Result<()> {
+    let manifest = crate::outcomes::load(root)?;
+    let rows = outcomes::matrix(&manifest, &[], &[], &[])?;
+    if let Some(parent) = output.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(output, outcomes::markdown(&rows))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod scale_tests;
 
@@ -151,7 +162,63 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
         .filter(|row| row.coverage_status == CoverageStatus::Thin)
         .count();
     let missing = scenario_payload.len() - covered - thin;
+    let manifest: Value = serde_json::from_slice(&std::fs::read(
+        config
+            .project_root
+            .join("benches/measurement_manifest.json"),
+    )?)?;
+    let capacity_values = capacity_rows
+        .iter()
+        .map(serde_json::to_value)
+        .collect::<Result<Vec<_>, _>>()?;
+    let outcome_matrix =
+        outcomes::matrix(&manifest, &latency_rows, &capacity_values, resource_rows)?;
+    let mut unique_failing_gates: std::collections::BTreeSet<String> = outcome_matrix
+        .iter()
+        .filter(|r| r.verdict == "fail" && !r.shared_with.is_empty())
+        .map(|r| format!("{}/{}", r.kind, r.id))
+        .collect();
+    for (definition, row) in scenarios.iter().zip(&scenario_payload) {
+        for evidence in &row.evidence.latency {
+            let id = evidence["benchmark_key"].as_str().unwrap_or("");
+            if definition.benchmark_keys.contains(&id)
+                && crate::measurement_contract::eligible(id, &evidence["measurement_contract"])
+                && over_budget_latency(&evidence)
+            {
+                let kind = if manifest["probe_measurements"].get(id).is_some() {
+                    "probe_measurements"
+                } else {
+                    "criterion"
+                };
+                unique_failing_gates.insert(format!("{kind}/{id}"));
+            }
+        }
+        if !resources_synthetic {
+            for evidence in &row.evidence.resources {
+                if resource_contract_failed(evidence) {
+                    unique_failing_gates.insert(format!(
+                        "resource_budgets/{}",
+                        evidence["scenario"].as_str().unwrap_or("unknown")
+                    ));
+                }
+            }
+        }
+    }
+    let unique_failing_gates: Vec<_> = unique_failing_gates.into_iter().collect();
+    std::fs::write(
+        config.output_dir.join("promise-outcomes.md"),
+        outcomes::markdown(&outcome_matrix),
+    )?;
+    let diagnostics = inputs.read("residency_ladder.json", json!(null));
+    let residency_diagnostics = if diagnostics.is_null() {
+        json!({"status":"missing","promise_eligible":false})
+    } else {
+        json!({"status":if diagnostics["complete"] == true {"complete"} else {"incomplete"},"promise_eligible":false,"source_context":diagnostics["source_context"],"groups":diagnostics["groups"],"gaps":diagnostics["gaps"]})
+    };
     let artifact = PerformanceReviewArtifact {
+        residency_diagnostics,
+        outcome_matrix,
+
         meta: PerformanceReviewMeta {
             noisy_sources,
             generated_from: "rust:performance_review".to_string(),
@@ -171,6 +238,8 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
                 .filter(|check| !check.met)
                 .count(),
             budget_misses: scenario_payload.iter().map(|row| row.budget_misses).sum(),
+            unique_failing_gate_count: unique_failing_gates.len(),
+            unique_failing_gates,
             ceilings_reached: scenario_payload.iter().map(|row| row.ceilings_reached).sum(),
             implementation_count: scenario_payload
                 .iter()

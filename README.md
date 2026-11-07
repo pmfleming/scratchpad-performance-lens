@@ -68,7 +68,45 @@ records a `focused` selection in the artifact and requested scenarios in
 `measure_run.json`. Unknown scenario IDs fail before launching a probe. Use a
 separate output directory: the resulting artifact contains only the
 selected scenarios and cannot establish coverage for omitted operations.
-`--scenario` is rejected for `promises` and other producers.
+`--scenario` is also supported by the opt-in `residency` diagnostic; it is
+rejected for `promises` and other producers.
+
+## Precise outcomes and residency diagnostics
+
+The versioned project outcome contract names what finishes, what blocks the user,
+the observed cache state, and the durability endpoint for every resource,
+capacity, and workflow/frame probe gate. `store_uncontrolled` means the probe
+does not establish cold, warm, or resident conditions. The original budgets,
+workloads, repetition minima, and code-path requirements remain frozen.
+
+```console
+splens validate --config splens.toml
+splens describe-promises --config splens.toml --output docs/promise-outcomes.md
+splens measure residency --scenario search_file_size_ceiling --config diagnostic.toml
+splens import-residency --input trials.json --config diagnostic.toml
+splens measure-instructions --probe resource_probe --scenario session_persist_cost --config diagnostic.toml
+```
+
+`describe-promises` writes declarations with **unmeasured** verdicts. A review
+writes `promise-outcomes.md` beside `performance_review.json`, with observed
+endpoints, measured-sweep budget verdicts, and memory-observation coverage.
+The JSON matrix has one row per gate with `shared_with` membership. Its unique
+failure count deduplicates required gates across promises; legacy per-promise
+counts remain available. A capacity failure above promised scale can contribute
+to this measured-sweep count without proving a promise failed at its scale.
+
+Residency and instruction measurements are opt-in diagnostics and cannot satisfy
+promise gates. `measure all` and `measure promises` do not run them.
+The residency runner/importer, result checks, memory-policy assessment and
+classification are implemented. **Scratchpad has not yet implemented the full
+`residency_probe` target.** Until it does, a residency run writes explicit missing
+rungs and exits unsuccessfully; it does not substitute owned benchmarks or
+invent memory/exposure data. Callgrind currently records whole-process counts,
+including setup and teardown; per-phase counts require probe instrumentation.
+
+See [the diagnostic protocol](docs/residency-diagnostics.md),
+[generated promise declarations](docs/promise-outcomes.md), and
+[implementation status](docs/promise-plan-implementation.md).
 
 Project capacity/resource budgets may declare `min_independent_launches` (1–16).
 The runner honors that floor even away from the adaptive repetition band, and

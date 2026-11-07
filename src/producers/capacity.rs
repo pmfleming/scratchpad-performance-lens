@@ -192,9 +192,16 @@ fn capacity_report_for(
                     .project_root
                     .join("benches/measurement_manifest.json"),
             )?)?;
+            if manifest.get("outcome_contract_version").is_some() {
+                crate::outcomes::validate(&manifest)?;
+            }
             for event in &mut result.events {
                 event["operation_budget"] =
                     manifest["capacity_budgets"][event["scenario"].as_str().unwrap_or("")].clone();
+            }
+            for event in &mut result.events {
+                let id = event["scenario"].as_str().unwrap_or("").to_owned();
+                crate::outcomes::annotate(&manifest, "capacity_budgets", &id, event);
             }
             let validation = validate_capacity_events_for(&result.events, scenarios)
                 .err()

@@ -10,7 +10,7 @@ pub(super) use frames::{frame_over_budget, valid_frame};
 
 pub(super) use artifact::{scenarios_array, values_array, AnalysisInputs};
 pub(super) use probe::{
-    output_text, probe_path, run_probe_object, run_sweeps, write_probe_artifact,
+    build_probe, output_text, probe_path, run_probe_object, run_sweeps, write_probe_artifact,
 };
 pub(super) use stats::{
     benchmark_parameter, budget_probe_ms, dispersion_lower_ns, dispersion_upper_ns,

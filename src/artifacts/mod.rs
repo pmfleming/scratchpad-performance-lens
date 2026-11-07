@@ -9,6 +9,24 @@ pub(crate) fn export_schemas(output: &Path) -> Result<()> {
     std::fs::create_dir_all(output)?;
     let schemas = [
         (
+            "residency_ladder",
+            "residency_ladder.schema.json",
+            "residency_ladder.json",
+            serde_json::to_value(schemars::schema_for!(crate::residency::LadderArtifact))?,
+        ),
+        (
+            "residency_trial",
+            "residency_trial.schema.json",
+            "residency trial input",
+            serde_json::to_value(schemars::schema_for!(crate::residency::Trial))?,
+        ),
+        (
+            "outcome",
+            "outcome.schema.json",
+            "manifest outcome",
+            serde_json::to_value(schemars::schema_for!(crate::outcomes::Outcome))?,
+        ),
+        (
             performance_review::SCHEMA_ID,
             performance_review::SCHEMA_FILE,
             "performance_review.json",

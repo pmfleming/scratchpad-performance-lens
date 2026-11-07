@@ -1,0 +1,739 @@
+{
+  "outcome_contract_version": 1,
+  "durability_policy": {
+    "version": 1,
+    "pending_queue_limit_bytes": 33554432,
+    "manifest_sync": "FULL",
+    "body_sync": "NORMAL",
+    "maximum_exposure_ms": null,
+    "exposure_limit_status": "not_specified_by_project",
+    "pending_limit_scope": "bulk_pending_queue_not_all_uncommitted_text"
+  },
+  "residency_diagnostics": {
+    "version": 1,
+    "probe": "residency_probe",
+    "independent_launches": 3,
+    "memory_profiles": [
+      4294967296,
+      17179869184,
+      null
+    ],
+    "operations": {
+      "search_file_size_ceiling": {
+        "gate_section": "capacity_budgets",
+        "gate_id": "search_file_size_ceiling",
+        "workloads": [
+          67108864,
+          268435456,
+          1073741824
+        ],
+        "workload_unit": "bytes",
+        "completion_endpoint": "all_ranges_returned",
+        "fixtures": [
+          "ascii",
+          "unicode_crlf"
+        ],
+        "metric": "/elapsed_ns",
+        "code_paths": {
+          "owned_contiguous": "search/owned_contiguous",
+          "owned_piece_tree": "search/owned_piece_tree",
+          "store_resident": "search/store_resident",
+          "store_warm": "search/store_warm",
+          "store_cold": "search/store_cold"
+        }
+      },
+      "search_target_count_ceiling": {
+        "gate_section": "capacity_budgets",
+        "gate_id": "search_target_count_ceiling",
+        "workloads": [
+          1000,
+          10000
+        ],
+        "workload_unit": "targets",
+        "completion_endpoint": "all_ranges_returned",
+        "fixtures": [
+          "ascii",
+          "unicode_crlf"
+        ],
+        "metric": "/elapsed_ns",
+        "code_paths": {
+          "owned_contiguous": "target_search/owned_contiguous",
+          "owned_piece_tree": "target_search/owned_piece_tree",
+          "store_resident": "target_search/store_resident",
+          "store_warm": "target_search/store_warm",
+          "store_cold": "target_search/store_cold"
+        }
+      },
+      "random_window": {
+        "gate_section": "resource_budgets",
+        "gate_id": "file_backed_random_window",
+        "workloads": [
+          1073741824
+        ],
+        "workload_unit": "bytes",
+        "completion_endpoint": "random_windows_complete",
+        "fixtures": [
+          "ascii",
+          "unicode_crlf"
+        ],
+        "metric": "/phase_elapsed_ns/window_p99_ns",
+        "code_paths": {
+          "owned_contiguous": "window/owned_contiguous",
+          "owned_piece_tree": "window/owned_piece_tree",
+          "store_resident": "window/store_resident",
+          "store_warm": "window/store_warm",
+          "store_cold": "window/store_cold"
+        }
+      },
+      "paste_publication": {
+        "gate_section": "capacity_budgets",
+        "gate_id": "paste_size_ceiling",
+        "workloads": [
+          67108864,
+          134217728
+        ],
+        "workload_unit": "bytes",
+        "completion_endpoint": "paste_published",
+        "fixtures": [
+          "ascii",
+          "unicode_crlf"
+        ],
+        "metric": "/elapsed_ns",
+        "code_paths": {
+          "owned_contiguous": "paste/owned_contiguous",
+          "owned_piece_tree": "paste/owned_piece_tree",
+          "store_resident": "paste/store_resident",
+          "store_warm": "paste/store_warm",
+          "store_cold": "paste/store_cold"
+        }
+      },
+      "metadata_refresh": {
+        "gate_section": "resource_budgets",
+        "gate_id": "large_utf8_load_peak_memory",
+        "workloads": [
+          1073741824
+        ],
+        "workload_unit": "bytes",
+        "completion_endpoint": "metadata_refresh_complete",
+        "fixtures": [
+          "ascii",
+          "unicode_crlf"
+        ],
+        "metric": "/elapsed_ns",
+        "code_paths": {
+          "owned_contiguous": "metadata/owned_contiguous",
+          "owned_piece_tree": "metadata/owned_piece_tree",
+          "store_resident": "metadata/store_resident",
+          "store_warm": "metadata/store_warm",
+          "store_cold": "metadata/store_cold"
+        }
+      },
+      "undo_redo": {
+        "gate_section": "resource_budgets",
+        "gate_id": "provenance_retained_memory",
+        "workloads": [
+          100000
+        ],
+        "workload_unit": "edits",
+        "completion_endpoint": "undo_redo_complete",
+        "fixtures": [
+          "ascii",
+          "unicode_crlf"
+        ],
+        "metric": "/elapsed_ns",
+        "code_paths": {
+          "owned_contiguous": "history/owned_contiguous",
+          "owned_piece_tree": "history/owned_piece_tree",
+          "store_resident": "history/store_resident",
+          "store_warm": "history/store_warm",
+          "store_cold": "history/store_cold"
+        }
+      },
+      "first_visible_paint": {
+        "gate_section": "resource_budgets",
+        "gate_id": "large_file_first_visible_paint",
+        "workloads": [
+          2147483648
+        ],
+        "workload_unit": "bytes",
+        "completion_endpoint": "first_window_prepared",
+        "fixtures": [
+          "ascii",
+          "unicode_crlf"
+        ],
+        "metric": "/elapsed_ns",
+        "code_paths": {
+          "owned_contiguous": "first_visible/owned_contiguous",
+          "owned_piece_tree": "first_visible/owned_piece_tree",
+          "store_resident": "first_visible/store_resident",
+          "store_warm": "first_visible/store_warm",
+          "store_cold": "first_visible/store_cold"
+        }
+      }
+    }
+  },
+  "resource_budgets": {
+    "large_utf8_load_peak_memory": {
+      "promise": "large_files",
+      "user_outcome": "UTF-8 load and metadata construction complete",
+      "endpoint": "load_complete",
+      "blocking": "background_completion",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "large_file_first_visible_paint": {
+      "promise": "large_files",
+      "user_outcome": "First bounded file window prepared for display (not display presentation)",
+      "endpoint": "first_window_prepared",
+      "blocking": "foreground_interaction",
+      "residency": "not_applicable",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "file_backed_chunk_cache_tracking": {
+      "promise": "large_files",
+      "user_outcome": "File-backed cache exercise complete",
+      "endpoint": "cache_cycle_complete",
+      "blocking": "background_completion",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "file_backed_random_window": {
+      "promise": "large_files",
+      "user_outcome": "Random text windows returned; gate uses p99",
+      "endpoint": "random_windows_complete",
+      "blocking": "foreground_interaction",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "file_backed_search": {
+      "promise": "search",
+      "user_outcome": "Serial file-backed search scan complete",
+      "endpoint": "serial_scan_complete",
+      "blocking": "background_completion",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "typing_without_save": {
+      "promise": "text_mutation",
+      "user_outcome": "Typing cycle complete; gate uses p99",
+      "endpoint": "typing_cycle_complete",
+      "blocking": "foreground_interaction",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "typing_during_save": {
+      "promise": "text_mutation",
+      "user_outcome": "Typing cycle complete while persistence runs; gate uses p99",
+      "endpoint": "typing_cycle_complete",
+      "blocking": "interaction_during_background",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "many_file_resource_tracking": {
+      "promise": "many_files",
+      "user_outcome": "Many-file component operation complete",
+      "endpoint": "file_cycle_complete",
+      "blocking": "background_completion",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "many_file_lazy_open_tracking": {
+      "promise": "many_files",
+      "user_outcome": "Lazy-open tracking operation complete",
+      "endpoint": "lazy_open_complete",
+      "blocking": "background_completion",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "search_file_size_resource_tracking": {
+      "promise": "search",
+      "user_outcome": "Prepared search component scan complete",
+      "endpoint": "search_component_complete",
+      "blocking": "background_completion",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "search_target_resource_tracking": {
+      "promise": "search",
+      "user_outcome": "Prepared multi-target search component complete",
+      "endpoint": "target_search_complete",
+      "blocking": "background_completion",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "search_app_result_tracking": {
+      "promise": "search",
+      "user_outcome": "Completed production search results retained",
+      "endpoint": "results_retained",
+      "blocking": "background_completion",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "edited_buffer_search_preview_rendering": {
+      "promise": "search",
+      "user_outcome": "Edited-buffer result preview rendering complete",
+      "endpoint": "preview_render_complete",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "paste_allocation": {
+      "promise": "text_mutation",
+      "user_outcome": "Prepared paste component mutation complete",
+      "endpoint": "paste_component_complete",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "provenance_retained_memory": {
+      "promise": "text_mutation",
+      "user_outcome": "History exercise complete and retained",
+      "endpoint": "history_retained",
+      "blocking": "background_completion",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "fragmented_long_session_mutation": {
+      "promise": "text_mutation",
+      "user_outcome": "Fragmented paste/cut/undo/redo component cycle complete",
+      "endpoint": "mutation_cycle_complete",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "tab_count_resource_tracking": {
+      "promise": "many_tabs",
+      "user_outcome": "Prepared tab construction/manipulation cycle complete",
+      "endpoint": "tab_cycle_complete",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "tab_build_targeted": {
+      "promise": "many_tabs",
+      "user_outcome": "Prepared tabs constructed",
+      "endpoint": "tabs_constructed",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "tab_split_targeted": {
+      "promise": "many_tabs",
+      "user_outcome": "Prepared tabs split",
+      "endpoint": "tabs_split",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "tab_combine_targeted": {
+      "promise": "many_tabs",
+      "user_outcome": "Prepared tabs combined",
+      "endpoint": "tabs_combined",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "tab_strip_frame_rendering": {
+      "promise": "many_tabs",
+      "user_outcome": "Tab strip CPU frame rendered; excludes display presentation",
+      "endpoint": "tab_frame_complete",
+      "blocking": "foreground_interaction",
+      "residency": "not_applicable",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "view_count_resource_tracking": {
+      "promise": "many_views",
+      "user_outcome": "Prepared view operation complete",
+      "endpoint": "view_cycle_complete",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "anchor_heavy_view_editing": {
+      "promise": "many_views",
+      "user_outcome": "Shared-text edit and anchor resolution complete",
+      "endpoint": "anchors_resolved",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "session_persist_cost": {
+      "promise": "session_restore",
+      "user_outcome": "First session persistence request complete",
+      "endpoint": "persist_complete",
+      "blocking": "background_completion",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "committed_full",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "large_dirty_buffer_save": {
+      "promise": "session_restore",
+      "user_outcome": "Large dirty buffer and history durably persisted",
+      "endpoint": "persist_complete",
+      "blocking": "background_completion",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "committed_full",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "session_restore_cost": {
+      "promise": "session_restore",
+      "user_outcome": "Full restored session reconstructed and retained",
+      "endpoint": "fully_reconstructed_session_retained",
+      "blocking": "background_completion",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "startup_visible_restore_cost": {
+      "promise": "session_restore",
+      "user_outcome": "Startup-visible session subset restored",
+      "endpoint": "visible_restore_complete",
+      "blocking": "foreground_interaction",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "session_steady_persist_cost": {
+      "promise": "session_restore",
+      "user_outcome": "Unchanged session persistence request complete (may reuse committed snapshot)",
+      "endpoint": "steady_persist_complete",
+      "blocking": "background_completion",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "committed_full",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "store_import": {
+      "promise": "large_files",
+      "user_outcome": "Streaming store import exercise complete",
+      "endpoint": "store_import_complete",
+      "blocking": "background_completion",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "ui_during_store_writes": {
+      "promise": "large_files",
+      "user_outcome": "CPU frames sampled during writes; gate uses frame p99",
+      "endpoint": "frames_during_writes_complete",
+      "blocking": "interaction_during_background",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "cold_reads_during_save": {
+      "promise": "large_files",
+      "user_outcome": "Physically verified cold reads sampled during saves; gate uses p99",
+      "endpoint": "cold_reads_complete",
+      "blocking": "interaction_during_background",
+      "residency": "store_cold",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "aged_store_save": {
+      "promise": "session_restore",
+      "user_outcome": "Aged-store save operation complete",
+      "endpoint": "aged_save_complete",
+      "blocking": "background_completion",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "aged_store_restore": {
+      "promise": "session_restore",
+      "user_outcome": "Aged-store restore operation complete",
+      "endpoint": "aged_restore_complete",
+      "blocking": "background_completion",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "aged_store_close": {
+      "promise": "session_restore",
+      "user_outcome": "Aged-store close/archive operation complete",
+      "endpoint": "aged_close_complete",
+      "blocking": "foreground_interaction",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "aged_store_forget": {
+      "promise": "session_restore",
+      "user_outcome": "Aged-store forget-history operation complete",
+      "endpoint": "aged_forget_complete",
+      "blocking": "foreground_interaction",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "production_paste": {
+      "promise": "text_mutation",
+      "user_outcome": "Accepted paste visible and editable; later durability is separate",
+      "endpoint": "paste_published",
+      "blocking": "foreground_interaction",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "published_ram",
+      "workload": "Full declared resource sweep; actual workload_value and workload_unit retained in raw trials"
+    }
+  },
+  "capacity_budgets": {
+    "large_file_first_visible_ceiling": {
+      "promise": "large_files",
+      "user_outcome": "First file prefix available",
+      "endpoint": "first_visible",
+      "blocking": "foreground_interaction",
+      "residency": "not_applicable",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared capacity sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "large_file_background_index_ceiling": {
+      "promise": "large_files",
+      "user_outcome": "Large-file background indexing complete",
+      "endpoint": "index_complete",
+      "blocking": "background_completion",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared capacity sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "in_memory_text_ingest_ceiling": {
+      "promise": "large_files",
+      "user_outcome": "In-memory ingest diagnostic complete",
+      "endpoint": "ingest_complete",
+      "blocking": "background_completion",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared capacity sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "text_layout_ceiling": {
+      "promise": "large_files",
+      "user_outcome": "CPU text layout complete",
+      "endpoint": "layout_complete",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared capacity sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "many_file_first_visible_ceiling": {
+      "promise": "many_files",
+      "user_outcome": "Selected file first visible",
+      "endpoint": "first_visible",
+      "blocking": "foreground_interaction",
+      "residency": "not_applicable",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared capacity sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "many_file_background_hydration_ceiling": {
+      "promise": "many_files",
+      "user_outcome": "All declared files hydrated",
+      "endpoint": "hydration_complete",
+      "blocking": "background_completion",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared capacity sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "search_file_size_ceiling": {
+      "promise": "search",
+      "user_outcome": "All production search ranges returned",
+      "endpoint": "all_ranges_returned",
+      "blocking": "background_completion",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared capacity sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "search_target_count_ceiling": {
+      "promise": "search",
+      "user_outcome": "Search over all prepared targets complete",
+      "endpoint": "target_search_complete",
+      "blocking": "background_completion",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared capacity sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "tab_count_ceiling": {
+      "promise": "many_tabs",
+      "user_outcome": "Prepared tab operation cycle complete",
+      "endpoint": "tab_cycle_complete",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared capacity sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "split_count_ceiling": {
+      "promise": "many_views",
+      "user_outcome": "Prepared split cycle complete",
+      "endpoint": "split_cycle_complete",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared capacity sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "view_count_ceiling": {
+      "promise": "many_views",
+      "user_outcome": "Prepared view cycle complete",
+      "endpoint": "view_cycle_complete",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "Full declared capacity sweep; actual workload_value and workload_unit retained in raw trials"
+    },
+    "paste_size_ceiling": {
+      "promise": "text_mutation",
+      "user_outcome": "Production paste published",
+      "endpoint": "paste_published",
+      "blocking": "foreground_interaction",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "published_ram",
+      "workload": "Full declared capacity sweep; actual workload_value and workload_unit retained in raw trials"
+    }
+  },
+  "probe_measurements": {
+    "editor_scroll_frame_120hz": {
+      "promise": "large_files",
+      "user_outcome": "Measured CPU frame path complete; display presentation excluded",
+      "endpoint": "measured_frame_path_complete",
+      "blocking": "foreground_interaction",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Complete declared scrolling workload; frame count, document bytes and p95/p99 retained"
+    },
+    "editor_scroll_event_to_tessellation": {
+      "promise": "large_files",
+      "user_outcome": "Scroll CPU frame tessellated; display presentation excluded",
+      "endpoint": "tessellation_complete",
+      "blocking": "foreground_interaction",
+      "residency": "store_uncontrolled",
+      "durability_at_endpoint": "not_required",
+      "workload": "Complete declared scrolling workload; frame count, document bytes and p95/p99 retained"
+    },
+    "search_workflow_active_dispatch": {
+      "promise": "search",
+      "user_outcome": "active search: dispatch",
+      "endpoint": "dispatch",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "1 targets, 1048576 bytes per target; full production workflow"
+    },
+    "search_workflow_active_first_result": {
+      "promise": "search",
+      "user_outcome": "active search: first result",
+      "endpoint": "first_result",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "1 targets, 1048576 bytes per target; full production workflow"
+    },
+    "search_workflow_active_first_render": {
+      "promise": "search",
+      "user_outcome": "active search: first render",
+      "endpoint": "first_render",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "1 targets, 1048576 bytes per target; full production workflow"
+    },
+    "search_workflow_active_completion": {
+      "promise": "search",
+      "user_outcome": "active search: completion",
+      "endpoint": "completion",
+      "blocking": "background_completion",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "1 targets, 1048576 bytes per target; full production workflow"
+    },
+    "search_workflow_current_dispatch": {
+      "promise": "search",
+      "user_outcome": "current search: dispatch",
+      "endpoint": "dispatch",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "32 targets, 16384 bytes per target; full production workflow"
+    },
+    "search_workflow_current_first_result": {
+      "promise": "search",
+      "user_outcome": "current search: first result",
+      "endpoint": "first_result",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "32 targets, 16384 bytes per target; full production workflow"
+    },
+    "search_workflow_current_first_render": {
+      "promise": "search",
+      "user_outcome": "current search: first render",
+      "endpoint": "first_render",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "32 targets, 16384 bytes per target; full production workflow"
+    },
+    "search_workflow_current_completion": {
+      "promise": "search",
+      "user_outcome": "current search: completion",
+      "endpoint": "completion",
+      "blocking": "background_completion",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "32 targets, 16384 bytes per target; full production workflow"
+    },
+    "search_workflow_all_dispatch": {
+      "promise": "search",
+      "user_outcome": "all search: dispatch",
+      "endpoint": "dispatch",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "10000 targets, 16384 bytes per target; full production workflow"
+    },
+    "search_workflow_all_first_result": {
+      "promise": "search",
+      "user_outcome": "all search: first result",
+      "endpoint": "first_result",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "10000 targets, 16384 bytes per target; full production workflow"
+    },
+    "search_workflow_all_first_render": {
+      "promise": "search",
+      "user_outcome": "all search: first render",
+      "endpoint": "first_render",
+      "blocking": "foreground_interaction",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "10000 targets, 16384 bytes per target; full production workflow"
+    },
+    "search_workflow_all_completion": {
+      "promise": "search",
+      "user_outcome": "all search: completion",
+      "endpoint": "completion",
+      "blocking": "background_completion",
+      "residency": "owned",
+      "durability_at_endpoint": "not_required",
+      "workload": "10000 targets, 16384 bytes per target; full production workflow"
+    }
+  }
+}

@@ -116,6 +116,18 @@ fn schema_export_writes_typed_artifact_contracts() -> anyhow::Result<()> {
             "capacity_report",
             vec!["first_failure_workload", "workload_value"],
         ),
+        (
+            "residency_trial",
+            vec!["metric_ns", "result_digest", "memory_profile_bytes"],
+        ),
+        (
+            "residency_ladder",
+            vec!["diagnostic_only", "promise_eligible", "gaps"],
+        ),
+        (
+            "outcome",
+            vec!["durability_at_endpoint", "store_uncontrolled", "endpoint"],
+        ),
     ] {
         assert!(index["schemas"]
             .as_array()

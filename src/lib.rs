@@ -17,3 +17,7 @@ pub mod baselines;
 pub mod environment;
 
 pub mod fixture_contract;
+
+pub mod outcomes;
+
+pub mod residency;

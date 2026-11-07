@@ -2,13 +2,14 @@
 use serde_json::Value;
 
 pub(in crate::producers) fn valid_frame(row: &Value) -> bool {
-    ["p95_ms", "p99_ms", "budget_ms", "p99_budget_ms"]
-        .iter()
-        .all(|key| {
-            row[*key]
-                .as_f64()
-                .is_some_and(|value| value.is_finite() && value > 0.0)
-        })
+    row["outcome_valid"] != false
+        && ["p95_ms", "p99_ms", "budget_ms", "p99_budget_ms"]
+            .iter()
+            .all(|key| {
+                row[*key]
+                    .as_f64()
+                    .is_some_and(|value| value.is_finite() && value > 0.0)
+            })
         && row["p95_ms"].as_f64() <= row["p99_ms"].as_f64()
         && row["max_ms"].as_f64().is_none_or(|maximum| {
             row["p99_ms"].as_f64().is_some_and(|p99| {

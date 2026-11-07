@@ -3,6 +3,9 @@ use anyhow::{ensure, Context, Result};
 use serde_json::{json, Value};
 
 pub(super) fn validate(payload: &Value, manifest: &Value) -> Result<()> {
+    if manifest.get("outcome_contract_version").is_some() {
+        crate::outcomes::validate(manifest)?;
+    }
     for row in payload["scenarios"]
         .as_array()
         .context("missing workflow rows")?
@@ -19,6 +22,9 @@ pub(super) fn validate(payload: &Value, manifest: &Value) -> Result<()> {
             "workflow identity mismatch"
         );
         let budget = &manifest["probe_measurements"][key];
+        if manifest.get("outcome_contract_version").is_some() {
+            crate::outcomes::verify(&budget["outcome"], &row["observed_outcome"])?;
+        }
         ensure!(
             budget["probe"] == "search_workflow_metrics"
                 && budget["threshold_ms"]

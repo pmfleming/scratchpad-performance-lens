@@ -83,7 +83,8 @@ pub fn context(root: &Path) -> Value {
     })
 }
 
-fn compute_context(root: &Path) -> Value {
+/// Bypass the per-run snapshot when checking for edits during a diagnostic run.
+pub(crate) fn compute_context(root: &Path) -> Value {
     let files = Command::new("git")
         .args(["ls-files", "-c", "-o", "--exclude-standard", "-z"])
         .current_dir(root)

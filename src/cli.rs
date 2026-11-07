@@ -13,6 +13,15 @@ mod run_report;
 type ProducerRun = fn(&LensConfig, MeasureOptions) -> Result<()>;
 
 const PRODUCERS: &[ProducerSpec] = &[
+    ProducerSpec {
+        standard_run: false,
+        ..ProducerSpec::new(
+            "residency",
+            "residency_ladder.json",
+            producers::residency::measure,
+            &[],
+        )
+    },
     ProducerSpec::new(
         "slowspots",
         "slowspots.json",
@@ -131,6 +140,12 @@ struct Cli {
 enum Command {
     Measure(MeasureArgs),
     Catalog(ConfigArgs),
+    /// Generate promise definitions without inventing current verdicts.
+    DescribePromises(DescribeArgs),
+    /// Validate and report source-bound diagnostic trials.
+    ImportResidency(ImportResidencyArgs),
+    /// Optional setup-inclusive Callgrind companion; never latency evidence.
+    MeasureInstructions(producers::instructions::Args),
     /// Check required measurements and project-owned budgets without running probes.
     Validate(ConfigArgs),
     Telemetry(ConfigArgs),
@@ -143,6 +158,24 @@ enum Command {
     MeasureLargeDirtySave(crate::session_tools::MeasureLargeDirtySaveArgs),
     /// Archive usage/archive/history maintenance and subsequent save samples.
     MeasureSessionMaintenance(crate::session_tools::MeasureLargeDirtySaveArgs),
+}
+
+#[derive(Debug, Parser)]
+struct ImportResidencyArgs {
+    #[arg(long)]
+    config: Option<PathBuf>,
+    #[arg(long)]
+    input: PathBuf,
+    #[arg(long = "scenario")]
+    scenarios: Vec<String>,
+}
+
+#[derive(Debug, Parser)]
+struct DescribeArgs {
+    #[arg(long)]
+    config: Option<PathBuf>,
+    #[arg(long, default_value = "docs/promise-outcomes.md")]
+    output: PathBuf,
 }
 
 #[derive(Debug, Parser)]
@@ -168,7 +201,7 @@ struct MeasureArgs {
     index_only: bool,
     #[arg(
         long = "scenario",
-        help = "Run only this scenario; repeat for several (resources or capacity only)"
+        help = "Run only this scenario; repeat for several (resources, capacity or residency only)"
     )]
     scenarios: Vec<String>,
 }
@@ -210,9 +243,25 @@ pub fn run_cli() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Catalog(args) => catalog(args),
+        Command::MeasureInstructions(args) => producers::instructions::measure(args),
+        Command::ImportResidency(args) => {
+            let c = LensConfig::load(args.config.as_deref())?;
+            producers::residency::import(&c, &args.input, &args.scenarios)
+        }
+        Command::DescribePromises(args) => {
+            let c = LensConfig::load(args.config.as_deref())?;
+            producers::describe_promises(&c.project_root, &args.output)
+        }
         Command::Validate(args) => {
             let config = LensConfig::load(args.config.as_deref())?;
             producers::validate_registry(&config.project_root)?;
+            let manifest = crate::outcomes::load(&config.project_root)?;
+            if manifest.get("durability_policy").is_some() {
+                crate::residency::validate_policy(&manifest["durability_policy"])?;
+            }
+            if manifest["diagnostics"].get("residency").is_some() {
+                crate::residency::analyze(&manifest, Vec::new(), &[])?;
+            }
             println!("Promise registry is satisfiable.");
             Ok(())
         }
@@ -399,7 +448,10 @@ fn selected_producers(selection: &str) -> Vec<&'static ProducerSpec> {
             .iter()
             .filter(|producer| producer.standard_run)
             .collect(),
-        "all-with-flamegraphs" => PRODUCERS.iter().collect(),
+        "all-with-flamegraphs" => PRODUCERS
+            .iter()
+            .filter(|p| p.standard_run || p.tool == "flamegraphs")
+            .collect(),
         tool => PRODUCERS
             .iter()
             .find(|producer| producer.tool == tool)
@@ -410,9 +462,10 @@ fn selected_producers(selection: &str) -> Vec<&'static ProducerSpec> {
 
 fn validate_measure_options(selected: &[&ProducerSpec], options: &MeasureOptions) -> Result<()> {
     if !options.scenarios.is_empty()
-        && (selected.len() != 1 || !matches!(selected[0].tool, "resources" | "capacity"))
+        && (selected.len() != 1
+            || !matches!(selected[0].tool, "resources" | "capacity" | "residency"))
     {
-        bail!("--scenario only applies to a resources or capacity run; it cannot narrow a promise review");
+        bail!("--scenario only applies to a resources, capacity or residency run; it cannot narrow a promise review");
     }
     if options.fail_on_slow
         && !selected

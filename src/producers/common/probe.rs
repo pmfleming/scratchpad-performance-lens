@@ -337,7 +337,7 @@ fn parse_partial(bytes: &[u8]) -> (Vec<Value>, Option<Value>, Vec<String>) {
     (events, active, errors)
 }
 
-fn build_probe(root: &Path, bin: &str) -> Result<PathBuf> {
+pub(in crate::producers) fn build_probe(root: &Path, bin: &str) -> Result<PathBuf> {
     let output = shared::run_command(
         root,
         &[

@@ -22,6 +22,27 @@ pub fn frame_metrics(config: &LensConfig, _options: MeasureOptions) -> Result<()
 
     add_realistic_frame_metrics(&mut payload, config);
     annotate_frame_scenarios(&mut payload);
+    let manifest: Value = serde_json::from_slice(
+        &std::fs::read(
+            config
+                .project_root
+                .join("benches/measurement_manifest.json"),
+        )
+        .unwrap_or_default(),
+    )
+    .unwrap_or_default();
+    if manifest.get("outcome_contract_version").is_some() {
+        crate::outcomes::validate(&manifest)?;
+        for row in payload["scenarios"].as_array_mut().into_iter().flatten() {
+            let key =
+                crate::shared::benchmark_key(row["scenario_id"].as_str().unwrap_or("")).to_owned();
+            if manifest["probe_measurements"].get(&key).is_some()
+                && crate::measurement_contract::eligible(&key, &row["measurement_contract"])
+            {
+                crate::outcomes::annotate(&manifest, "probe_measurements", &key, row);
+            }
+        }
+    }
     if !payload["scenarios"]
         .as_array()
         .is_some_and(|rows| !rows.is_empty() && rows.iter().all(super::common::valid_frame))

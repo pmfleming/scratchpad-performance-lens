@@ -8,6 +8,10 @@ pub const SCHEMA_FILE: &str = "performance_review.schema.json";
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct PerformanceReviewArtifact {
+    #[serde(default)]
+    pub residency_diagnostics: Value,
+    #[serde(default)]
+    pub outcome_matrix: Vec<crate::producers::review::outcomes::GateOutcome>,
     pub meta: PerformanceReviewMeta,
     pub summary: PerformanceReviewSummary,
     pub target_promises: Vec<String>,
@@ -49,6 +53,10 @@ pub struct ProbeClass {
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct PerformanceReviewSummary {
+    #[serde(default)]
+    pub unique_failing_gate_count: usize,
+    #[serde(default)]
+    pub unique_failing_gates: Vec<String>,
     pub scenario_count: usize,
     pub covered_scenarios: usize,
     pub thin_scenarios: usize,

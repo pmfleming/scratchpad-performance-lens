@@ -43,12 +43,52 @@ Reviewed changed-file inventories, cycle evidence, contract diffs, and current v
 - A bounded pending queue is not a maximum bound on all user-visible uncommitted text; mutable tails and uncommitted references also matter.
 - A profile override changes budgeting inputs, not the physical RAM/cache capacity of the machine.
 
-## Progress
+## Foundation checkpoints
 - Stage 1 foundation checkpoint: frozen project manifest/benchmark metadata and promise membership/scale inventory; corrected noise propagation, opportunity text, uncertain evidence coverage, capacity labels, and unsupported write amplification. Cold-read output includes sample count and nearest-rank position.
 - Full lens suite passed: 104 library tests and 11 integration tests. Strict all-target Clippy, formatting and diff checks passed.
-- Stage 1 is not yet complete: attributed syscall collection is not implemented (ratios remain null without it); cache configuration is observed only where probes request storage configuration; sampling minima are unchanged; complete behavioral gate inventory/version-change tooling remains to be extended.
+- At that checkpoint, attributed syscall collection was not implemented (ratios remain null without it); cache configuration was observed only where probes request storage configuration; sampling minima were unchanged; endpoint inventory/versioning remained to be extended.
 - Scratchpad companion exposes actual cache limits and app-default comparison without modifying policy. Library check and focused cache-configuration test passed. Committed as Scratchpad 0727bec.
-- Stages 2–7 have not been implemented. No new performance audit or optimization experiment has run.
+- Stages 2–7 had not been implemented at the foundation checkpoint.
 - Baseline lens library suite: 99 tests passed.
 
 Foundation commits: lens d100a10; Scratchpad 0727bec. The follow-up commit corrects uncertain-evidence advice and tests covered-but-at-risk behavior. These are checkpoints within stage 1, not completion of the seven-stage plan.
+
+## Outcome and diagnostic tooling checkpoint
+
+Scratchpad companion commit: `d92bb47`. Existing budgets, workload sweeps,
+measurement scopes, required launches and code-path contracts are unchanged.
+The gate inventory test verifies that against cycle 25. A separate versioned
+snapshot freezes the new outcome, diagnostic and durability-policy declarations.
+
+| Plan work | Delivered | Remaining |
+|---|---|---|
+| Outcome declarations and matrix (step 2) | 62 resource/capacity/workflow/frame declarations; observed endpoint validation; shared membership; unique failing-gate count; generated document | Criterion gates retain their existing benchmark metadata and are included in unique failures, rather than receiving a new probe outcome object |
+| Residency ladder (step 3) | Seven-operation manifest, five-rung runner/importer, source binding, result/cancellation/residency contracts, coverage and noise checks | Scratchpad's actual seven-operation `residency_probe` and measured trials |
+| Memory and exposure (step 4) | Separate policy declaration; current/peak metric validation; FULL exposure calculation; missing-metric reporting; 4/16/host profile protocol; raw pending/cache/tail observations where available | Application budget override plumbing, complete memory ownership and FULL-exposure instrumentation |
+| Classification and optimization (step 5) | Diagnostic paired contrasts and classification for complete, stable imported/measured ladders | Actual classifications and evidence-driven editor changes |
+| Retention/pending experiments (step 6) | Explicit policy-change labeling, preserving NORMAL/FULL distinction | Retention, pressure eviction and pending-headroom experiments |
+| Instruction companion | Opt-in Callgrind runner, raw archives, validated whole-process Ir counts | Named-phase client instrumentation and paired application instruction results |
+| Audit (step 7) | Fresh existing-gate audit launched against committed companion | An audit including residency/retention optimization evidence cannot be completed before those experiments exist |
+
+The original seven-stage plan is not complete. This checkpoint completes the
+lens tooling and its companion observations; it does not claim to make all
+performance promises pass. Keep application changes driven by the missing
+measurements rather than choosing speculative optimizations in the lens.
+
+Validation: 116 lens library tests and 12 integration tests passed, including
+both inventory snapshots, negative outcome/residency cases, source-bound import,
+missing-probe behavior and CLI schema exports. Strict all-target Clippy and
+formatting passed. Scratchpad library/binaries checked successfully; three
+focused outcome tests passed. `splens validate` accepts the committed manifest.
+
+The real `measure residency` smoke check exited nonzero as intended: it wrote
+66 incomplete workload/fixture/profile groups, zero trials, and no inferred
+timings. This confirms the absence is visible. A local Valgrind format smoke
+check produced an unambiguous Ir summary; no application phase counts are
+claimed from that check.
+
+See [the diagnostic protocol](residency-diagnostics.md) and
+[generated declaration matrix](promise-outcomes.md) for the supported commands
+and artifact semantics. Raw audit output is under Scratchpad's ignored
+`target/promise-outcomes-audit/`; committed validation notes will record its
+result without replacing historical cycle-25 evidence.

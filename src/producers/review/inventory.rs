@@ -71,6 +71,9 @@ pub fn validate(root: &Path) -> Result<()> {
                 .context("promise registry: missing project measurement manifest")?,
         )?,
     };
+    if inventory.manifest.get("outcome_contract_version").is_some() {
+        crate::outcomes::validate(&inventory.manifest)?;
+    }
     let mut errors = Vec::new();
     for promise in review_scenarios() {
         errors.extend(
