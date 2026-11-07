@@ -106,6 +106,9 @@ exceed peaks. Exposure is derived only from publication and FULL commit
 timestamps. NORMAL body flush duration is reported separately and cannot fill
 that field. The 32 MiB bulk queue bound is not a bound on all accepted text:
 mutable tails and references awaiting a manifest commit also matter.
+The configured queue value is an admission threshold, not a strict peak ceiling;
+an admitted chunk can take the observed queue above it. Report that peak
+separately rather than inferring a changed policy from a small overshoot.
 
 The current resource emitter supplies measured pending queue, cache and tail
 values where available. It does not yet track total FULL-durable residency,

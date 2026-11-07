@@ -68,14 +68,14 @@ snapshot freezes the new outcome, diagnostic and durability-policy declarations.
 | Classification and optimization (step 5) | Diagnostic paired contrasts and classification for complete, stable imported/measured ladders | Actual classifications and evidence-driven editor changes |
 | Retention/pending experiments (step 6) | Explicit policy-change labeling, preserving NORMAL/FULL distinction | Retention, pressure eviction and pending-headroom experiments |
 | Instruction companion | Opt-in Callgrind runner, raw archives, validated whole-process Ir counts | Named-phase client instrumentation and paired application instruction results |
-| Audit (step 7) | Fresh existing-gate audit launched against committed companion | An audit including residency/retention optimization evidence cannot be completed before those experiments exist |
+| Audit (step 7) | Fresh existing-gate audit completed against committed companion; all eight producers completed | An audit including residency/retention optimization evidence cannot be completed before those experiments exist |
 
 The original seven-stage plan is not complete. This checkpoint completes the
 lens tooling and its companion observations; it does not claim to make all
 performance promises pass. Keep application changes driven by the missing
 measurements rather than choosing speculative optimizations in the lens.
 
-Validation: 116 lens library tests and 12 integration tests passed, including
+Validation: 117 lens library tests and 12 integration tests passed, including
 both inventory snapshots, negative outcome/residency cases, source-bound import,
 missing-probe behavior and CLI schema exports. Strict all-target Clippy and
 formatting passed. Scratchpad library/binaries checked successfully; three
@@ -90,5 +90,9 @@ claimed from that check.
 See [the diagnostic protocol](residency-diagnostics.md) and
 [generated declaration matrix](promise-outcomes.md) for the supported commands
 and artifact semantics. Raw audit output is under Scratchpad's ignored
-`target/promise-outcomes-audit/`; committed validation notes will record its
-result without replacing historical cycle-25 evidence.
+`target/promise-outcomes-audit/`. The [audit notes](promise-outcomes-audit.md)
+record the result and the matrix-only correction made during the run without
+replacing historical cycle-25 evidence.
+
+Implementation commits: lens `cf51363` (outcomes and diagnostic tooling),
+`13de9ed` (preserve aggregate uncertainty); Scratchpad `d92bb47` (probe companion).
