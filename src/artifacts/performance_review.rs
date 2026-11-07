@@ -6,12 +6,26 @@ use std::collections::BTreeMap;
 pub const SCHEMA_ID: &str = "performance_review";
 pub const SCHEMA_FILE: &str = "performance_review.schema.json";
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GateOutcome {
+    pub id: String,
+    pub kind: String,
+    pub shared_with: Vec<String>,
+    pub declaration: crate::outcomes::Outcome,
+    pub budget: Value,
+    pub promised_scale: Vec<Value>,
+    pub verdict: String,
+    pub observation_status: String,
+    pub observation_errors: Vec<String>,
+    pub memory_assessments: Vec<Value>,
+}
+
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct PerformanceReviewArtifact {
     #[serde(default)]
     pub residency_diagnostics: Value,
     #[serde(default)]
-    pub outcome_matrix: Vec<crate::producers::review::outcomes::GateOutcome>,
+    pub outcome_matrix: Vec<GateOutcome>,
     pub meta: PerformanceReviewMeta,
     pub summary: PerformanceReviewSummary,
     pub target_promises: Vec<String>,

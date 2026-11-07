@@ -123,44 +123,38 @@ mod tests {
             "peak_working_set_bytes":peak})
     }
     #[test]
-    fn one_incomplete_search_cannot_be_hidden_by_other_repetitions() {
-        let events: Vec<_> = (0..3).map(|index| {
-            let mut row = sample(index, 10, "ok", 20);
-            row["scenario"] = json!("search_file_size_ceiling");
-            row["measurement_scope"] = json!("prepared_search_component_completion");
-            row["result_value"] = json!(1);
-            row["measurement_contract"] = json!({"fixture_kind":"non_repeating","fixture_revision":2,
-                "production_path":true,"text_backing":"store","code_path":"search_target_ranges/production_worker_policy",
-                "search_fixture_revision":3,"document_bytes":100,"expected_matches":1,"completion_endpoint":"all_ranges_returned"});
-            row
-        }).collect();
-        assert_eq!(aggregate(events.clone())[0]["status"], "ok");
-        for result in [Value::Null, json!(0), json!(2)] {
-            let mut invalid = events.clone();
-            invalid[1]["result_value"] = result;
-            assert_eq!(aggregate(invalid)[0]["status"], "incomplete");
-        }
-    }
-
-    #[test]
-    fn a_timeout_with_only_two_installed_files_does_not_prove_background_completion() {
-        let events: Vec<_> = (0..3)
-            .map(|index| {
+    fn repetitions_require_complete_consistent_search_and_background_evidence() {
+        for (field, value, expected) in [
+            ("result_value", json!(1), "ok"),
+            ("result_value", Value::Null, "incomplete"),
+            ("result_value", json!(0), "incomplete"),
+            ("result_value", json!(2), "incomplete"),
+            ("completed_workload_value", json!(2), "incomplete"),
+            ("repeat_index", json!(0), "incomplete"),
+            ("workload_value", json!(999), "incomplete"),
+            ("elapsed_ns", json!(0), "incomplete"),
+            ("background_completion_ns", json!(5), "incomplete"),
+        ] {
+            let mut events: Vec<_> = (0..3).map(|index| {
                 let mut row = sample(index, 10, "ok", 20);
+                row["scenario"] = json!("search_file_size_ceiling");
+                row["measurement_scope"] = json!("prepared_search_component_completion");
+                row["result_value"] = json!(1);
                 row["background_completion_ns"] = json!(20);
-                row["completed_workload_value"] = json!(2);
+                row["completed_workload_value"] = json!(100);
+                row["measurement_contract"] = json!({"fixture_kind":"non_repeating","fixture_revision":2,
+                    "production_path":true,"text_backing":"store","code_path":"search_target_ranges/production_worker_policy",
+                    "search_fixture_revision":3,"document_bytes":100,"expected_matches":1,"completion_endpoint":"all_ranges_returned"});
                 row
-            })
-            .collect();
-        assert_eq!(aggregate(events.clone())[0]["status"], "incomplete");
-        let complete: Vec<_> = events
-            .into_iter()
-            .map(|mut row| {
-                row["completed_workload_value"] = row["workload_value"].clone();
-                row
-            })
-            .collect();
-        assert_eq!(aggregate(complete)[0]["status"], "ok");
+            }).collect();
+            events[1][field] = value;
+            let row = aggregate(events).remove(0);
+            assert_eq!(row["status"], expected, "{field}");
+            assert_eq!(row["complete"], expected == "ok", "{field}");
+        }
+        let row = aggregate(vec![sample(0, 10, "ok", 10)]).remove(0);
+        assert_eq!(row["complete"], false);
+        assert_eq!(row["status"], "incomplete");
     }
 
     #[test]
@@ -176,30 +170,5 @@ mod tests {
         assert_eq!(row["failure_count"], 1);
         assert_eq!(row["peak_working_set_bytes"], 999);
         assert_eq!(row["raw_repetitions"].as_array().unwrap().len(), 3);
-    }
-    #[test]
-    fn missing_duplicate_or_inconsistent_repetitions_are_incomplete() {
-        for events in [
-            vec![sample(0, 10, "ok", 10)],
-            vec![
-                sample(0, 10, "ok", 10),
-                sample(0, 20, "ok", 20),
-                sample(2, 30, "ok", 30),
-            ],
-        ] {
-            let row = aggregate(events).remove(0);
-            assert_eq!(row["complete"], false);
-            assert_eq!(row["status"], "incomplete");
-        }
-        let mut wrong = sample(2, 30, "ok", 30);
-        wrong["workload_value"] = json!(999);
-        assert_eq!(
-            aggregate(vec![
-                sample(0, 10, "ok", 10),
-                sample(1, 20, "ok", 20),
-                wrong
-            ])[0]["complete"],
-            false
-        );
     }
 }

@@ -345,3 +345,128 @@ nix develop ../rust-quality-lens --command \
   ../rust-quality-lens/target/campaign-tool-build/debug/rqlens verify \
   --config target/quality-review/refactor-2026-11-06/after.toml
 ```
+
+
+## Residency and promise-contract review — 2026-11-07
+
+Measured the performance lens at `a4965d51fdb865f8f3a3dfffbdcd818bc1710a5d`
+and the refactored source using the same RustQualityLens executable, configuration
+and Rust 1.95.0 toolchain. RustQualityLens is installed locally as
+`../rust-quality-lens` (the requested `rustqualitylens` directory is not present).
+Tool revision: `d137d8d8f219b4ee788935aff27115374626d2f8`.
+Executable SHA-256:
+`3e3704d2731ab916f6c64c6c44b39b6feaaa5a73df9de4b7a9b7193aef629915`.
+
+### Findings and changes
+
+- Residency execution and analysis independently traversed the same dynamic JSON
+  contract. A shared typed `Plan` now validates declarations once, generates
+  requests, and groups borrowed trials by their declared identity. Classification,
+  paired contrasts and result validation have separate, bounded functions.
+  The analyzer's cognitive complexity was 48 and the runner's was 32.
+- Promise outcome evaluation combined membership, observation validation and
+  three evidence formats in a function with cognitive complexity 69. These now
+  have focused helpers. Capacity evidence stays typed instead of being serialized
+  back to JSON. `GateOutcome` belongs to the artifact layer, removing its dependency
+  on the producer implementation. Each declaration is decoded once per gate.
+- Raw residency archives serialize borrowed trials instead of cloning the entire
+  accumulated history after every request. Source identity comparison is shared
+  by residency and instruction diagnostics. Review source statuses are collected
+  once and reused for both noise evaluation and the published artifact.
+- Resource budgets and noise controls use one launch-identity check. Both still
+  enforce their own minimum counts and measurement-quality requirements. Removed
+  unused intermediate capacity sweep values: only their maxima had been consumed
+  by validation; every existing minimum maximum workload is unchanged.
+- Removed unused `Clone` implementations on the new outcome/trial types, narrowed
+  the private residency import type, replaced all 12 test glob imports with explicit
+  imports, and flattened fixture-group and resource-render conditionals.
+- Consolidated overlapping tests into case matrices while extending classification,
+  malformed contracts, nearest-rank p99, typed capacity outcomes, and probe-runner
+  coverage. The residency lifecycle test builds a real Rust fixture executable,
+  runs all 45 requests, verifies profile propagation and launch rotation, checks
+  raw archives and measurement controls, and rejects mismatched returned identity.
+  It also retains import freshness and missing-probe checks.
+
+### Measured results
+
+| Measure | Before | After |
+|---|---:|---:|
+| Production cognitive complexity, sum / maximum | 1028 / 69 | 899 / 29 |
+| Production cyclomatic complexity, sum / maximum | 1687 / 47 | 1668 / 28 |
+| Production Halstead effort, sum | 9,393,686 | 8,584,302 |
+| Mean observed leverage (advisory) | 34.154 | 34.545 |
+| Mean locality (advisory) | 95.777 | 95.659 |
+| Explicit .clone() / .cloned() calls | 120 | 91 |
+| Production panic findings | 31 | 19 |
+| Escape-hatch findings (test glob imports) | 12 | 0 |
+| Duplicated nonblank lines | 643 | 631 |
+| Rust physical lines, src + tests | 15768 | 15997 |
+| Rust nonblank lines | 15056 | 15253 |
+| Test/helper function span lines | 3865 | 3961 |
+| Executed tests | 129 | 119 |
+| LLVM lines coverage | 88.96% (10422/11715) | 90.96% (10786/11858) |
+| LLVM functions coverage | 87.32% (1178/1349) | 88.97% (1226/1378) |
+| LLVM regions coverage | 87.43% (17924/20502) | 89.21% (18341/20560) |
+
+The reduction in test volume is **test count**, not test/helper source: 119 tests
+replace 129, while test/helper function spans grow by 96 lines. Total Rust source
+also grows by 229 physical lines (1.45%). Typed declarations, smaller functions
+and the executable fixture add source even after deleting duplicate validation
+and obsolete sweep data. This refactor therefore **does not meet the total-LOC or
+test-source-volume reduction targets**. It avoids hiding the increase by moving
+fixtures outside the Rust inventory or deleting useful assertions.
+
+Observed leverage improves slightly; mean locality declines by 0.118 points.
+Shared ownership and the artifact dependency direction improve, but the locality
+score does not show a win: the typed plan and evidence contracts add module edges
+(244 to 252). These are advisory measures, not demonstrated maintenance costs.
+The remaining largest cognitive hotspot is `performance_review` at 29; it is the
+next useful boundary to revisit if reducing orchestration dependencies becomes
+more important than keeping this change focused on new residency/outcome code.
+
+All-function cognitive complexity falls 1,175 to 1,069; all-function cyclomatic
+complexity stays 2,168; all-function effort falls 13,066,383 to 12,544,490.
+Production-only totals exclude functions in test modules, including modules named
+`*_tests`, and integration-test files. Test/helper volume sums their function spans;
+physical/nonblank LOC includes all authored Rust in `src` and `tests`.
+
+Coverage is LLVM line/function/region coverage, including test code; branch
+coverage is unavailable. Residency producer line coverage rises 63.60% to 97.30%,
+and outcome-matrix coverage rises 58.60% to 98.20%. This demonstrates new executed
+paths, not merely a smaller coverage denominator. The fixture does not measure
+Scratchpad editor performance or prove any application promise passes.
+
+### Validation and reproduction
+
+Formatting, all-target checking, strict all-target Clippy and all 119 tests pass,
+including both frozen gate inventories, CLI schema checks and probe integration
+checks. `rqlens verify` reports six passed checks, eight existing project-policy
+warnings, fourteen optional checks skipped, and no error-level failures. It is an
+evidence-producing command, so these child-check results were inspected rather
+than inferred from its exit code.
+
+Static syntax inventory remains partial solely because the existing
+`thread_local!` in `provenance.rs` is unexpanded. No source files are missing or
+unparsable. The leverage model is explicitly uncalibrated/advisory. None of these
+numbers proves that all dead code has been found. The public JSON schemas,
+project budget authority, aggregate uncertainty and diagnostic-only eligibility
+are preserved. Scratchpad and RustQualityLens source are unchanged.
+
+Local evidence is retained under
+`target/quality-review/refactor-2026-11-07/{before,after}` with summary JSON,
+configs, correctness/coverage artifacts and command logs in the parent directory.
+The configuration uses `identity_resolution = "auto"`, workspace/all-target/locked
+verification and additional fingerprint inputs `metadata` and `tests/fixtures`.
+Run from the performance-lens root (keep the baseline directory intact):
+
+```sh
+nix develop ../rust-quality-lens --command cargo fmt --check
+nix develop ../rust-quality-lens --command cargo check --locked --all-targets
+nix develop ../rust-quality-lens --command cargo clippy --locked --all-targets -- -D warnings
+nix develop ../rust-quality-lens --command \
+  ../rust-quality-lens/target/campaign-tool-build/debug/rqlens measure all \
+  --config target/quality-review/refactor-2026-11-07/after.toml
+nix develop ../rust-quality-lens --command \
+  ../rust-quality-lens/target/campaign-tool-build/debug/rqlens verify \
+  --config target/quality-review/refactor-2026-11-07/after.toml
+```

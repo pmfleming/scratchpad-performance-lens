@@ -96,7 +96,10 @@ impl RunReport {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{MeasureOptions, ProducerSpec, RunReport};
+    use anyhow::Result;
+    use serde_json::Value;
+    use std::time::Duration;
 
     #[test]
     fn failed_and_interrupted_runs_never_look_completed() -> Result<()> {

@@ -3,7 +3,7 @@ mod evidence;
 mod health;
 mod inventory;
 mod noise;
-pub(crate) mod outcomes;
+mod outcomes;
 mod registry;
 pub fn describe_promises(root: &std::path::Path, output: &std::path::Path) -> Result<()> {
     let manifest = crate::outcomes::load(root)?;
@@ -107,7 +107,8 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
             )
         })
         .collect();
-    let noisy_sources: Vec<String> = source_status(config, &inputs.context)
+    let source_artifacts = source_status(config, &inputs.context);
+    let noisy_sources: Vec<String> = source_artifacts
         .iter()
         .filter(|source| source.available && noise::is_measurement_source(&source.id))
         .filter_map(|source| {
@@ -167,12 +168,7 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
             .project_root
             .join("benches/measurement_manifest.json"),
     )?)?;
-    let capacity_values = capacity_rows
-        .iter()
-        .map(serde_json::to_value)
-        .collect::<Result<Vec<_>, _>>()?;
-    let outcome_matrix =
-        outcomes::matrix(&manifest, &latency_rows, &capacity_values, resource_rows)?;
+    let outcome_matrix = outcomes::matrix(&manifest, &latency_rows, &capacity_rows, resource_rows)?;
     let mut unique_failing_gates: std::collections::BTreeSet<String> = outcome_matrix
         .iter()
         .filter(|r| r.verdict == "fail" && !r.shared_with.is_empty())
@@ -222,7 +218,7 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
         meta: PerformanceReviewMeta {
             noisy_sources,
             generated_from: "rust:performance_review".to_string(),
-            source_artifacts: source_status(config, &inputs.context),
+            source_artifacts,
             scenario_model: "scenario-first performance coverage".to_string(),
             probe_classes: probe_classes(),
         },

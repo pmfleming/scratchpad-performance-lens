@@ -22,6 +22,12 @@ pub fn fingerprint(bytes: &[u8]) -> String {
     format!("{hash:016x}")
 }
 
+pub(crate) fn same_source(recorded: &Value, current: &Value) -> bool {
+    ["revision", "source_fingerprint"]
+        .iter()
+        .all(|key| recorded[*key].is_string() && recorded[*key] == current[*key])
+}
+
 fn command(root: &Path, program: &str, args: &[&str]) -> Option<String> {
     crate::process::text(Command::new(program).args(args).current_dir(root))
 }

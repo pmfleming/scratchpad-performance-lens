@@ -1,34 +1,34 @@
 use crate::{
     cli::MeasureOptions,
     config::LensConfig,
-    residency::{LadderArtifact, Trial},
+    residency::{LadderArtifact, Plan, Request, Trial},
 };
 use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::{
     path::Path,
     process::{Command, Stdio},
     time::Duration,
 };
 
-#[derive(Deserialize, Serialize)]
-pub struct Input {
-    pub source_context: Value,
-    pub trials: Vec<Trial>,
+#[derive(Deserialize)]
+struct Input {
+    source_context: Value,
+    trials: Vec<Trial>,
 }
 
-fn matching_source(recorded: &Value, current: &Value) -> bool {
-    ["revision", "source_fingerprint"]
-        .iter()
-        .all(|k| recorded[*k].is_string() && recorded[*k] == current[*k])
+#[derive(Serialize)]
+struct Archive<'a> {
+    source_context: &'a Value,
+    trials: &'a [Trial],
 }
 
 pub fn import(config: &LensConfig, path: &Path, selected: &[String]) -> Result<()> {
     let input: Input = serde_json::from_slice(&std::fs::read(path)?)?;
     let context = crate::provenance::context(&config.project_root);
     ensure!(
-        matching_source(&input.source_context, &context),
+        crate::provenance::same_source(&input.source_context, &context),
         "diagnostics do not match current source revision/fingerprint"
     );
     let manifest = crate::outcomes::load(&config.project_root)?;
@@ -55,14 +55,14 @@ pub fn import(config: &LensConfig, path: &Path, selected: &[String]) -> Result<(
 
 pub fn measure(config: &LensConfig, options: MeasureOptions) -> Result<()> {
     let manifest = crate::outcomes::load(&config.project_root)?;
-    // Validate selection and configuration before building or launching anything.
-    let empty = crate::residency::analyze(&manifest, Vec::new(), &options.scenarios)?;
-    let spec = &manifest["diagnostics"]["residency"];
-    let probe = spec["probe"]
-        .as_str()
+    let plan = Plan::new(&manifest, &options.scenarios)?;
+    let probe = plan
+        .config
+        .probe
+        .as_deref()
         .context("missing residency probe target")?;
     ensure!(
-        probe.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+        !probe.is_empty() && probe.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
         "invalid probe name"
     );
     if !config
@@ -70,7 +70,7 @@ pub fn measure(config: &LensConfig, options: MeasureOptions) -> Result<()> {
         .join(format!("src/bin/{probe}.rs"))
         .is_file()
     {
-        write(config, &empty)?;
+        write(config, &plan.analyze(Vec::new())?)?;
         anyhow::bail!(
             "project has not implemented {probe}; missing rungs recorded, no timings inferred"
         );
@@ -80,83 +80,19 @@ pub fn measure(config: &LensConfig, options: MeasureOptions) -> Result<()> {
     let archive = config.output_dir.join("residency-raw");
     std::fs::create_dir_all(&archive)?;
     let mut trials = Vec::new();
-    let mut sequence = 0;
-    for (id, op) in spec["operations"].as_object().unwrap() {
-        if !options.scenarios.is_empty() && !options.scenarios.contains(id) {
-            continue;
-        }
-        for size in op["workloads"].as_array().unwrap() {
-            for fixture in op["fixtures"].as_array().unwrap() {
-                for profile in spec["memory_profiles"].as_array().unwrap() {
-                    for launch in 0..spec["independent_launches"].as_u64().unwrap() {
-                        // Rotate order between independent launches, keeping five arms paired.
-                        for offset in 0..5 {
-                            let rung = crate::residency::RUNGS[(offset + launch as usize) % 5];
-                            sequence += 1;
-                            let prefix = archive.join(format!("{}-{sequence}", std::process::id()));
-                            let stdout = prefix.with_extension("json");
-                            let stderr = prefix.with_extension("stderr");
-                            let mut command = Command::new(&executable);
-                            command.current_dir(&config.project_root).args([
-                                "--scenario",
-                                id,
-                                "--workload",
-                                &size.to_string(),
-                                "--fixture",
-                                fixture.as_str().unwrap(),
-                                "--rung",
-                                rung,
-                                "--launch",
-                                &launch.to_string(),
-                            ]);
-                            command.env_remove("SCRATCHPAD_MEMORY_PROFILE");
-                            if let Some(bytes) = profile.as_u64() {
-                                command.env("SCRATCHPAD_MEMORY_PROFILE", bytes.to_string());
-                            }
-                            command.env(
-                                "SCRATCHPAD_DIAGNOSTIC_REVISION",
-                                source["revision"].as_str().unwrap_or(""),
-                            );
-                            command
-                                .stdout(Stdio::from(std::fs::File::create(&stdout)?))
-                                .stderr(Stdio::from(std::fs::File::create(&stderr)?));
-                            let before = crate::environment::control();
-                            let exit = crate::process::run(&mut command, Duration::from_secs(300))?;
-                            let after = crate::environment::control();
-                            ensure!(
-                                exit.status.success() && !exit.timed_out,
-                                "residency trial failed; raw output at {}",
-                                stdout.display()
-                            );
-                            let mut trial: Trial =
-                                serde_json::from_slice(&std::fs::read(&stdout)?)?;
-                            ensure!(
-                                trial.scenario == *id
-                                    && trial.workload_value == size.as_u64().unwrap()
-                                    && trial.fixture == fixture.as_str().unwrap()
-                                    && trial.rung == rung
-                                    && trial.launch_index == launch
-                                    && json!(trial.memory_profile_bytes) == *profile,
-                                "probe returned different requested trial"
-                            );
-                            trial.measurement_quality =
-                                crate::environment::quality(&before, &after);
-                            trials.push(trial);
-                            std::fs::write(
-                                archive.join("trials.json"),
-                                serde_json::to_vec_pretty(&Input {
-                                    source_context: source.clone(),
-                                    trials: trials.clone(),
-                                })?,
-                            )?;
-                        }
-                    }
-                }
-            }
-        }
+    for (sequence, request) in plan.requests().enumerate() {
+        let prefix = archive.join(format!("{}-{}", std::process::id(), sequence + 1));
+        trials.push(run_trial(config, &executable, &source, &request, &prefix)?);
+        std::fs::write(
+            archive.join("trials.json"),
+            serde_json::to_vec_pretty(&Archive {
+                source_context: &source,
+                trials: &trials,
+            })?,
+        )?;
     }
     ensure!(
-        matching_source(
+        crate::provenance::same_source(
             &source,
             &crate::provenance::compute_context(&config.project_root)
         ),
@@ -168,9 +104,63 @@ pub fn measure(config: &LensConfig, options: MeasureOptions) -> Result<()> {
             .all(|t| Some(t.revision.as_str()) == source["revision"].as_str()),
         "diagnostic revision mismatch"
     );
-    let mut artifact = crate::residency::analyze(&manifest, trials, &options.scenarios)?;
+    let mut artifact = plan.analyze(trials)?;
     artifact.source_context = source;
     write(config, &artifact)
+}
+
+fn run_trial(
+    config: &LensConfig,
+    executable: &Path,
+    source: &Value,
+    request: &Request<'_>,
+    prefix: &Path,
+) -> Result<Trial> {
+    let (id, size, fixture, profile) = request.key;
+    let stdout = prefix.with_extension("json");
+    let mut command = Command::new(executable);
+    command
+        .current_dir(&config.project_root)
+        .args([
+            "--scenario",
+            id,
+            "--workload",
+            &size.to_string(),
+            "--fixture",
+            fixture,
+            "--rung",
+            request.rung,
+            "--launch",
+            &request.launch.to_string(),
+        ])
+        .env_remove("SCRATCHPAD_MEMORY_PROFILE");
+    if let Some(bytes) = profile {
+        command.env("SCRATCHPAD_MEMORY_PROFILE", bytes.to_string());
+    }
+    command
+        .env(
+            "SCRATCHPAD_DIAGNOSTIC_REVISION",
+            source["revision"].as_str().unwrap_or(""),
+        )
+        .stdout(Stdio::from(std::fs::File::create(&stdout)?))
+        .stderr(Stdio::from(std::fs::File::create(
+            prefix.with_extension("stderr"),
+        )?));
+    let before = crate::environment::control();
+    let exit = crate::process::run(&mut command, Duration::from_secs(300))?;
+    let after = crate::environment::control();
+    ensure!(
+        exit.status.success() && !exit.timed_out,
+        "residency trial failed; raw output at {}",
+        stdout.display()
+    );
+    let mut trial: Trial = serde_json::from_slice(&std::fs::read(&stdout)?)?;
+    ensure!(
+        request.matches(&trial),
+        "probe returned different requested trial"
+    );
+    trial.measurement_quality = crate::environment::quality(&before, &after);
+    Ok(trial)
 }
 
 fn write(config: &LensConfig, artifact: &LadderArtifact) -> Result<()> {
@@ -195,10 +185,14 @@ fn write(config: &LensConfig, artifact: &LadderArtifact) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{import, measure, Archive};
+    use crate::{cli::MeasureOptions, config::LensConfig};
+    use anyhow::{ensure, Result};
+    use serde_json::{json, Value};
+    use std::process::Command;
 
     #[test]
-    fn imports_bind_source_and_missing_probe_preserves_explicit_gaps() -> Result<()> {
+    fn residency_runner_archives_requests_and_rejects_stale_or_mismatched_evidence() -> Result<()> {
         let root = tempfile::tempdir()?;
         std::fs::create_dir(root.path().join("benches"))?;
         let (mut manifest, mut trials) = crate::residency::tests::fixture();
@@ -251,9 +245,9 @@ mod tests {
         let input = config.output_dir.join("input.json");
         std::fs::write(
             &input,
-            serde_json::to_vec(&Input {
-                source_context: context,
-                trials,
+            serde_json::to_vec(&Archive {
+                source_context: &context,
+                trials: &trials,
             })?,
         )?;
         import(&config, &input, &[])?;
@@ -268,15 +262,13 @@ mod tests {
         assert!(crate::provenance::sidecar(&artifact).exists());
         std::fs::write(root.path().join("changed.rs"), "changed source")?;
         assert!(import(&config, &input, &[]).is_err());
-        let result = measure(
-            &config,
-            MeasureOptions {
-                skip_bench: false,
-                fail_on_slow: false,
-                index_only: false,
-                scenarios: Vec::new(),
-            },
-        );
+        let options = || MeasureOptions {
+            skip_bench: false,
+            fail_on_slow: false,
+            index_only: false,
+            scenarios: Vec::new(),
+        };
+        let result = measure(&config, options());
         assert!(result
             .unwrap_err()
             .to_string()
@@ -285,6 +277,51 @@ mod tests {
         assert_eq!(value["complete"], false);
         assert_eq!(value["trials"], json!([]));
         assert!(!value["gaps"].as_array().unwrap().is_empty());
+        std::fs::create_dir_all(root.path().join("src/bin"))?;
+        std::fs::write(
+            root.path().join("Cargo.toml"),
+            "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )?;
+        let template = serde_json::to_string(&crate::residency::tests::fixture().1[0])?;
+        let source = r##"fn main() {
+            let args: Vec<_> = std::env::args().skip(1).collect();
+            let rung = &args[7];
+            let profile = std::env::var("SCRATCHPAD_MEMORY_PROFILE").unwrap_or("null".into());
+            let mut trial = TEMPLATE.to_owned()
+                .replace("owned_contiguous", rung)
+                .replace("fixture-revision", &std::env::var("SCRATCHPAD_DIAGNOSTIC_REVISION").unwrap())
+                .replace("\"memory_profile_bytes\":4294967296", &format!("\"memory_profile_bytes\":{profile}"))
+                .replace("\"launch_index\":0", &format!("\"launch_index\":{}", args[9]));
+            if rung == "store_warm" {
+                trial = trial.replace("\"store_read_count\":0", "\"store_read_count\":1");
+            }
+            if std::path::Path::new("break_probe").exists() {
+                trial = trial.replace("\"workload_value\":64", "\"workload_value\":65");
+            }
+            println!("{trial}");
+        }"##.replace("TEMPLATE", &format!("{template:?}"));
+        std::fs::write(root.path().join("src/bin/residency_probe.rs"), source)?;
+        measure(&config, options())?;
+        let value: Value = serde_json::from_slice(&std::fs::read(&artifact)?)?;
+        assert_eq!(value["complete"], true);
+        assert_eq!(value["promise_eligible"], false);
+        let archive = config.output_dir.join("residency-raw/trials.json");
+        let raw: Value = serde_json::from_slice(&std::fs::read(archive)?)?;
+        assert_eq!(raw["trials"].as_array().unwrap().len(), 45);
+        for (index, profile) in [
+            (0, json!(4294967296u64)),
+            (15, json!(17179869184u64)),
+            (30, Value::Null),
+        ] {
+            assert_eq!(raw["trials"][index]["memory_profile_bytes"], profile);
+            assert_eq!(raw["trials"][index + 5]["rung"], "owned_piece_tree");
+            assert!(raw["trials"][index]["measurement_quality"]["before"].is_object());
+        }
+        std::fs::write(root.path().join("break_probe"), "")?;
+        assert!(measure(&config, options())
+            .unwrap_err()
+            .to_string()
+            .contains("different requested trial"));
         Ok(())
     }
 }

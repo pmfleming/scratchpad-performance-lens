@@ -56,62 +56,62 @@ fn summarize(values: impl Iterator<Item = Option<f64>>, expected: usize) -> Valu
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::annotate;
+    use serde_json::json;
     #[test]
-    fn attribution_uses_paired_trials_and_preserves_missing_counters() {
+    fn paired_render_attribution_preserves_missing_inconsistent_and_unknown_counters() {
         let mut payload = json!({"scenarios":[{"latency_kind":"first_render","raw_samples":[
-            {"first_result":1000000,"first_render":11000000,"first_render_layout":{"layout_time_ns":9000000,"result_groups_rendered":5,"result_groups_skipped":9995}},
-            {"first_result":20000000,"first_render":22000000,"first_render_layout":{"layout_time_ns":1000000,"result_groups_rendered":6}}
+            {"first_result":1000000,"first_render":11000000,"first_render_layout":{"layout_time_ns":9000000,"result_groups_rendered":5,"result_groups_skipped":9995,"word_wrap":true,"prepared_wrap_width":1263,"result_wrap_width":1256}},
+            {"first_result":20000000,"first_render":22000000,"first_render_layout":{"layout_time_ns":1000000,"result_groups_rendered":6,"word_wrap":true,"prepared_wrap_width":1256,"result_wrap_width":1256}}
         ]}]});
         annotate(&mut payload);
         let d = &payload["scenarios"][0]["render_diagnostics"];
-        assert_eq!(d["delivery_to_render_ms"]["median"], 6.0);
-        assert_eq!(d["layout_ms"]["median"], 5.0);
-        assert_eq!(d["non_layout_render_ms"]["median"], 1.0);
-        assert_eq!(d["result_groups_rendered"]["median"], 5.5);
+        for (field, expected) in [
+            ("delivery_to_render_ms", 6.0),
+            ("layout_ms", 5.0),
+            ("non_layout_render_ms", 1.0),
+            ("result_groups_rendered", 5.5),
+        ] {
+            assert_eq!(d[field]["median"], expected, "{field}");
+        }
         assert_eq!(d["result_groups_skipped"]["complete"], false);
         assert!(d["result_groups_skipped"]["median"].is_null());
-        payload["scenarios"][0]["raw_samples"][0]["first_result"] = json!(12000000);
-        annotate(&mut payload);
-        assert!(
-            payload["scenarios"][0]["render_diagnostics"]["delivery_to_render_ms"]["median"]
-                .is_null()
-        );
-        assert!(
-            payload["scenarios"][0]["render_diagnostics"]["non_layout_render_ms"]["median"]
-                .is_null()
-        );
-    }
-    #[test]
-    fn inconsistent_layout_counters_do_not_produce_negative_render_work() {
-        let mut payload = json!({"scenarios":[{"latency_kind":"first_render","raw_samples":[
-            {"first_result":1000000,"first_render":2000000,"first_render_layout":{"layout_time_ns":3000000}}
-        ]}]});
-        annotate(&mut payload);
-        let summary = &payload["scenarios"][0]["render_diagnostics"]["non_layout_render_ms"];
-        assert_eq!(summary["complete"], false);
-        assert!(summary["median"].is_null());
-    }
-    #[test]
-    fn width_diagnostics_expose_reflow_and_preserve_unknown_modes() {
-        let mut payload = json!({"scenarios":[{"latency_kind":"first_render","raw_samples":[
-            {"first_render_layout":{"word_wrap":true,"prepared_wrap_width":1263,"result_wrap_width":1256}},
-            {"first_render_layout":{"word_wrap":true,"prepared_wrap_width":1256,"result_wrap_width":1256}}
-        ]}]});
-        annotate(&mut payload);
-        let width = &payload["scenarios"][0]["render_diagnostics"]["wrap_width_change_px"];
-        assert_eq!(width["max"], 7.0);
-        assert_eq!(width["complete"], true);
-        payload["scenarios"][0]["raw_samples"][0]["first_render_layout"]["word_wrap"] =
-            json!(false);
-        annotate(&mut payload);
-        assert_eq!(
-            payload["scenarios"][0]["render_diagnostics"]["wrap_width_change_px"]["complete"],
-            false
-        );
-        assert!(
-            super::super::super::render::render_search_workflows(&payload)
-                .contains("max wrap change=unknown")
-        );
+        assert_eq!(d["wrap_width_change_px"]["max"], 7.0);
+        assert_eq!(d["wrap_width_change_px"]["complete"], true);
+        for (pointer, value, metrics) in [
+            (
+                "/first_result",
+                json!(12000000),
+                &["delivery_to_render_ms", "non_layout_render_ms"][..],
+            ),
+            (
+                "/first_render_layout/layout_time_ns",
+                json!(12000000),
+                &["non_layout_render_ms"][..],
+            ),
+            (
+                "/first_render_layout/word_wrap",
+                json!(false),
+                &["wrap_width_change_px"][..],
+            ),
+        ] {
+            let sample = &mut payload["scenarios"][0]["raw_samples"][0];
+            let previous = std::mem::replace(sample.pointer_mut(pointer).unwrap(), value);
+            annotate(&mut payload);
+            for metric in metrics {
+                let d = &payload["scenarios"][0]["render_diagnostics"][metric];
+                assert_eq!(d["complete"], false, "{metric}");
+                assert!(d["median"].is_null(), "{metric}");
+            }
+            if pointer.ends_with("word_wrap") {
+                assert!(
+                    super::super::super::render::render_search_workflows(&payload)
+                        .contains("max wrap change=unknown")
+                );
+            }
+            *payload["scenarios"][0]["raw_samples"][0]
+                .pointer_mut(pointer)
+                .unwrap() = previous;
+        }
     }
 }

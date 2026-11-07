@@ -12,28 +12,10 @@ use std::collections::BTreeMap;
 const CAPACITY_STRESS_FAMILY: &str = "capacity-stress";
 const TEXT_LAYOUT_FAMILY: &str = "text-layout";
 
-const FILE_SIZE_SWEEP: &[i64] = &[shared::MB, 64 * shared::MB, 256 * shared::MB, shared::GB];
-const MANY_FILE_SWEEP: &[i64] = &[2_048, 10_000, 50_000];
-const TEXT_LAYOUT_SWEEP: &[i64] = &[
-    64 * 1024,
-    shared::MB,
-    4 * shared::MB,
-    8 * shared::MB,
-    16 * shared::MB,
-    32 * shared::MB,
-    64 * shared::MB,
-    128 * shared::MB,
-];
-const SEARCH_TARGET_SWEEP: &[i64] = &[100, 1_000, 10_000];
-const TAB_COUNT_SWEEP: &[i64] = &[512, 4_096, 10_000];
-const SPLIT_COUNT_SWEEP: &[i64] = &[32, 128, 512, 1_000];
-const VIEW_COUNT_SWEEP: &[i64] = &[128, 512, 1_000];
-const PASTE_SIZE_SWEEP: &[i64] = &[8 * shared::MB, 64 * shared::MB, 128 * shared::MB];
-
 struct CapacityScenarioSpec {
     id: &'static str,
     label: &'static str,
-    fallback_values: &'static [i64],
+    minimum_max_workload: i64,
     unit: &'static str,
     family: &'static str,
     profile_id: Option<&'static str>,
@@ -43,7 +25,7 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
     CapacityScenarioSpec {
         id: "large_file_first_visible_ceiling",
         label: "Large-file first-visible window sweep",
-        fallback_values: FILE_SIZE_SWEEP,
+        minimum_max_workload: shared::GB,
         unit: "bytes",
         family: "file-load",
         profile_id: Some("viewport_extraction_profile"),
@@ -51,7 +33,7 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
     CapacityScenarioSpec {
         id: "large_file_background_index_ceiling",
         label: "Large-file background indexing sweep",
-        fallback_values: FILE_SIZE_SWEEP,
+        minimum_max_workload: shared::GB,
         unit: "bytes",
         family: "file-load",
         profile_id: Some("document_snapshot_profile"),
@@ -59,7 +41,7 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
     CapacityScenarioSpec {
         id: "in_memory_text_ingest_ceiling",
         label: "In-memory text ingest diagnostic sweep",
-        fallback_values: FILE_SIZE_SWEEP,
+        minimum_max_workload: shared::GB,
         unit: "bytes",
         family: CAPACITY_STRESS_FAMILY,
         profile_id: None,
@@ -67,7 +49,7 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
     CapacityScenarioSpec {
         id: "text_layout_ceiling",
         label: "Text Layout",
-        fallback_values: TEXT_LAYOUT_SWEEP,
+        minimum_max_workload: 128 * shared::MB,
         unit: "bytes",
         family: TEXT_LAYOUT_FAMILY,
         profile_id: None,
@@ -75,7 +57,7 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
     CapacityScenarioSpec {
         id: "many_file_first_visible_ceiling",
         label: "Many-file first-visible workspace sweep",
-        fallback_values: MANY_FILE_SWEEP,
+        minimum_max_workload: 50_000,
         unit: "files",
         family: CAPACITY_STRESS_FAMILY,
         profile_id: None,
@@ -83,7 +65,7 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
     CapacityScenarioSpec {
         id: "many_file_background_hydration_ceiling",
         label: "Many-file background hydration completion sweep",
-        fallback_values: MANY_FILE_SWEEP,
+        minimum_max_workload: 50_000,
         unit: "files",
         family: CAPACITY_STRESS_FAMILY,
         profile_id: None,
@@ -91,7 +73,7 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
     CapacityScenarioSpec {
         id: "search_file_size_ceiling",
         label: "Search file-size ceiling sweep",
-        fallback_values: FILE_SIZE_SWEEP,
+        minimum_max_workload: shared::GB,
         unit: "bytes",
         family: CAPACITY_STRESS_FAMILY,
         profile_id: Some("search_capacity_profile"),
@@ -99,7 +81,7 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
     CapacityScenarioSpec {
         id: "search_target_count_ceiling",
         label: "Search target-count ceiling sweep",
-        fallback_values: SEARCH_TARGET_SWEEP,
+        minimum_max_workload: 10_000,
         unit: "files",
         family: CAPACITY_STRESS_FAMILY,
         profile_id: Some("search_dispatch_profile"),
@@ -107,7 +89,7 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
     CapacityScenarioSpec {
         id: "tab_count_ceiling",
         label: "Tab count ceiling sweep",
-        fallback_values: TAB_COUNT_SWEEP,
+        minimum_max_workload: 10_000,
         unit: "tabs",
         family: CAPACITY_STRESS_FAMILY,
         profile_id: Some("tab_operations_profile"),
@@ -115,7 +97,7 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
     CapacityScenarioSpec {
         id: "split_count_ceiling",
         label: "Split count ceiling sweep",
-        fallback_values: SPLIT_COUNT_SWEEP,
+        minimum_max_workload: 1_000,
         unit: "splits",
         family: CAPACITY_STRESS_FAMILY,
         profile_id: Some("split_stress_profile"),
@@ -123,7 +105,7 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
     CapacityScenarioSpec {
         id: "view_count_ceiling",
         label: "View count ceiling sweep",
-        fallback_values: VIEW_COUNT_SWEEP,
+        minimum_max_workload: 1_000,
         unit: "views",
         family: CAPACITY_STRESS_FAMILY,
         profile_id: Some("view_navigation_profile"),
@@ -131,7 +113,7 @@ const CAPACITY_SCENARIOS: &[CapacityScenarioSpec] = &[
     CapacityScenarioSpec {
         id: "paste_size_ceiling",
         label: "Paste size ceiling sweep",
-        fallback_values: PASTE_SIZE_SWEEP,
+        minimum_max_workload: 128 * shared::MB,
         unit: "bytes",
         family: CAPACITY_STRESS_FAMILY,
         profile_id: Some("paste_stress_profile"),
@@ -305,7 +287,7 @@ fn validate_capacity_events_for(
                 .iter()
                 .filter_map(|event| event["workload_value"].as_i64())
                 .max()
-                >= spec.fallback_values.iter().copied().max(),
+                >= Some(spec.minimum_max_workload),
             "incomplete workload sweep for {}",
             spec.id
         );
@@ -537,7 +519,7 @@ mod tests {
         let selected = super::selected_scenarios(&[id.into(), id.into()]).unwrap();
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].id, id);
-        assert_eq!(selected[0].fallback_values, super::FILE_SIZE_SWEEP);
+        assert_eq!(selected[0].minimum_max_workload, crate::shared::GB);
         assert_eq!(
             super::selected_scenarios(&[]).unwrap().len(),
             CAPACITY_SCENARIOS.len()
@@ -623,7 +605,7 @@ mod tests {
         let mut events: Vec<_> = CAPACITY_SCENARIOS.iter().map(|spec| {
             assert_eq!(capacity_config(spec.id), (spec.family, spec.profile_id));
             json!({"scenario":if spec.id == "text_layout_ceiling" { "layout_bytes_ceiling" } else { spec.id },
-                "workload_value":spec.fallback_values.iter().max(),"workload_unit":spec.unit})
+                "workload_value":spec.minimum_max_workload,"workload_unit":spec.unit})
         }).collect();
         assert!(validate_capacity_events(&events).is_ok());
         let payload = summarize_capacity(events.clone(), "partial");
@@ -656,7 +638,7 @@ mod tests {
             .map(|spec| {
                 json!({
                     "scenario":spec.id, "workload_unit":spec.unit,
-                    "workload_value":spec.fallback_values.iter().max(),
+                    "workload_value":spec.minimum_max_workload,
                 })
             })
             .collect();

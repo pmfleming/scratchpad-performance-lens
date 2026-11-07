@@ -1,6 +1,21 @@
 use crate::shared;
 use serde_json::Value;
 
+/// Every declared independent launch must be represented by a consistent identity.
+pub(in crate::producers) fn complete_launches(rows: &[&Value], expected: u64) -> bool {
+    let mut observed = std::collections::BTreeSet::new();
+    rows.iter().all(|row| {
+        row["independent_launch_count"].as_u64() == Some(expected)
+            && row["launch_index"]
+                .as_u64()
+                .filter(|index| *index < expected)
+                .is_some_and(|index| {
+                    observed.insert(index);
+                    true
+                })
+    }) && observed.len() as u64 == expected
+}
+
 pub(in crate::producers) fn estimate_optional(value: &Value, path: &[&str]) -> Option<f64> {
     let result = shared::f64_field(value, path);
     (result != 0.0).then_some(result)

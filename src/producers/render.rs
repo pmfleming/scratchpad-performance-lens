@@ -184,16 +184,14 @@ pub(super) fn render_resources(payload: &Value) -> String {
                 shared::human_bytes(item["max_allocated_bytes"].as_i64()),
                 shared::human_bytes(item["max_working_set_bytes"].as_i64()),
             );
-            if let Some(groups) = item["scaling_diagnostics"]["groups"].as_array() {
-                if groups.len() == 1 {
-                    if let Some(ratio) = groups[0]["adjacent_steps"]
-                        .as_array()
-                        .and_then(|steps| steps.last())
-                        .and_then(|step| step["per_unit_cost_multiplier"].as_f64())
-                    {
-                        row.push_str(&format!(" | time/unit change={ratio:.2}x (last step)"));
-                    }
-                }
+            if let Some(ratio) = item["scaling_diagnostics"]["groups"]
+                .as_array()
+                .filter(|groups| groups.len() == 1)
+                .and_then(|groups| groups[0]["adjacent_steps"].as_array())
+                .and_then(|steps| steps.last())
+                .and_then(|step| step["per_unit_cost_multiplier"].as_f64())
+            {
+                row.push_str(&format!(" | time/unit change={ratio:.2}x (last step)"));
             }
             if let Some((size, name, ms)) = largest_database_phase(item) {
                 row.push_str(&format!(" | largest DB phase at {size}: {name}={ms:.1} ms"));
@@ -207,10 +205,8 @@ pub(super) fn render_resources(payload: &Value) -> String {
             if let Some(ratio) = item["max_write_amplification"].as_f64() {
                 row.push_str(&format!(" | max_process_write/text={ratio:.2}x"));
             }
-            if let Some(setup_ms) = item["max_setup_elapsed_ms"].as_f64() {
-                if setup_ms > 0.0 {
-                    row.push_str(&format!(" | setup={setup_ms:.1} ms"));
-                }
+            if let Some(setup_ms) = item["max_setup_elapsed_ms"].as_f64().filter(|ms| *ms > 0.0) {
+                row.push_str(&format!(" | setup={setup_ms:.1} ms"));
             }
             if let (Some(retained), Some(limit)) = (
                 item["max_retained_file_chunks"].as_i64(),
@@ -345,7 +341,7 @@ fn largest_database_phase(item: &Value) -> Option<(u64, String, f64)> {
 
 #[cfg(test)]
 mod resource_phase_tests {
-    use super::*;
+    use super::largest_database_phase;
     use serde_json::json;
     #[test]
     fn largest_phase_uses_child_measurements_and_requires_complete_largest_workload() {

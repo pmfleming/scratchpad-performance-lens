@@ -42,22 +42,13 @@ fn locally_unstable(rows: &[&Value], producer_noisy: bool) -> bool {
         else {
             return true;
         };
-        let mut observed = std::collections::BTreeSet::new();
-        for row in group {
-            let control = &row["launch_measurement_quality"];
-            if control["scope"] != "independent_probe_launch_including_setup"
-                || crate::environment::quality(&control["before"], &control["after"])["status"]
-                    != "stable"
-                || row["independent_launch_count"].as_u64() != Some(expected)
-            {
-                return true;
-            }
-            let Some(index) = row["launch_index"].as_u64().filter(|n| *n < expected) else {
-                return true;
-            };
-            observed.insert(index);
-        }
-        observed.len() as u64 != expected
+        !super::super::common::complete_launches(group, expected)
+            || group.iter().any(|row| {
+                let control = &row["launch_measurement_quality"];
+                control["scope"] != "independent_probe_launch_including_setup"
+                    || crate::environment::quality(&control["before"], &control["after"])["status"]
+                        != "stable"
+            })
     })
 }
 
@@ -145,7 +136,8 @@ pub(super) fn flag(scenario: &mut PerformanceReviewScenario, sources: &[&str]) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{flag, is_measurement_source, locally_unstable, relevant_sources};
+    use crate::artifacts::performance_review::PromiseHealth;
     use crate::producers::review::{build_review_scenario, registry::review_scenarios};
     use serde_json::json;
 

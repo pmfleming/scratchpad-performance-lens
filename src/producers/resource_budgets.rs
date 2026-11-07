@@ -152,86 +152,72 @@ fn complete_launches(group: &[&Value]) -> bool {
     else {
         return false;
     };
-    let mut observed = std::collections::BTreeSet::new();
-    for sample in group {
-        if sample["independent_launch_count"].as_u64() != Some(expected) {
-            return false;
-        }
-        let Some(index) = sample["launch_index"]
-            .as_u64()
-            .filter(|index| *index < expected)
-        else {
-            return false;
-        };
-        observed.insert(index);
-    }
-    observed.len() as u64 == expected
+    super::common::complete_launches(group, expected)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{group_status, status};
     use serde_json::{json, Value};
-    #[test]
-    fn missing_or_duplicate_launches_cannot_prove_a_repeated_workload() {
-        let rows: Vec<_> = (0..3).map(|index| json!({"status":"ok","workload_value":100,
-            "elapsed_ns":80,"launch_index":index,"independent_launch_count":3,
-            "resource_budget":{"metric":"/elapsed_ns","max":100,"authoritative":true,"min_independent_launches":3}})).collect();
-        assert_eq!(group_status(&rows), "pass");
-        assert_eq!(group_status(&rows[..2]), "invalid");
-        let mut duplicated = rows.clone();
-        duplicated[2]["launch_index"] = json!(0);
-        assert_eq!(group_status(&duplicated), "invalid");
-        let mut inconsistent = rows.clone();
-        inconsistent[2]["independent_launch_count"] = json!(1);
-        assert_eq!(group_status(&inconsistent), "invalid");
-        let mut missing = rows[0].clone();
-        missing.as_object_mut().unwrap().remove("launch_index");
-        missing
-            .as_object_mut()
-            .unwrap()
-            .remove("independent_launch_count");
-        assert_eq!(group_status([&missing]), "invalid");
+
+    fn sample(elapsed: u64) -> Value {
+        json!({"status":"ok","workload_value":10000,"elapsed_ns":elapsed,
+            "measurement_scope":"prepared_operation","resource_budget":{
+            "metric":"/elapsed_ns","max":100,"authoritative":true,"measurement_scope":"prepared_operation"}})
     }
+
     #[test]
-    fn fixture_inclusive_or_missing_scope_cannot_satisfy_an_operation_budget() {
-        let mut sample = json!({"status":"ok","elapsed_ns":10,"resource_budget":{
-            "metric":"/elapsed_ns","max":100,"authoritative":true,
-            "measurement_scope":"prepared_operation"}});
-        assert_eq!(status(&sample), "invalid");
-        sample["measurement_scope"] = json!("scenario_including_fixture_work");
-        assert_eq!(status(&sample), "invalid");
-        sample["measurement_scope"] = json!("prepared_operation");
-        assert_eq!(status(&sample), "pass");
-        sample["elapsed_ns"] = json!(110);
-        assert_eq!(status(&sample), "fail");
-    }
-    #[test]
-    fn budgets_keep_uncertainty_and_cannot_select_the_fastest_observation() {
-        let sample = |n| json!({"status":"ok","workload_value":10000,"elapsed_ns":n,"resource_budget":{"metric":"/elapsed_ns","max":100,"authoritative":true}});
+    fn budgets_require_valid_scope_and_preserve_uncertainty_across_complete_launches() {
         for (times, expected) in [
             ([90, 95, 110], "uncertain"),
             ([90, 110, 120], "fail"),
             ([80, 90, 95], "pass"),
         ] {
-            assert_eq!(
-                group_status(times.iter().map(|n| sample(*n)).collect::<Vec<_>>().iter()),
-                expected
-            );
+            let rows: Vec<_> = times.into_iter().map(sample).collect();
+            assert_eq!(group_status(&rows), expected);
         }
-        let mut row = sample(5200);
-        assert_eq!(status(&row), "fail");
-        row["elapsed_ns"] = json!(10);
-        assert_eq!(status(&row), "pass");
-        for failed in [json!("panic"), json!("failed"), Value::Null] {
-            row["status"] = failed;
-            assert_eq!(status(&row), "invalid");
-            assert_eq!(group_status([&row]), "invalid");
+        for (pointer, value, expected) in [
+            ("/elapsed_ns", json!(110), "fail"),
+            ("/elapsed_ns", json!(10), "pass"),
+            ("/measurement_scope", Value::Null, "invalid"),
+            (
+                "/measurement_scope",
+                json!("scenario_including_fixture_work"),
+                "invalid",
+            ),
+            ("/status", json!("panic"), "invalid"),
+            ("/status", json!("failed"), "invalid"),
+            ("/status", Value::Null, "invalid"),
+            ("/resource_budget/metric", json!("/missing"), "invalid"),
+            ("/resource_budget", Value::Null, "unbudgeted"),
+        ] {
+            let mut row = sample(10);
+            *row.pointer_mut(pointer).unwrap() = value;
+            assert_eq!(status(&row), expected, "{pointer}");
+            assert_eq!(group_status([&row]), expected, "{pointer}");
         }
-        row["status"] = json!("ok");
-        row["resource_budget"]["metric"] = json!("/missing");
-        assert_eq!(status(&row), "invalid");
-        row["resource_budget"] = Value::Null;
-        assert_eq!(status(&row), "unbudgeted");
+        for (field, value) in [
+            ("launch_index", json!(0)),
+            ("independent_launch_count", json!(1)),
+            ("launch_index", Value::Null),
+            ("independent_launch_count", Value::Null),
+        ] {
+            let mut rows: Vec<_> = (0..3)
+                .map(|index| {
+                    let mut row = sample(80);
+                    row["launch_index"] = json!(index);
+                    row["independent_launch_count"] = json!(3);
+                    row["resource_budget"]["min_independent_launches"] = json!(3);
+                    row
+                })
+                .collect();
+            assert_eq!(group_status(&rows), "pass");
+            assert_eq!(group_status(&rows[..2]), "invalid");
+            rows[2][field] = value;
+            assert_eq!(group_status(&rows), "invalid", "{field}");
+        }
+        let mut row = sample(80);
+        row["resource_budget"]["min_independent_launches"] = json!(3);
+        assert_eq!(group_status([&row]), "invalid");
     }
 }

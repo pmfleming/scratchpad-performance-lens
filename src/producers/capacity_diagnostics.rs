@@ -38,7 +38,8 @@ pub(super) fn background_lanes(event: &Value) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::background_lanes;
+    use serde_json::json;
 
     #[test]
     fn aggregates_raw_trials_instead_of_the_representative_event() {

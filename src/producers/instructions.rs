@@ -95,8 +95,7 @@ pub fn measure(args: Args) -> Result<()> {
     let count = parse(&std::fs::read_to_string(&output)?)?;
     let after = crate::provenance::compute_context(&config.project_root);
     ensure!(
-        source["revision"] == after["revision"]
-            && source["source_fingerprint"] == after["source_fingerprint"],
+        crate::provenance::same_source(&source, &after),
         "source changed during instrumentation"
     );
     let payload: Value = json!({"version":1,"diagnostic_only":true,"promise_eligible":false,"source_context":source,

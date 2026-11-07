@@ -1,5 +1,6 @@
 //! Only project-declared fixture families may share a probe process.
-use anyhow::{ensure, Context, Result};
+use anyhow::{ensure, Result};
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeSet;
 
@@ -16,48 +17,48 @@ pub(super) fn select<'a>(
     let mut declared = Vec::new();
     let mut members = BTreeSet::new();
     let mut names = BTreeSet::new();
-    if let Some(value) = manifest["probe_fixture_groups"].get(bin) {
-        for group in value
-            .as_array()
-            .context("probe fixture groups must be an array")?
-        {
-            let id = group["id"]
-                .as_str()
-                .filter(|id| !id.is_empty())
-                .context("fixture group requires an id")?;
-            ensure!(names.insert(id), "duplicate fixture group: {id}");
-            let scenarios = group["scenarios"]
-                .as_array()
-                .context("fixture group scenarios must be an array")?;
+    #[derive(Deserialize)]
+    struct Declaration<'a> {
+        id: &'a str,
+        scenarios: Vec<&'a str>,
+    }
+    let groups = manifest["probe_fixture_groups"]
+        .get(bin)
+        .map(Vec::<Declaration<'_>>::deserialize)
+        .transpose()?
+        .unwrap_or_default();
+    for group in groups {
+        let id = group.id;
+        ensure!(
+            !id.is_empty() && names.insert(id),
+            "empty or duplicate fixture group: {id}"
+        );
+        ensure!(
+            group.scenarios.len() >= 2,
+            "fixture group must declare at least two scenarios"
+        );
+        for scenario in &group.scenarios {
             ensure!(
-                scenarios.len() >= 2,
-                "fixture group must declare at least two scenarios"
+                manifest["probes"][bin]
+                    .as_array()
+                    .is_some_and(|known| known.iter().any(|value| value == scenario)),
+                "unknown fixture group scenario: {scenario}"
             );
-            let mut ids = Vec::new();
-            for scenario in scenarios {
-                let scenario = scenario
-                    .as_str()
-                    .context("fixture group scenario must be a string")?;
-                ensure!(
-                    manifest["probes"][bin]
-                        .as_array()
-                        .is_some_and(|known| known.iter().any(|value| value == scenario)),
-                    "unknown fixture group scenario: {scenario}"
-                );
-                ensure!(
-                    members.insert(scenario),
-                    "overlapping fixture group scenario: {scenario}"
-                );
-                if selected.contains(&scenario) {
-                    ids.push(scenario);
-                }
-            }
-            if !ids.is_empty() {
-                declared.push(Group {
-                    id: Some(id),
-                    scenarios: ids,
-                });
-            }
+            ensure!(
+                members.insert(*scenario),
+                "overlapping fixture group scenario: {scenario}"
+            );
+        }
+        let scenarios: Vec<_> = group
+            .scenarios
+            .into_iter()
+            .filter(|id| selected.contains(id))
+            .collect();
+        if !scenarios.is_empty() {
+            declared.push(Group {
+                id: Some(id),
+                scenarios,
+            });
         }
     }
     let mut result = Vec::new();
@@ -85,7 +86,7 @@ pub(super) fn select<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::select;
     use serde_json::json;
     #[test]
     fn only_explicit_disjoint_known_groups_share_selected_work() {

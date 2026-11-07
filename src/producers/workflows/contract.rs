@@ -134,7 +134,8 @@ pub(super) fn annotate(payload: &mut Value, manifest: &Value) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{annotate, validate};
+    use serde_json::{json, Value};
     fn fixture() -> (Value, Value) {
         let manifest = json!({"workflow_workloads":{"all":{"targets":10000,"bytes_per_target":16384}},
             "probe_measurements":{"search_workflow_all_first_render":{"probe":"search_workflow_metrics","threshold_ms":120}}});
@@ -145,19 +146,36 @@ mod tests {
         (json!({"scenarios":[row]}), manifest)
     }
     #[test]
-    fn reduced_workload_cannot_claim_a_promise_even_with_passing_trials() {
-        let (mut payload, manifest) = fixture();
-        validate(&payload, &manifest).unwrap();
-        annotate(&mut payload, &manifest);
-        let row = &payload["scenarios"][0];
-        assert_eq!(row["promise_workload_met"], false);
-        assert_eq!(row["budget_status"], "unmeasured");
-        assert_eq!(row["observed_budget_status"], "pass");
-        assert_eq!(row["measurement_status"], "diagnostic");
-    }
-    #[test]
-    fn mismatched_budgets_fixtures_and_trial_summaries_are_rejected() {
-        let (original, manifest) = fixture();
+    fn workload_and_trial_contract_matrix() {
+        for targets in [100, 10000] {
+            let (mut payload, mut manifest) = fixture();
+            manifest["workflow_workloads"]["all"]["targets"] = json!(targets);
+            payload["scenarios"][0]["measurement_status"] = json!("valid");
+            validate(&payload, &manifest).unwrap();
+            annotate(&mut payload, &manifest);
+            let row = &payload["scenarios"][0];
+            assert_eq!(row["promise_workload_met"], targets == 100);
+            assert_eq!(
+                row["budget_status"],
+                if targets == 100 { "pass" } else { "unmeasured" }
+            );
+            assert_eq!(
+                row["measurement_status"],
+                if targets == 100 {
+                    "valid"
+                } else {
+                    "diagnostic"
+                }
+            );
+            assert_eq!(
+                row["observed_budget_status"],
+                if targets == 100 {
+                    Value::Null
+                } else {
+                    json!("pass")
+                }
+            );
+        }
         for (pointer, value) in [
             ("/threshold_ms", json!(1000)),
             ("/total_bytes", json!(1)),
@@ -169,21 +187,10 @@ mod tests {
             ("/max_ms", json!(0.1)),
             ("/mean_ms", json!(0.1)),
         ] {
-            let mut payload = original.clone();
+            let (mut payload, manifest) = fixture();
             *payload["scenarios"][0].pointer_mut(pointer).unwrap() = value;
             assert!(validate(&payload, &manifest).is_err(), "{pointer}");
         }
-        assert!(validate(&original, &json!({})).is_err());
-    }
-    #[test]
-    fn full_workload_preserves_observed_status() {
-        let (mut payload, mut manifest) = fixture();
-        manifest["workflow_workloads"]["all"]["targets"] = json!(100);
-        payload["scenarios"][0]["measurement_status"] = json!("valid");
-        validate(&payload, &manifest).unwrap();
-        annotate(&mut payload, &manifest);
-        assert_eq!(payload["scenarios"][0]["promise_workload_met"], true);
-        assert_eq!(payload["scenarios"][0]["budget_status"], "pass");
-        assert_eq!(payload["scenarios"][0]["measurement_status"], "valid");
+        assert!(validate(&fixture().0, &json!({})).is_err());
     }
 }

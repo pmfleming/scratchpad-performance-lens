@@ -192,7 +192,8 @@ pub(super) fn phases(events: &[Value]) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{phases, scaling, storage, subdivisions};
+    use serde_json::{json, Value};
     #[test]
     fn subdivisions_require_complete_consistent_intervals() {
         let good = json!({"workload_value":10,"status":"ok","elapsed_ns":20000000,

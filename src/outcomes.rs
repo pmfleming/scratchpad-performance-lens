@@ -7,7 +7,7 @@ use std::path::Path;
 
 pub const SECTIONS: [&str; 3] = ["resource_budgets", "capacity_budgets", "probe_measurements"];
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Blocking {
     ForegroundInteraction,
@@ -15,7 +15,7 @@ pub enum Blocking {
     InteractionDuringBackground,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Residency {
     StoreCold,
@@ -26,7 +26,7 @@ pub enum Residency {
     NotApplicable,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Durability {
     NotRequired,
@@ -35,7 +35,7 @@ pub enum Durability {
     CommittedFull,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Outcome {
     pub promise: String,
@@ -65,7 +65,7 @@ pub fn validate(manifest: &Value) -> Result<()> {
             .as_object()
             .with_context(|| format!("missing {section}"))?;
         for (id, entry) in entries {
-            let outcome: Outcome = serde_json::from_value(entry["outcome"].clone())
+            let outcome: Outcome = Outcome::deserialize(&entry["outcome"])
                 .with_context(|| format!("{section}/{id}: missing or invalid outcome"))?;
             ensure!(
                 [
@@ -98,53 +98,65 @@ pub fn validate(manifest: &Value) -> Result<()> {
 
 /// A label never proves residency, publication, or power-loss durability.
 pub fn verify(declaration: &Value, observed: &Value) -> Result<()> {
-    let expected: Outcome = serde_json::from_value(declaration.clone())?;
-    ensure!(observed["completed"] == true, "completion was not observed");
-    for field in ["endpoint", "residency", "durability_at_endpoint"] {
+    Outcome::deserialize(declaration)?.verify(observed)
+}
+
+impl Outcome {
+    pub fn verify(&self, observed: &Value) -> Result<()> {
+        ensure!(observed["completed"] == true, "completion was not observed");
         ensure!(
-            observed[field] == declaration[field],
-            "observed {field} differs from declaration"
+            observed["endpoint"].as_str() == Some(self.endpoint.as_str()),
+            "observed endpoint differs from declaration"
         );
+        ensure!(
+            Residency::deserialize(&observed["residency"])? == self.residency,
+            "observed residency differs from declaration"
+        );
+        ensure!(
+            Durability::deserialize(&observed["durability_at_endpoint"])?
+                == self.durability_at_endpoint,
+            "observed durability_at_endpoint differs from declaration"
+        );
+        match self.residency {
+            Residency::StoreResident => ensure!(
+                observed["store_read_count"] == 0
+                    && observed["retained_read_count"]
+                        .as_u64()
+                        .is_some_and(|n| n > 0)
+                    && observed["app_retention_policy"] == true,
+                "resident claim lacks cache/policy proof"
+            ),
+            Residency::StoreWarm => ensure!(
+                observed["app_cache_empty_at_start"] == true && observed["os_cache_primed"] == true,
+                "warm claim lacks setup proof"
+            ),
+            Residency::StoreCold => ensure!(
+                observed["eviction_succeeded"] == true
+                    && observed["physical_read_bytes"]
+                        .as_u64()
+                        .is_some_and(|n| n > 0),
+                "cold claim lacks physical read proof"
+            ),
+            _ => {}
+        }
+        match self.durability_at_endpoint {
+            Durability::PublishedRam => ensure!(
+                observed["publication_observed"] == true,
+                "publication not observed"
+            ),
+            Durability::CommittedNormal => ensure!(
+                observed["body_commit_normal_observed"] == true,
+                "NORMAL body commit not observed"
+            ),
+            Durability::CommittedFull => ensure!(
+                observed["manifest_commit_full_observed"] == true
+                    || observed["previous_full_snapshot_reused"] == true,
+                "FULL manifest durability not observed"
+            ),
+            Durability::NotRequired => {}
+        }
+        Ok(())
     }
-    match expected.residency {
-        Residency::StoreResident => ensure!(
-            observed["store_read_count"] == 0
-                && observed["retained_read_count"]
-                    .as_u64()
-                    .is_some_and(|n| n > 0)
-                && observed["app_retention_policy"] == true,
-            "resident claim lacks cache/policy proof"
-        ),
-        Residency::StoreWarm => ensure!(
-            observed["app_cache_empty_at_start"] == true && observed["os_cache_primed"] == true,
-            "warm claim lacks setup proof"
-        ),
-        Residency::StoreCold => ensure!(
-            observed["eviction_succeeded"] == true
-                && observed["physical_read_bytes"]
-                    .as_u64()
-                    .is_some_and(|n| n > 0),
-            "cold claim lacks physical read proof"
-        ),
-        _ => {}
-    }
-    match expected.durability_at_endpoint {
-        Durability::PublishedRam => ensure!(
-            observed["publication_observed"] == true,
-            "publication not observed"
-        ),
-        Durability::CommittedNormal => ensure!(
-            observed["body_commit_normal_observed"] == true,
-            "NORMAL body commit not observed"
-        ),
-        Durability::CommittedFull => ensure!(
-            observed["manifest_commit_full_observed"] == true
-                || observed["previous_full_snapshot_reused"] == true,
-            "FULL manifest durability not observed"
-        ),
-        Durability::NotRequired => {}
-    }
-    Ok(())
 }
 
 /// Historical unversioned fixtures retain their old contract. Versioned producers
@@ -162,7 +174,8 @@ pub fn annotate(manifest: &Value, section: &str, id: &str, event: &mut Value) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{validate, verify};
+    use serde_json::{json, Value};
     fn declaration() -> Value {
         json!({"promise":"search","user_outcome":"all matches returned",
         "endpoint":"all_ranges_returned","blocking":"background_completion","residency":"store_resident",

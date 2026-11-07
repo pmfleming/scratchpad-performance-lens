@@ -3,7 +3,9 @@ use anyhow::{ensure, Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+mod plan;
+pub(crate) use plan::{Plan, Request};
 
 pub const RUNGS: [&str; 5] = [
     "owned_contiguous",
@@ -13,7 +15,7 @@ pub const RUNGS: [&str; 5] = [
     "store_cold",
 ];
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Trial {
     pub scenario: String,
@@ -125,8 +127,9 @@ pub fn memory_assessment(memory: &Value, policy: &Value) -> Result<Value> {
         _ => None,
     };
     let configured = memory["configured_pending_limit_bytes"].as_u64();
-    let policy_change =
-        configured.map(|n| n != policy["pending_queue_limit_bytes"].as_u64().unwrap());
+    let policy_change = configured
+        .zip(policy["pending_queue_limit_bytes"].as_u64())
+        .map(|(n, limit)| n != limit);
     Ok(json!({"metrics":memory,"exposure_window_ms":exposure,
         "policy_change":policy_change,
         "classification":match policy_change {Some(true)=>"durability_policy_change",Some(false)=>"declared_pending_policy",None=>"unknown_policy"},
@@ -135,27 +138,14 @@ pub fn memory_assessment(memory: &Value, policy: &Value) -> Result<Value> {
         "interpretation":"NORMAL body commit is separate from FULL durability; pending queue is not total accepted uncommitted text; unknown metrics are not zero"}))
 }
 
-fn validate_trial(t: &Trial, spec: &Value) -> Result<()> {
+fn validate_trial(t: &Trial, spec: &plan::Operation) -> Result<()> {
     ensure!(RUNGS.contains(&t.rung.as_str()), "unknown rung");
     ensure!(
         t.workload_value > 0 && !t.revision.is_empty() && !t.code_path.is_empty(),
         "missing trial identity"
     );
     ensure!(
-        spec["workloads"]
-            .as_array()
-            .is_some_and(|v| v.contains(&json!(t.workload_value))),
-        "undeclared workload"
-    );
-    ensure!(
-        spec["fixtures"]
-            .as_array()
-            .is_some_and(|v| v.contains(&json!(t.fixture))),
-        "undeclared fixture"
-    );
-    ensure!(
-        t.workload_unit == spec["workload_unit"].as_str().unwrap_or("")
-            && t.completion_endpoint == spec["completion_endpoint"].as_str().unwrap_or(""),
+        t.workload_unit == spec.workload_unit && t.completion_endpoint == spec.completion_endpoint,
         "workload unit or completion endpoint mismatch"
     );
     ensure!(
@@ -163,7 +153,7 @@ fn validate_trial(t: &Trial, spec: &Value) -> Result<()> {
         "instrumented timings cannot be used in residency latency comparisons"
     );
     ensure!(
-        spec["code_paths"][&t.rung].as_str() == Some(t.code_path.as_str()),
+        spec.code_paths.get(&t.rung) == Some(&t.code_path),
         "unexpected diagnostic code path"
     );
     ensure!(
@@ -192,10 +182,7 @@ fn validate_trial(t: &Trial, spec: &Value) -> Result<()> {
             && t.cancellation_checked,
         "missing exact-result or cancellation evidence"
     );
-    ensure!(
-        Some(t.metric.as_str()) == spec["metric"].as_str(),
-        "diagnostic metric mismatch"
-    );
+    ensure!(t.metric == spec.metric, "diagnostic metric mismatch");
     let o = &t.observations;
     if t.metric.contains("p99") {
         let samples = o["metric_samples_ns"]
@@ -234,17 +221,9 @@ fn validate_trial(t: &Trial, spec: &Value) -> Result<()> {
                 && positive(&o["physical_read_bytes"]).is_some(),
             "cold rung lacks physical read proof"
         ),
-        _ => unreachable!(),
+        _ => anyhow::bail!("unknown rung"),
     }
     Ok(())
-}
-
-fn median(mut values: Vec<f64>) -> Option<f64> {
-    if values.is_empty() {
-        return None;
-    }
-    values.sort_by(f64::total_cmp);
-    Some((values[values.len() / 2] + values[(values.len() - 1) / 2]) / 2.)
 }
 
 pub fn analyze(
@@ -252,247 +231,14 @@ pub fn analyze(
     trials: Vec<Trial>,
     selected: &[String],
 ) -> Result<LadderArtifact> {
-    let config = &manifest["diagnostics"]["residency"];
-    ensure!(
-        config["version"] == 1,
-        "unsupported residency contract version"
-    );
-    let specs = config["operations"]
-        .as_object()
-        .context("missing residency operation declarations")?;
-    let launches = positive(&config["independent_launches"])
-        .filter(|n| *n >= 3)
-        .context("residency requires at least three independent launches")?;
-    let profiles = config["memory_profiles"]
-        .as_array()
-        .context("missing memory profiles")?;
-    ensure!(
-        profiles.contains(&Value::Null)
-            && profiles.contains(&json!(4u64 * 1024 * 1024 * 1024))
-            && profiles.contains(&json!(16u64 * 1024 * 1024 * 1024)),
-        "required host/4GiB/16GiB profiles absent"
-    );
-    ensure!(
-        profiles
-            .iter()
-            .all(|p| p.is_null() || positive(p).is_some())
-            && profiles
-                .iter()
-                .map(Value::to_string)
-                .collect::<BTreeSet<_>>()
-                .len()
-                == profiles.len(),
-        "invalid or duplicate memory profile"
-    );
-    ensure!(!specs.is_empty(), "empty residency operation inventory");
-    for (id, spec) in specs {
-        let workloads = spec["workloads"].as_array().context("missing workloads")?;
-        let fixtures = spec["fixtures"].as_array().context("missing fixtures")?;
-        ensure!(
-            !workloads.is_empty()
-                && workloads.iter().all(|v| positive(v).is_some())
-                && workloads
-                    .iter()
-                    .map(Value::to_string)
-                    .collect::<BTreeSet<_>>()
-                    .len()
-                    == workloads.len(),
-            "{id}: invalid or duplicate workloads"
-        );
-        ensure!(
-            !fixtures.is_empty()
-                && fixtures
-                    .iter()
-                    .all(|v| v.as_str().is_some_and(|s| !s.trim().is_empty()))
-                && fixtures
-                    .iter()
-                    .map(Value::to_string)
-                    .collect::<BTreeSet<_>>()
-                    .len()
-                    == fixtures.len(),
-            "{id}: invalid or duplicate fixtures"
-        );
-        ensure!(
-            ["workload_unit", "completion_endpoint", "metric"]
-                .iter()
-                .all(|key| spec[*key].as_str().is_some_and(|s| !s.trim().is_empty()))
-                && RUNGS.iter().all(|r| spec["code_paths"][*r]
-                    .as_str()
-                    .is_some_and(|s| !s.trim().is_empty())),
-            "{id}: missing trial contract"
-        );
-        let section = spec["gate_section"]
-            .as_str()
-            .context("missing gate section")?;
-        let gate = spec["gate_id"].as_str().context("missing gate id")?;
-        ensure!(
-            ["capacity_budgets", "resource_budgets"].contains(&section),
-            "invalid reference gate section"
-        );
-        let budget = &manifest[section][gate];
-        ensure!(
-            spec["metric"]
-                == budget
-                    .get("metric")
-                    .cloned()
-                    .unwrap_or(json!("/elapsed_ns")),
-            "{id}: reference gate metric mismatch"
-        );
-        ensure!(
-            budget["threshold_ms"].as_f64().is_some_and(|n| n > 0.)
-                || (budget["unit"] == "ns" && positive(&budget["max"]).is_some()),
-            "{id}: diagnostic requires an existing time gate"
-        );
-    }
-    let selection: BTreeSet<_> = if selected.is_empty() {
-        specs.keys().cloned().collect()
-    } else {
-        selected.iter().cloned().collect()
-    };
-    ensure!(
-        selection.iter().all(|id| specs.contains_key(id)),
-        "unknown residency scenario"
-    );
-    validate_policy(&manifest["durability_policy"])?;
-    let mut seen = BTreeSet::new();
-    let mut revision = None;
-    for t in &trials {
-        ensure!(
-            selection.contains(&t.scenario),
-            "unsolicited diagnostic scenario"
-        );
-        ensure!(
-            profiles.contains(&json!(t.memory_profile_bytes)),
-            "undeclared memory profile"
-        );
-        ensure!(t.launch_index < launches, "unexpected launch index");
-        validate_trial(t, &specs[&t.scenario])?;
-        memory_assessment(&t.memory, &manifest["durability_policy"])?;
-        let r = revision.get_or_insert(&t.revision);
-        ensure!(*r == &t.revision, "mixed revisions in one ladder");
-        ensure!(
-            seen.insert((
-                t.scenario.clone(),
-                t.workload_value,
-                t.fixture.clone(),
-                t.memory_profile_bytes,
-                t.launch_index,
-                t.rung.clone()
-            )),
-            "duplicate trial"
-        );
-    }
-    let mut gaps = Vec::new();
-    let mut groups = Vec::new();
-    for id in selection {
-        let spec = &specs[&id];
-        let budget = manifest[spec["gate_section"]
-            .as_str()
-            .context("missing gate section")?]
-            [spec["gate_id"].as_str().context("missing gate id")?]
-        .clone();
-        let limit = budget["threshold_ms"]
-            .as_f64()
-            .or_else(|| {
-                budget["max"]
-                    .as_f64()
-                    .filter(|_| budget["unit"] == "ns")
-                    .map(|n| n / 1e6)
-            })
-            .context("diagnostic requires an existing time gate")?;
-        for size in spec["workloads"].as_array().context("missing workloads")? {
-            for fixture in spec["fixtures"].as_array().context("missing fixtures")? {
-                for profile in profiles {
-                    let rows: Vec<_> = trials
-                        .iter()
-                        .filter(|t| {
-                            t.scenario == id
-                                && json!(t.workload_value) == *size
-                                && json!(t.fixture) == *fixture
-                                && json!(t.memory_profile_bytes) == *profile
-                        })
-                        .collect();
-                    let complete =
-                        rows.len() as u64 == launches * 5 && rows.iter().all(|t| t.status == "ok");
-                    if !complete {
-                        gaps.push(format!(
-                            "{id}/{size}/{fixture}/{profile}: incomplete or unavailable rungs"
-                        ));
-                    }
-                    for launch in 0..launches {
-                        let pair: Vec<_> = rows
-                            .iter()
-                            .filter(|t| t.launch_index == launch && t.status == "ok")
-                            .collect();
-                        if let Some(first) = pair.first() {
-                            ensure!(
-                                pair.iter().all(|t| t.fixture_digest == first.fixture_digest
-                                    && t.result_digest == first.result_digest
-                                    && t.result_count == first.result_count
-                                    && t.expected_result_count == first.expected_result_count
-                                    && t.host_memory_bytes == first.host_memory_bytes),
-                                "paired rungs disagree on fixture/results/host"
-                            );
-                        }
-                    }
-                    let stable = rows.iter().all(|t| {
-                        crate::environment::quality(
-                            &t.measurement_quality["before"],
-                            &t.measurement_quality["after"],
-                        )["status"]
-                            == "stable"
-                    });
-                    let medians: Vec<_> = RUNGS
-                        .iter()
-                        .map(|r| {
-                            median(
-                                rows.iter()
-                                    .filter(|t| t.rung == *r && t.status == "ok")
-                                    .filter_map(|t| t.metric_ns.map(|n| n as f64 / 1e6))
-                                    .collect(),
-                            )
-                        })
-                        .collect();
-                    let classification = if !complete {
-                        "incomplete"
-                    } else if !stable {
-                        "uncertain_noise"
-                    } else if medians[0].unwrap() > limit {
-                        "computation"
-                    } else if medians[1].unwrap() > limit {
-                        "piece_tree_or_window_assembly"
-                    } else if medians[2].unwrap() > limit {
-                        "resident_store_access"
-                    } else if medians[3].unwrap() > limit || medians[4].unwrap() > limit {
-                        "retrieval_or_residency"
-                    } else {
-                        "all_diagnostic_rungs_within_budget"
-                    };
-                    let contrasts:Vec<_>=[(0,1),(1,2),(2,3),(3,4)].iter().map(|(a,b)| {
-                        let differences=(0..launches).filter_map(|i|{
-                            let left=rows.iter().find(|t|t.launch_index==i && t.rung==RUNGS[*a] && t.status=="ok")?.metric_ns?;
-                            let right=rows.iter().find(|t|t.launch_index==i && t.rung==RUNGS[*b] && t.status=="ok")?.metric_ns?;
-                            Some((right as f64-left as f64)/1e6)
-                        }).collect();
-                        json!({"from":RUNGS[*a],"to":RUNGS[*b],"paired_median_difference_ms":median(differences)})
-                    }).collect();
-                    groups.push(json!({"scenario":id,"workload_value":size,"fixture":fixture,"memory_profile_bytes":profile,
-                        "completion_endpoint":spec["completion_endpoint"],"reference_gate_endpoint":budget["outcome"]["endpoint"],
-                        "reference_gate":spec["gate_id"],
-                        "budget_ms":limit,"complete":complete,"stable":stable,"classification":classification,
-                        "rungs":RUNGS.iter().zip(medians).map(|(r,m)|json!({"rung":r,"median_ms":m})).collect::<Vec<_>>(),"contrasts":contrasts,
-                        "memory":rows.iter().map(|t|memory_assessment(&t.memory,&manifest["durability_policy"])).collect::<Result<Vec<_>>>()?}));
-                }
-            }
-        }
-    }
-    Ok(LadderArtifact {version:1,source_context:Value::Null,diagnostic_only:true,promise_eligible:false,complete:gaps.is_empty(),gaps,groups,trials,
-        interpretation:"Paired diagnostic contrasts are not exclusive causal phase costs. Budget simulation does not constrain physical RAM. Instrument counts are companion signals; instrumented timings cannot establish latency gates.".into()})
+    Plan::new(manifest, selected)?.analyze(trials)
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::*;
+    use super::{analyze, memory_assessment, Plan, Trial, RUNGS};
+    use serde_json::{json, Value};
+    use std::collections::BTreeMap;
     pub(crate) fn fixture() -> (Value, Vec<Trial>) {
         let policy = json!({"version":1,"pending_queue_limit_bytes":33554432,"manifest_sync":"FULL","body_sync":"NORMAL","maximum_exposure_ms":null});
         let paths: BTreeMap<_, _> = RUNGS
@@ -524,51 +270,103 @@ pub(crate) mod tests {
         (manifest, trials)
     }
     #[test]
-    fn complete_ladder_never_certifies_a_promise_and_missing_rungs_stay_missing() {
-        let (m, mut t) = fixture();
-        let a = analyze(&m, t.clone(), &[]).unwrap();
-        assert!(a.complete);
-        assert!(!a.promise_eligible);
-        assert_eq!(
-            a.groups[0]["classification"],
-            "all_diagnostic_rungs_within_budget"
-        );
-        t.pop();
-        let a = analyze(&m, t, &[]).unwrap();
-        assert!(!a.complete);
-        assert!(!a.gaps.is_empty());
+    fn ladder_classifies_only_complete_stable_comparable_trials() {
+        for (case, expected) in [
+            ("baseline", "all_diagnostic_rungs_within_budget"),
+            ("owned_contiguous", "computation"),
+            ("owned_piece_tree", "piece_tree_or_window_assembly"),
+            ("store_resident", "resident_store_access"),
+            ("store_warm", "retrieval_or_residency"),
+            ("store_cold", "retrieval_or_residency"),
+            ("missing", "incomplete"),
+            ("unavailable", "incomplete"),
+            ("noise", "uncertain_noise"),
+        ] {
+            let (m, mut t) = fixture();
+            match case {
+                "missing" => {
+                    t.pop();
+                }
+                "unavailable" => {
+                    t[4].status = "unavailable".into();
+                    t[4].metric_ns = None;
+                    t[4].unavailable_reason = Some("eviction unsupported".into());
+                }
+                "noise" => t[0].measurement_quality = json!({"status":"stable"}),
+                _ => {
+                    for row in t.iter_mut().filter(|t| t.rung == case) {
+                        row.metric_ns = Some(200000000);
+                    }
+                }
+            }
+            let a = analyze(&m, t, &[]).unwrap();
+            assert!(!a.promise_eligible);
+            assert_eq!(a.complete, !matches!(case, "missing" | "unavailable"));
+            let group = if case == "missing" {
+                a.groups.last()
+            } else {
+                a.groups.first()
+            }
+            .unwrap();
+            assert_eq!(group["classification"], expected, "{case}");
+            if case == "owned_contiguous" {
+                assert_eq!(group["contrasts"][0]["paired_median_difference_ms"], -199.0);
+            }
+        }
     }
+
     #[test]
-    fn mismatched_results_duplicate_trials_and_false_cold_claims_fail() {
-        let (m, t) = fixture();
-        let mut bad = t.clone();
-        bad[1].result_digest = "c".repeat(64);
-        assert!(analyze(&m, bad, &[]).is_err());
-        let mut bad = t.clone();
-        bad.push(t[0].clone());
-        assert!(analyze(&m, bad, &[]).is_err());
-        let mut bad = t.clone();
-        bad[4].observations["physical_read_bytes"] = json!(0);
-        assert!(analyze(&m, bad, &[]).is_err());
-        let mut bad = t.clone();
-        bad[0].timing_source = "callgrind_wall".into();
-        assert!(analyze(&m, bad, &[]).is_err());
-        assert!(analyze(&m, t, &["typo".into()]).is_err());
+    fn invalid_trial_identity_results_and_statistics_are_rejected() {
+        for (index, pointer, value) in [
+            (0, "/scenario", json!("typo")),
+            (0, "/revision", json!("other")),
+            (0, "/rung", json!("unknown")),
+            (0, "/workload_value", json!(1)),
+            (0, "/fixture", json!("other")),
+            (0, "/fixture_digest", json!("bad")),
+            (0, "/result_count", json!(2)),
+            (1, "/result_digest", json!("c".repeat(64))),
+            (0, "/workload_unit", json!("tabs")),
+            (0, "/code_path", json!("fake")),
+            (0, "/completion_endpoint", json!("dispatch")),
+            (0, "/host_memory_bytes", json!(0)),
+            (0, "/memory_profile_bytes", json!(1)),
+            (0, "/launch_index", json!(3)),
+            (0, "/timing_source", json!("callgrind_wall")),
+            (0, "/cancellation_checked", json!(false)),
+            (0, "/status", json!("unavailable")),
+            (0, "/metric_ns", Value::Null),
+            (0, "/metric", json!("/wrong_ns")),
+            (0, "/observations/store_read_count", json!(1)),
+            (2, "/observations/retained_read_count", json!(0)),
+            (3, "/observations/os_cache_primed", json!(false)),
+            (4, "/observations/physical_read_bytes", json!(0)),
+        ] {
+            let (m, mut t) = fixture();
+            let mut raw = serde_json::to_value(&t[index]).unwrap();
+            *raw.pointer_mut(pointer).unwrap() = value;
+            t[index] = serde_json::from_value(raw).unwrap();
+            assert!(analyze(&m, t, &[]).is_err(), "{index}:{pointer}");
+        }
+        let (mut m, mut t) = fixture();
+        let duplicate = serde_json::from_value(serde_json::to_value(&t[0]).unwrap()).unwrap();
+        t.push(duplicate);
+        assert!(analyze(&m, t, &[]).is_err());
+        let (_, mut t) = fixture();
+        m["diagnostics"]["residency"]["operations"]["search"]["metric"] = json!("/p99_ns");
+        m["capacity_budgets"]["search"]["metric"] = json!("/p99_ns");
+        t[0].metric = "/p99_ns".into();
+        t[0].metric_ns = Some(127);
+        t[0].observations["metric_samples_ns"] = json!((1..=128).collect::<Vec<_>>());
+        let plan = Plan::new(&m, &[]).unwrap();
+        assert!(plan.validate_trial(&t[0]).is_ok());
+        for bad in [128, 0] {
+            t[0].metric_ns = Some(bad);
+            assert!(plan.validate_trial(&t[0]).is_err());
+        }
+        assert!(analyze(&m, Vec::new(), &["typo".into()]).is_err());
     }
-    #[test]
-    fn unavailable_rung_is_not_zero_latency_and_noise_is_not_a_classification() {
-        let (m, mut t) = fixture();
-        t[4].status = "unavailable".into();
-        t[4].metric_ns = None;
-        t[4].unavailable_reason = Some("eviction unsupported".into());
-        assert!(!analyze(&m, t, &[]).unwrap().complete);
-        let (m, mut t) = fixture();
-        t[0].measurement_quality = json!({"status":"stable"});
-        assert_eq!(
-            analyze(&m, t, &[]).unwrap().groups[0]["classification"],
-            "uncertain_noise"
-        );
-    }
+
     #[test]
     fn memory_retention_and_durability_policy_are_independent() {
         let (m, _) = fixture();
@@ -589,8 +387,10 @@ pub(crate) mod tests {
 
     #[test]
     fn invalid_declarations_fail_before_any_probe_runs() {
-        let (m, _) = fixture();
+        let (mut m, _) = fixture();
+        m["capacity_budgets"]["search"]["metric"] = json!("/elapsed_ns");
         for (pointer, value) in [
+            ("/capacity_budgets/search/metric", Value::Null),
             ("/diagnostics/residency/version", json!(2)),
             (
                 "/diagnostics/residency/memory_profiles",
