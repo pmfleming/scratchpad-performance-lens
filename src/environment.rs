@@ -47,11 +47,7 @@ fn filesystem(path: &Path) -> Value {
     mount
 }
 
-pub fn identity(root: &Path) -> Value {
-    let governors: std::collections::BTreeMap<_, _> = std::fs::read_dir("/sys/devices/system/cpu/cpufreq").into_iter().flatten().filter_map(Result::ok)
-        .map(|entry| (entry.file_name().to_string_lossy().into_owned(),json!({
-            "governor":read(entry.path().join("scaling_governor")),"driver":read(entry.path().join("scaling_driver")),
-            "min_khz":read(entry.path().join("scaling_min_freq")),"max_khz":read(entry.path().join("scaling_max_freq"))}))).collect();
+fn power_supplies() -> Value {
     let power: std::collections::BTreeMap<_, _> = std::fs::read_dir("/sys/class/power_supply")
         .into_iter()
         .flatten()
@@ -64,10 +60,44 @@ pub fn identity(root: &Path) -> Value {
             )
         })
         .collect();
+    json!(power)
+}
+
+fn power_identity(mut power: Value) -> Value {
+    // Charge completion/threshold cycling is transient when external power is
+    // positively observed. Unknown supplies and battery discharge stay distinct.
+    let external_online = power.as_object().is_some_and(|supplies| {
+        supplies
+            .values()
+            .any(|s| s["type"].as_str().is_some_and(|kind| kind != "Battery") && s["online"] == "1")
+    });
+    if external_online {
+        if let Some(supplies) = power.as_object_mut() {
+            for supply in supplies.values_mut() {
+                if supply["type"] == "Battery"
+                    && matches!(
+                        supply["status"].as_str(),
+                        Some("Charging" | "Full" | "Not charging")
+                    )
+                {
+                    supply["status"] = json!("not_discharging_on_external_power");
+                }
+            }
+        }
+    }
+    power
+}
+
+pub fn identity(root: &Path) -> Value {
+    let governors: std::collections::BTreeMap<_, _> = std::fs::read_dir("/sys/devices/system/cpu/cpufreq").into_iter().flatten().filter_map(Result::ok)
+        .map(|entry| (entry.file_name().to_string_lossy().into_owned(),json!({
+            "governor":read(entry.path().join("scaling_governor")),"driver":read(entry.path().join("scaling_driver")),
+            "min_khz":read(entry.path().join("scaling_min_freq")),"max_khz":read(entry.path().join("scaling_max_freq"))}))).collect();
+    let power = power_identity(power_supplies());
     json!({"project_filesystem":filesystem(root),"temp_filesystem":filesystem(&std::env::temp_dir()),
         "target_filesystem":filesystem(&crate::shared::cargo_target_directory(root)),
         "governors":governors,"power_supplies":power,"power_profile":command("powerprofilesctl",&["get"]),
-        "kernel":command("uname",&["-r"]),"control_revision":2})
+        "kernel":command("uname",&["-r"]),"control_revision":2,"power_identity_revision":2})
 }
 
 pub fn conditions() -> Value {
@@ -85,7 +115,7 @@ pub fn conditions() -> Value {
         .collect();
     json!({"loadavg":read("/proc/loadavg"),"cpu_pressure":read("/proc/pressure/cpu"),
         "io_pressure":read("/proc/pressure/io"),"memory_pressure":read("/proc/pressure/memory"),
-        "temperatures_millicelsius":temperatures})
+        "temperatures_millicelsius":temperatures,"power_supplies":power_supplies()})
 }
 
 pub fn control() -> Value {
@@ -140,6 +170,32 @@ pub fn quality(before: &Value, after: &Value) -> Value {
 mod tests {
     use super::quality;
     use serde_json::{json, Value};
+    #[test]
+    fn charge_completion_is_transient_but_power_source_and_discharge_changes_are_not() {
+        let supplies = |online, status| {
+            json!({"AC":{"type":"Mains","online":online,"status":null},
+            "BAT0":{"type":"Battery","online":null,"status":status}})
+        };
+        let charging = super::power_identity(supplies("1", "Charging"));
+        for status in ["Full", "Not charging"] {
+            assert_eq!(charging, super::power_identity(supplies("1", status)));
+        }
+        assert_ne!(
+            charging,
+            super::power_identity(supplies("0", "Discharging"))
+        );
+        assert_ne!(
+            charging,
+            super::power_identity(supplies("1", "Discharging"))
+        );
+        assert_ne!(charging, super::power_identity(supplies("1", "Unknown")));
+        assert_ne!(
+            super::power_identity(supplies("0", "Charging")),
+            super::power_identity(supplies("0", "Not charging"))
+        );
+        assert_eq!(super::power_identity(Value::Null), Value::Null);
+    }
+
     #[test]
     fn control_drift_flags_noise_without_changing_machine_identity() {
         let control = |n| json!({"median_ns":n,"min_ns":n,"max_ns":n});
