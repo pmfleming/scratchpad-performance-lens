@@ -45,8 +45,10 @@ Reviewed changed-file inventories, cycle evidence, contract diffs, and current v
 
 ## Progress
 - Stage 1 foundation checkpoint: frozen project manifest/benchmark metadata and promise membership/scale inventory; corrected noise propagation, opportunity text, uncertain evidence coverage, capacity labels, and unsupported write amplification. Cold-read output includes sample count and nearest-rank position.
-- Full lens suite passed: 103 library tests and 11 integration tests. Strict all-target Clippy passed before the final percentile test; formatting and diff checks passed.
+- Full lens suite passed: 104 library tests and 11 integration tests. Strict all-target Clippy, formatting and diff checks passed.
 - Stage 1 is not yet complete: attributed syscall collection is not implemented (ratios remain null without it); cache configuration is observed only where probes request storage configuration; sampling minima are unchanged; complete behavioral gate inventory/version-change tooling remains to be extended.
-- Scratchpad companion exposes actual cache limits and app-default comparison without modifying policy. Library check passed; focused test is pending.
+- Scratchpad companion exposes actual cache limits and app-default comparison without modifying policy. Library check and focused cache-configuration test passed. Committed as Scratchpad 0727bec.
 - Stages 2–7 have not been implemented. No new performance audit or optimization experiment has run.
 - Baseline lens library suite: 99 tests passed.
+
+Foundation commits: lens d100a10; Scratchpad 0727bec. The follow-up commit corrects uncertain-evidence advice and tests covered-but-at-risk behavior. These are checkpoints within stage 1, not completion of the seven-stage plan.

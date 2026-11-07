@@ -403,7 +403,15 @@ fn build_review_scenario(
         promised_scale: promised_scale_payload(scenario),
         scale_checks,
         gaps,
-        opportunities: scenario_opportunities(promise_health, gaps_empty),
+        opportunities: if promise_health == PromiseHealth::AtRisk && !uncertain_resources.is_empty()
+        {
+            vec![
+                "Resolve resource measurements that straddle the budget before claiming a pass."
+                    .into(),
+            ]
+        } else {
+            scenario_opportunities(promise_health, gaps_empty)
+        },
         implementations: Vec::new(),
         implementation_count: 0,
         measurement_split: MeasurementSplit {
@@ -479,6 +487,39 @@ mod tests {
     };
     use crate::shared;
     use serde_json::json;
+
+    #[test]
+    fn complete_uncertain_resources_are_covered_without_claiming_a_pass() {
+        let definition = super::ReviewScenario {
+            id: "fixture",
+            title: "Fixture",
+            promise: "Fixture",
+            families: &[],
+            benchmark_keys: &[],
+            capacity_scenarios: &[],
+            resource_scenarios: &["fixture"],
+            profile_ids: &[],
+            scale_targets: &[],
+        };
+        let row = build_review_scenario(
+            &definition,
+            &[],
+            &[],
+            &[json!({
+                "scenario":"fixture", "budget_status":"uncertain", "samples":[{
+                    "status":"ok", "elapsed_ms":1, "measurement_scope":"prepared_operation",
+                    "peak_live_bytes":100
+                }]
+            })],
+            &[],
+            false,
+            false,
+        );
+        assert_eq!(row.coverage_status, CoverageStatus::Covered);
+        assert_eq!(row.promise_health, PromiseHealth::AtRisk);
+        assert!(row.gaps.iter().all(|s| !s.contains("Missing")));
+        assert!(row.opportunities.iter().all(|s| !s.contains("missing")));
+    }
 
     #[test]
     fn fresh_but_incompatible_capacity_is_not_silently_missing() -> anyhow::Result<()> {
