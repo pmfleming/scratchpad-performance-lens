@@ -49,7 +49,12 @@ fn outcome_endpoints_and_policy_match_versioned_inventory() {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../scratchpad"));
     let manifest = scratchpad_performance_lens::outcomes::load(&root).unwrap();
-    let expected: Value = serde_json::from_str(include_str!("fixtures/outcomes-v1.json")).unwrap();
+    let snapshot = match manifest["durability_policy"]["version"].as_u64() {
+        Some(1) => include_str!("fixtures/outcomes-v1.json"),
+        Some(2) => include_str!("fixtures/outcomes-policy-v2.json"),
+        version => panic!("unreviewed policy version: {version:?}"),
+    };
+    let expected: Value = serde_json::from_str(snapshot).unwrap();
     let mut actual = serde_json::json!({
         "outcome_contract_version":manifest["outcome_contract_version"],
         "durability_policy":manifest["durability_policy"],

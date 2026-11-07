@@ -67,9 +67,34 @@ fn positive(v: &Value) -> Option<u64> {
 
 pub fn validate_policy(policy: &Value) -> Result<()> {
     ensure!(
-        policy["version"] == 1 && positive(&policy["pending_queue_limit_bytes"]).is_some(),
+        matches!(policy["version"].as_u64(), Some(1 | 2))
+            && positive(&policy["pending_queue_limit_bytes"]).is_some(),
         "invalid durability policy"
     );
+    if policy["version"] == 2 {
+        let max = positive(&policy["pending_queue_limit_bytes"]).unwrap();
+        let min = positive(&policy["minimum_pending_queue_bytes"])
+            .context("missing minimum pending limit")?;
+        ensure!(min <= max, "minimum pending limit exceeds maximum");
+        ensure!(
+            positive(&policy["available_memory_divisor"]).is_some(),
+            "invalid memory divisor"
+        );
+        ensure!(
+            policy["pressure_pending_limit_bytes"] == min,
+            "unexpected pressure limit"
+        );
+        ensure!(
+            policy["pending_limit_policy"] == "available_memory_clamped_failure_budget",
+            "unknown admission policy"
+        );
+        ensure!(
+            policy["memory_pressure_some_avg10_percent"]
+                .as_f64()
+                .is_some_and(|v| v.is_finite() && v > 0.0 && v <= 100.0),
+            "invalid pressure threshold"
+        );
+    }
     ensure!(
         policy["manifest_sync"] == "FULL" && policy["body_sync"] == "NORMAL",
         "unexpected commit policy: review policy changes explicitly"
@@ -127,9 +152,39 @@ pub fn memory_assessment(memory: &Value, policy: &Value) -> Result<Value> {
         _ => None,
     };
     let configured = memory["configured_pending_limit_bytes"].as_u64();
-    let policy_change = configured
-        .zip(policy["pending_queue_limit_bytes"].as_u64())
-        .map(|(n, limit)| n != limit);
+    let expected = if policy["version"] == 1 {
+        policy["pending_queue_limit_bytes"].as_u64()
+    } else {
+        for key in [
+            "policy_available_memory_bytes",
+            "policy_failure_limit_bytes",
+        ] {
+            ensure!(
+                memory[key].is_null() || positive(&memory[key]).is_some(),
+                "invalid observation: {key}"
+            );
+        }
+        ensure!(
+            memory["policy_memory_pressure"].is_null()
+                || memory["policy_memory_pressure"].is_boolean(),
+            "invalid pressure observation"
+        );
+        positive(&memory["policy_available_memory_bytes"])
+            .zip(positive(&memory["policy_failure_limit_bytes"]))
+            .zip(memory["policy_memory_pressure"].as_bool())
+            .map(|((available, failure), pressure)| {
+                let min = policy["minimum_pending_queue_bytes"].as_u64().unwrap();
+                let max = policy["pending_queue_limit_bytes"].as_u64().unwrap();
+                let divisor = policy["available_memory_divisor"].as_u64().unwrap();
+                (if pressure {
+                    min
+                } else {
+                    (available / divisor).clamp(min, max)
+                })
+                .min(failure)
+            })
+    };
+    let policy_change = configured.zip(expected).map(|(n, limit)| n != limit);
     Ok(json!({"metrics":memory,"exposure_window_ms":exposure,
         "policy_change":policy_change,
         "classification":match policy_change {Some(true)=>"durability_policy_change",Some(false)=>"declared_pending_policy",None=>"unknown_policy"},
@@ -383,6 +438,46 @@ pub(crate) mod tests {
             p
         )
         .is_err());
+    }
+
+    #[test]
+    fn version_two_checks_the_formula_and_keeps_missing_inputs_unknown() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/outcomes-policy-v2.json"))
+                .unwrap();
+        let policy = &fixture["durability_policy"];
+        let mut memory = json!({"configured_pending_limit_bytes":134217728,
+            "policy_available_memory_bytes":4294967296u64,
+            "policy_failure_limit_bytes":1073741824,
+            "policy_memory_pressure":false});
+        assert_eq!(
+            memory_assessment(&memory, policy).unwrap()["policy_change"],
+            false
+        );
+        memory["policy_memory_pressure"] = json!(true);
+        assert_eq!(
+            memory_assessment(&memory, policy).unwrap()["policy_change"],
+            true
+        );
+        memory["configured_pending_limit_bytes"] = json!(33554432);
+        assert_eq!(
+            memory_assessment(&memory, policy).unwrap()["policy_change"],
+            false
+        );
+        memory["policy_failure_limit_bytes"] = json!(16777216);
+        memory["configured_pending_limit_bytes"] = json!(16777216);
+        assert_eq!(
+            memory_assessment(&memory, policy).unwrap()["policy_change"],
+            false
+        );
+        memory["policy_available_memory_bytes"] = Value::Null;
+        assert!(memory_assessment(&memory, policy).unwrap()["policy_change"].is_null());
+        let mut bad = policy.clone();
+        bad["minimum_pending_queue_bytes"] = json!(u64::MAX);
+        assert!(super::validate_policy(&bad).is_err());
+        bad = policy.clone();
+        bad["available_memory_divisor"] = json!(0);
+        assert!(super::validate_policy(&bad).is_err());
     }
 
     #[test]
