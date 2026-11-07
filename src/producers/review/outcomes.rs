@@ -97,15 +97,16 @@ pub(super) fn matrix(
                 r["budget_status"] == "fail"
                     || (r["evidence_kind"] == "frame"
                         && crate::producers::common::frame_over_budget(r))
-                    || r["samples"].as_array().is_some_and(|samples| {
-                        samples.iter().any(|s| {
-                            s["budget_status"] == "fail"
-                                || s["elapsed_ms"]
-                                    .as_f64()
-                                    .zip(budget["threshold_ms"].as_f64())
-                                    .is_some_and(|(v, b)| v > b)
-                        })
-                    })
+                    || (section == "capacity_budgets"
+                        && r["samples"].as_array().is_some_and(|samples| {
+                            samples.iter().any(|s| {
+                                s["budget_status"] == "fail"
+                                    || s["elapsed_ms"]
+                                        .as_f64()
+                                        .zip(budget["threshold_ms"].as_f64())
+                                        .is_some_and(|(v, b)| v > b)
+                            })
+                        }))
             });
             let verdict = if failed {
                 "fail"
@@ -252,6 +253,29 @@ pub(super) fn markdown(rows: &[GateOutcome]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn resource_outliers_do_not_overrule_aggregate_uncertainty() {
+        let declaration = json!({"promise":"session_restore","user_outcome":"Persisted",
+            "endpoint":"persist_complete","blocking":"background_completion","residency":"store_uncontrolled",
+            "durability_at_endpoint":"committed_full","workload":"10k tabs"});
+        let manifest = json!({"resource_budgets":{"session_persist_cost":{"outcome":declaration,"max":180000000,"unit":"ns"}}});
+        let observed = json!({"completed":true,"endpoint":"persist_complete","residency":"store_uncontrolled",
+            "durability_at_endpoint":"committed_full","manifest_commit_full_observed":true});
+        let mut row = json!({"scenario":"session_persist_cost","budget_status":"uncertain","samples":[
+            {"budget_status":"pass","observed_outcome":observed},
+            {"budget_status":"pass","observed_outcome":observed},
+            {"budget_status":"fail","observed_outcome":observed}]});
+        assert_eq!(
+            matrix(&manifest, &[], &[], &[row.clone()]).unwrap()[0].verdict,
+            "uncertain"
+        );
+        row["budget_status"] = json!("fail");
+        assert_eq!(
+            matrix(&manifest, &[], &[], &[row]).unwrap()[0].verdict,
+            "fail"
+        );
+    }
+
     #[test]
     fn shared_gate_is_one_row_and_missing_observations_cannot_pass() {
         let m = json!({"resource_budgets":{"session_persist_cost":{"max":180000000,"unit":"ns","outcome":{
