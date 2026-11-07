@@ -157,3 +157,24 @@ mod registry_tests {
         assert!(super::validate(root.path()).is_err());
     }
 }
+
+#[cfg(test)]
+mod frozen_membership {
+    #[test]
+    fn promise_membership_and_scale_are_frozen() {
+        use serde_json::json;
+        let actual: Vec<_> = super::review_scenarios().iter().map(|p| json!({
+            "id":p.id, "benchmark_keys":p.benchmark_keys,
+            "capacity_scenarios":p.capacity_scenarios, "resource_scenarios":p.resource_scenarios,
+            "scale_targets":p.scale_targets.iter().map(|t| json!({
+                "id":t.id,"minimum":t.minimum,"unit":t.unit,
+                "capacity_scenarios":t.capacity_scenarios,"resource_scenarios":t.resource_scenarios
+            })).collect::<Vec<_>>()
+        })).collect();
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/promise-membership.json");
+        let expected: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(json!(actual), expected, "promise membership or scale drift");
+    }
+}

@@ -1,0 +1,288 @@
+[
+  {
+    "benchmark_keys": [
+      "editor_scroll_frame_120hz",
+      "editor_scroll_event_to_tessellation"
+    ],
+    "capacity_scenarios": [
+      "large_file_first_visible_ceiling",
+      "large_file_background_index_ceiling"
+    ],
+    "id": "large_files",
+    "resource_scenarios": [
+      "large_utf8_load_peak_memory",
+      "large_file_first_visible_paint",
+      "file_backed_chunk_cache_tracking",
+      "file_backed_random_window",
+      "cold_reads_during_save",
+      "store_import",
+      "ui_during_store_writes"
+    ],
+    "scale_targets": [
+      {
+        "capacity_scenarios": [
+          "large_file_first_visible_ceiling",
+          "large_file_background_index_ceiling"
+        ],
+        "id": "gb_class_files",
+        "minimum": 1073741824,
+        "resource_scenarios": [
+          "large_utf8_load_peak_memory",
+          "large_file_first_visible_paint",
+          "file_backed_chunk_cache_tracking"
+        ],
+        "unit": "bytes"
+      },
+      {
+        "capacity_scenarios": [],
+        "id": "cold_reads_with_saves",
+        "minimum": 3221225472,
+        "resource_scenarios": [
+          "cold_reads_during_save"
+        ],
+        "unit": "bytes"
+      }
+    ]
+  },
+  {
+    "benchmark_keys": [
+      "search_workflow_all_dispatch",
+      "search_workflow_all_first_render",
+      "search_workflow_all_completion"
+    ],
+    "capacity_scenarios": [
+      "many_file_first_visible_ceiling",
+      "many_file_background_hydration_ceiling",
+      "search_target_count_ceiling"
+    ],
+    "id": "many_files",
+    "resource_scenarios": [
+      "many_file_resource_tracking",
+      "many_file_lazy_open_tracking",
+      "search_target_resource_tracking",
+      "session_persist_cost",
+      "session_steady_persist_cost",
+      "session_restore_cost"
+    ],
+    "scale_targets": [
+      {
+        "capacity_scenarios": [
+          "many_file_first_visible_ceiling",
+          "many_file_background_hydration_ceiling",
+          "search_target_count_ceiling"
+        ],
+        "id": "ten_thousand_files",
+        "minimum": 10000,
+        "resource_scenarios": [
+          "many_file_resource_tracking",
+          "many_file_lazy_open_tracking",
+          "search_target_resource_tracking"
+        ],
+        "unit": "files"
+      }
+    ]
+  },
+  {
+    "benchmark_keys": [
+      "search_workflow_active_first_result",
+      "search_workflow_active_first_render",
+      "search_workflow_active_completion",
+      "search_workflow_current_first_result",
+      "search_workflow_current_first_render",
+      "search_workflow_current_completion",
+      "search_workflow_all_first_result",
+      "search_workflow_all_first_render",
+      "search_workflow_all_completion"
+    ],
+    "capacity_scenarios": [
+      "search_file_size_ceiling",
+      "search_target_count_ceiling"
+    ],
+    "id": "search",
+    "resource_scenarios": [
+      "search_file_size_resource_tracking",
+      "file_backed_search",
+      "search_target_resource_tracking",
+      "search_app_result_tracking",
+      "edited_buffer_search_preview_rendering"
+    ],
+    "scale_targets": [
+      {
+        "capacity_scenarios": [
+          "search_file_size_ceiling"
+        ],
+        "id": "gb_class_search",
+        "minimum": 1073741824,
+        "resource_scenarios": [
+          "search_file_size_resource_tracking"
+        ],
+        "unit": "bytes"
+      },
+      {
+        "capacity_scenarios": [
+          "search_target_count_ceiling"
+        ],
+        "id": "ten_thousand_search_targets",
+        "minimum": 10000,
+        "resource_scenarios": [
+          "search_target_resource_tracking"
+        ],
+        "unit": "files"
+      }
+    ]
+  },
+  {
+    "benchmark_keys": [
+      "tab_reorder_latency"
+    ],
+    "capacity_scenarios": [
+      "tab_count_ceiling"
+    ],
+    "id": "many_tabs",
+    "resource_scenarios": [
+      "tab_count_resource_tracking",
+      "tab_build_targeted",
+      "tab_split_targeted",
+      "tab_combine_targeted",
+      "tab_strip_frame_rendering",
+      "session_persist_cost",
+      "session_steady_persist_cost",
+      "session_restore_cost",
+      "startup_visible_restore_cost"
+    ],
+    "scale_targets": [
+      {
+        "capacity_scenarios": [
+          "tab_count_ceiling"
+        ],
+        "id": "ten_thousand_tabs",
+        "minimum": 10000,
+        "resource_scenarios": [
+          "tab_count_resource_tracking",
+          "tab_build_targeted",
+          "tab_split_targeted",
+          "tab_combine_targeted",
+          "tab_strip_frame_rendering",
+          "startup_visible_restore_cost"
+        ],
+        "unit": "tabs"
+      }
+    ]
+  },
+  {
+    "benchmark_keys": [],
+    "capacity_scenarios": [
+      "split_count_ceiling",
+      "view_count_ceiling"
+    ],
+    "id": "many_views",
+    "resource_scenarios": [
+      "view_count_resource_tracking",
+      "anchor_heavy_view_editing"
+    ],
+    "scale_targets": [
+      {
+        "capacity_scenarios": [
+          "split_count_ceiling"
+        ],
+        "id": "one_thousand_splits",
+        "minimum": 1000,
+        "resource_scenarios": [],
+        "unit": "splits"
+      },
+      {
+        "capacity_scenarios": [
+          "view_count_ceiling"
+        ],
+        "id": "one_thousand_views",
+        "minimum": 1000,
+        "resource_scenarios": [
+          "view_count_resource_tracking"
+        ],
+        "unit": "views"
+      }
+    ]
+  },
+  {
+    "benchmark_keys": [],
+    "capacity_scenarios": [
+      "paste_size_ceiling"
+    ],
+    "id": "text_mutation",
+    "resource_scenarios": [
+      "production_paste",
+      "provenance_retained_memory",
+      "fragmented_long_session_mutation"
+    ],
+    "scale_targets": [
+      {
+        "capacity_scenarios": [
+          "paste_size_ceiling"
+        ],
+        "id": "large_text_mutation",
+        "minimum": 134217728,
+        "resource_scenarios": [
+          "production_paste"
+        ],
+        "unit": "bytes"
+      }
+    ]
+  },
+  {
+    "benchmark_keys": [
+      "session_restore_latency",
+      "session_persist_latency"
+    ],
+    "capacity_scenarios": [],
+    "id": "session_restore",
+    "resource_scenarios": [
+      "session_persist_cost",
+      "session_steady_persist_cost",
+      "large_dirty_buffer_save",
+      "typing_without_save",
+      "typing_during_save",
+      "aged_store_save",
+      "aged_store_restore",
+      "aged_store_close",
+      "aged_store_forget",
+      "ui_during_store_writes",
+      "session_restore_cost",
+      "startup_visible_restore_cost"
+    ],
+    "scale_targets": [
+      {
+        "capacity_scenarios": [],
+        "id": "large_dirty_buffer_autosave",
+        "minimum": 52428800,
+        "resource_scenarios": [
+          "large_dirty_buffer_save"
+        ],
+        "unit": "bytes"
+      },
+      {
+        "capacity_scenarios": [],
+        "id": "ten_thousand_tab_restore",
+        "minimum": 10000,
+        "resource_scenarios": [
+          "session_persist_cost",
+          "session_steady_persist_cost",
+          "session_restore_cost",
+          "startup_visible_restore_cost"
+        ],
+        "unit": "tabs"
+      },
+      {
+        "capacity_scenarios": [],
+        "id": "aged_session_store",
+        "minimum": 3221225472,
+        "resource_scenarios": [
+          "aged_store_save",
+          "aged_store_restore",
+          "aged_store_close",
+          "aged_store_forget"
+        ],
+        "unit": "bytes"
+      }
+    ]
+  }
+]

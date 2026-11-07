@@ -273,6 +273,21 @@ fn resource_sample(event: &Value) -> Value {
         json!(event["setup_elapsed_ns"].as_f64().map(|ns| ns / 1e6)),
     );
     sample.insert("elapsed_ms".into(), json!(elapsed_ms(event)));
+    let verified = event["phase_elapsed_ns"]["cold_read_samples"]
+        .as_array()
+        .map(|rows| {
+            rows.iter()
+                .filter(|row| {
+                    row["physical_read_verified"] == true
+                        && row["eviction_succeeded"] == true
+                        && row["read_bytes"].as_u64().is_some_and(|n| n > 0)
+                })
+                .count()
+        });
+    sample.insert("cold_read_percentile".into(), json!(verified.filter(|n| *n > 0).map(|n|
+        json!({"sample_count":n, "percentile":99, "order_statistic_one_based":(n * 99).div_ceil(100),
+            "method":"nearest_rank", "scope":"physically_verified_samples_only"}))));
+
     sample.insert(
         "write_amplification".into(),
         json!(write_amplification(event)),
@@ -281,9 +296,9 @@ fn resource_sample(event: &Value) -> Value {
         "write_amplification_basis".into(),
         json!(
             if event["phase_elapsed_ns"]["persist_logical_bytes"].is_number() {
-                "process_write_bytes_per_captured_live_text_byte_not_changed_bytes"
+                "attributed_store_syscall_bytes_per_captured_live_text_byte_not_changed_bytes"
             } else {
-                "process_write_bytes_per_imported_or_inserted_text_byte"
+                "attributed_store_syscall_bytes_per_imported_or_inserted_text_byte"
             }
         ),
     );
@@ -311,7 +326,11 @@ fn write_amplification(event: &Value) -> Option<f64> {
         .as_f64()
         .or_else(|| event["phase_elapsed_ns"]["import_logical_bytes"].as_f64())
         .or_else(|| event["workload_details"]["inserted_bytes"].as_f64())?;
-    let physical = event["process_resources"]["write_bytes"].as_f64()?;
+    // Process counters include unrelated I/O; require operation-scoped store instrumentation.
+    if event["store_io"]["scope"] != "operation_store_files" {
+        return None;
+    }
+    let physical = event["store_io"]["write_syscall_bytes"].as_f64()?;
     (logical.is_finite() && logical > 0.0 && physical.is_finite() && physical >= 0.0)
         .then_some(physical / logical)
 }
@@ -367,13 +386,30 @@ mod selection_tests {
     fn persistence_write_ratio_requires_known_positive_logical_bytes() {
         use serde_json::json;
         let mut event = json!({"phase_elapsed_ns":{"persist_logical_bytes":100},"process_resources":{"write_bytes":2000}});
+        assert_eq!(super::write_amplification(&event), None);
+        event["store_io"] = json!({"scope":"operation_store_files","write_syscall_bytes":2000});
         assert_eq!(super::write_amplification(&event), Some(20.0));
         event["phase_elapsed_ns"]["persist_logical_bytes"] = json!(0);
         assert_eq!(super::write_amplification(&event), None);
         event["phase_elapsed_ns"]["persist_logical_bytes"] = json!(100);
-        event["process_resources"]["write_bytes"] = serde_json::Value::Null;
+        event["store_io"]["write_syscall_bytes"] = serde_json::Value::Null;
         assert_eq!(super::write_amplification(&event), None);
     }
+    #[test]
+    fn cold_percentile_describes_verified_order_statistic() {
+        use serde_json::json;
+        let mut event = json!({"phase_elapsed_ns":{"cold_read_samples":vec![
+            json!({"physical_read_verified":true,"eviction_succeeded":true,"read_bytes":4096});128]}});
+        let sample = super::resource_sample(&event);
+        assert_eq!(sample["cold_read_percentile"]["sample_count"], 128);
+        assert_eq!(
+            sample["cold_read_percentile"]["order_statistic_one_based"],
+            127
+        );
+        event["phase_elapsed_ns"]["cold_read_samples"] = json!([]);
+        assert!(super::resource_sample(&event)["cold_read_percentile"].is_null());
+    }
+
     #[test]
     fn focused_selection_is_exact_deduplicated_and_rejects_typos() {
         let expected = vec!["one".into(), "two".into(), "three".into()];

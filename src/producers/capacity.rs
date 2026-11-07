@@ -401,9 +401,11 @@ fn capacity_scenario_summary(scenario: String, events: Vec<Value>) -> Value {
                 .or_else(|| event["working_set_bytes"].as_i64())
         })
         .max();
-    let scenario_label = first
-        .get("scenario_label")
-        .and_then(Value::as_str)
+    let scenario_label = CAPACITY_SCENARIOS
+        .iter()
+        .find(|spec| spec.id == scenario)
+        .map(|spec| spec.label)
+        .or_else(|| first.get("scenario_label").and_then(Value::as_str))
         .unwrap_or(&scenario);
     let workload_family = first
         .get("workload_family")
@@ -657,5 +659,20 @@ mod tests {
         assert!(super::validate_capacity_events_for(&events, &specs).is_err());
         events.remove(0);
         assert!(super::validate_capacity_events_for(&events, &specs).is_err());
+    }
+}
+
+#[cfg(test)]
+mod endpoint_label_tests {
+    #[test]
+    fn hydration_does_not_inherit_first_visible_probe_label() {
+        let row = super::capacity_scenario_summary(
+            "many_file_background_hydration_ceiling".into(),
+            vec![serde_json::json!({"scenario_label":"Many-file first-visible workspace sweep"})],
+        );
+        assert_eq!(
+            row["scenario_label"],
+            "Many-file background hydration completion sweep"
+        );
     }
 }

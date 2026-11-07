@@ -132,6 +132,10 @@ pub(super) fn flag(scenario: &mut PerformanceReviewScenario, sources: &[&str]) {
     ) {
         scenario.promise_health = PromiseHealth::AtRisk;
     }
+    scenario.opportunities = vec![
+        "Repeat measurements with complete stable controls before claiming this promise passes."
+            .into(),
+    ];
     scenario.baseline_comparison.status = RegressionStatus::Noisy;
     scenario.gaps.push(format!(
         "Measurement controls are noisy or incomplete in: {}",
@@ -172,6 +176,10 @@ mod tests {
         row.promise_health = PromiseHealth::Pass;
         flag(&mut row, &["search_workflows"]);
         assert_eq!(row.promise_health, PromiseHealth::AtRisk);
+        assert!(!row
+            .opportunities
+            .iter()
+            .any(|s| s.contains("currently passing")));
         row.promise_health = PromiseHealth::Fail;
         flag(&mut row, &["search_workflows"]);
         assert_eq!(row.promise_health, PromiseHealth::Fail);

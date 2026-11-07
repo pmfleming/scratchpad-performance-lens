@@ -1,0 +1,878 @@
+{
+  "measurement_manifest.json": {
+    "version": 1,
+    "workflow_workloads": {
+      "active": {
+        "targets": 1,
+        "bytes_per_target": 1048576
+      },
+      "current": {
+        "targets": 32,
+        "bytes_per_target": 16384
+      },
+      "all": {
+        "targets": 10000,
+        "bytes_per_target": 16384
+      }
+    },
+    "probes": {
+      "resource_probe": [
+        "large_utf8_load_peak_memory",
+        "large_file_first_visible_paint",
+        "file_backed_chunk_cache_tracking",
+        "file_backed_random_window",
+        "file_backed_search",
+        "typing_without_save",
+        "typing_during_save",
+        "many_file_resource_tracking",
+        "many_file_lazy_open_tracking",
+        "search_file_size_resource_tracking",
+        "search_target_resource_tracking",
+        "search_app_result_tracking",
+        "edited_buffer_search_preview_rendering",
+        "paste_allocation",
+        "provenance_retained_memory",
+        "fragmented_long_session_mutation",
+        "tab_count_resource_tracking",
+        "tab_build_targeted",
+        "tab_split_targeted",
+        "tab_combine_targeted",
+        "tab_strip_frame_rendering",
+        "view_count_resource_tracking",
+        "anchor_heavy_view_editing",
+        "session_persist_cost",
+        "large_dirty_buffer_save",
+        "session_restore_cost",
+        "startup_visible_restore_cost",
+        "session_steady_persist_cost",
+        "store_import",
+        "ui_during_store_writes",
+        "cold_reads_during_save",
+        "aged_store_save",
+        "aged_store_restore",
+        "aged_store_close",
+        "aged_store_forget",
+        "production_paste"
+      ],
+      "capacity_probe": [
+        "large_file_first_visible_ceiling",
+        "large_file_background_index_ceiling",
+        "in_memory_text_ingest_ceiling",
+        "text_layout_ceiling",
+        "many_file_first_visible_ceiling",
+        "many_file_background_hydration_ceiling",
+        "search_file_size_ceiling",
+        "search_target_count_ceiling",
+        "tab_count_ceiling",
+        "split_count_ceiling",
+        "view_count_ceiling",
+        "paste_size_ceiling"
+      ]
+    },
+    "suites": {
+      "search_speed": {
+        "search_active_file_size": [
+          16384,
+          131072,
+          1048576
+        ],
+        "search_current_files_completion": [
+          1,
+          8,
+          32
+        ],
+        "search_current_files_first_response": [
+          1,
+          8,
+          32
+        ],
+        "search_all_tabs_completion": [
+          1,
+          8,
+          32
+        ],
+        "search_all_tabs_first_response": [
+          1,
+          8,
+          32
+        ]
+      },
+      "frame_budget": {
+        "ui_render_frame_120hz": [
+          "steady_workspace"
+        ],
+        "viewport_extraction_latency": [
+          1048576,
+          4194304
+        ],
+        "scroll_stress_latency": [
+          1048576,
+          4194304
+        ]
+      },
+      "promise_latency": {
+        "tab_reorder_latency": [
+          1000,
+          10000
+        ],
+        "paste_stress_latency": [
+          134217728
+        ],
+        "paste_insert_phase": [
+          134217728
+        ],
+        "paste_metadata_phase": [
+          134217728
+        ],
+        "snapshot_shared_edit_latency": [
+          16777216
+        ],
+        "snapshot_shared_fragmented_edit_latency": [
+          20000
+        ],
+        "dense_line_lookup_latency": [
+          4194304
+        ],
+        "reverse_character_walk_latency": [
+          8192
+        ],
+        "fragmented_tree_edit_latency": [
+          20000
+        ],
+        "large_paste_undo_latency": [
+          16777216
+        ],
+        "session_restore_latency": [
+          10000
+        ],
+        "session_restore_background_completion": [
+          10000
+        ],
+        "session_persist_latency": [
+          10000
+        ]
+      }
+    },
+    "resource_budgets": {
+      "large_utf8_load_peak_memory": {
+        "metric": "/elapsed_ns",
+        "max": 5000000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "large_file_first_visible_paint": {
+        "metric": "/elapsed_ns",
+        "max": 180000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "file_backed_chunk_cache_tracking": {
+        "metric": "/elapsed_ns",
+        "max": 5000000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "file_backed_random_window": {
+        "metric": "/phase_elapsed_ns/window_p99_ns",
+        "max": 4000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "file_backed_search": {
+        "metric": "/elapsed_ns",
+        "max": 5000000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "typing_without_save": {
+        "metric": "/phase_elapsed_ns/typing_p99_ns",
+        "max": 8330000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "typing_during_save": {
+        "metric": "/phase_elapsed_ns/typing_p99_ns",
+        "max": 8330000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "many_file_resource_tracking": {
+        "metric": "/elapsed_ns",
+        "max": 180000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "many_file_lazy_open_tracking": {
+        "metric": "/elapsed_ns",
+        "max": 180000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "search_file_size_resource_tracking": {
+        "metric": "/elapsed_ns",
+        "max": 5000000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "search_target_resource_tracking": {
+        "metric": "/elapsed_ns",
+        "max": 180000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "search_app_result_tracking": {
+        "metric": "/elapsed_ns",
+        "max": 180000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md",
+        "measurement_scope": "prepared_operation"
+      },
+      "edited_buffer_search_preview_rendering": {
+        "metric": "/elapsed_ns",
+        "max": 180000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md",
+        "measurement_scope": "prepared_operation"
+      },
+      "paste_allocation": {
+        "metric": "/elapsed_ns",
+        "max": 150000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "provenance_retained_memory": {
+        "metric": "/elapsed_ns",
+        "max": 180000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "fragmented_long_session_mutation": {
+        "metric": "/elapsed_ns",
+        "max": 180000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md",
+        "measurement_scope": "prepared_operation"
+      },
+      "tab_count_resource_tracking": {
+        "metric": "/elapsed_ns",
+        "max": 140000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md",
+        "measurement_scope": "prepared_operation"
+      },
+      "tab_build_targeted": {
+        "metric": "/elapsed_ns",
+        "max": 140000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md",
+        "measurement_scope": "prepared_operation"
+      },
+      "tab_split_targeted": {
+        "metric": "/elapsed_ns",
+        "max": 140000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md",
+        "measurement_scope": "prepared_operation"
+      },
+      "tab_combine_targeted": {
+        "metric": "/elapsed_ns",
+        "max": 140000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md",
+        "measurement_scope": "prepared_operation"
+      },
+      "tab_strip_frame_rendering": {
+        "metric": "/result_value",
+        "max": 8330000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "view_count_resource_tracking": {
+        "metric": "/elapsed_ns",
+        "max": 120000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "anchor_heavy_view_editing": {
+        "metric": "/elapsed_ns",
+        "max": 120000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "session_persist_cost": {
+        "min_independent_launches": 3,
+        "metric": "/elapsed_ns",
+        "max": 180000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "large_dirty_buffer_save": {
+        "metric": "/elapsed_ns",
+        "max": 180000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "session_restore_cost": {
+        "min_independent_launches": 3,
+        "measurement_scope": "prepared_operation",
+        "metric": "/elapsed_ns",
+        "max": 180000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "startup_visible_restore_cost": {
+        "min_independent_launches": 3,
+        "metric": "/elapsed_ns",
+        "max": 180000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "session_steady_persist_cost": {
+        "min_independent_launches": 3,
+        "metric": "/elapsed_ns",
+        "max": 180000000,
+        "unit": "ns",
+        "basis": "Existing interaction/capacity budgets applied to the declared operation; cold-read target from docs/turso-live-text-storage-plan.md"
+      },
+      "store_import": {
+        "metric": "/elapsed_ns",
+        "max": 5000000000,
+        "unit": "ns",
+        "basis": "large-file background completion budget"
+      },
+      "ui_during_store_writes": {
+        "metric": "/phase_elapsed_ns/frame_p99_ns",
+        "max": 12000000,
+        "unit": "ns",
+        "basis": "existing frame p99 limit"
+      },
+      "cold_reads_during_save": {
+        "metric": "/phase_elapsed_ns/cold_read_p99_ns",
+        "max": 4000000,
+        "unit": "ns",
+        "basis": "storage-plan cold-read gate or existing session interaction limit",
+        "min_independent_launches": 3
+      },
+      "aged_store_save": {
+        "metric": "/elapsed_ns",
+        "max": 180000000,
+        "unit": "ns",
+        "basis": "storage-plan cold-read gate or existing session interaction limit"
+      },
+      "aged_store_restore": {
+        "metric": "/elapsed_ns",
+        "max": 180000000,
+        "unit": "ns",
+        "basis": "storage-plan cold-read gate or existing session interaction limit"
+      },
+      "aged_store_close": {
+        "metric": "/elapsed_ns",
+        "max": 180000000,
+        "unit": "ns",
+        "basis": "storage-plan cold-read gate or existing session interaction limit"
+      },
+      "aged_store_forget": {
+        "metric": "/elapsed_ns",
+        "max": 180000000,
+        "unit": "ns",
+        "basis": "storage-plan cold-read gate or existing session interaction limit"
+      },
+      "production_paste": {
+        "metric": "/phase_elapsed_ns/publication_ns",
+        "max": 150000000,
+        "unit": "ns",
+        "basis": "existing paste latency budget applied to production input through publication"
+      }
+    },
+    "capacity_budgets": {
+      "large_file_first_visible_ceiling": {
+        "threshold_ms": 180,
+        "basis": "existing capacity budget"
+      },
+      "large_file_background_index_ceiling": {
+        "threshold_ms": 5000,
+        "basis": "existing capacity budget"
+      },
+      "in_memory_text_ingest_ceiling": {
+        "threshold_ms": 180,
+        "basis": "existing capacity budget"
+      },
+      "text_layout_ceiling": {
+        "threshold_ms": 180,
+        "basis": "existing capacity budget"
+      },
+      "many_file_first_visible_ceiling": {
+        "threshold_ms": 180,
+        "basis": "existing capacity budget"
+      },
+      "many_file_background_hydration_ceiling": {
+        "threshold_ms": 5000,
+        "basis": "existing capacity budget"
+      },
+      "search_file_size_ceiling": {
+        "threshold_ms": 180,
+        "basis": "existing capacity budget"
+      },
+      "search_target_count_ceiling": {
+        "threshold_ms": 180,
+        "basis": "existing capacity budget"
+      },
+      "tab_count_ceiling": {
+        "threshold_ms": 140,
+        "basis": "existing capacity budget"
+      },
+      "split_count_ceiling": {
+        "threshold_ms": 120,
+        "basis": "existing capacity budget"
+      },
+      "view_count_ceiling": {
+        "threshold_ms": 120,
+        "basis": "existing capacity budget"
+      },
+      "paste_size_ceiling": {
+        "threshold_ms": 150,
+        "basis": "existing capacity budget"
+      }
+    },
+    "probe_measurements": {
+      "editor_scroll_frame_120hz": {
+        "probe": "frame_metrics",
+        "threshold_ms": 8.33,
+        "p99_budget_ms": 12
+      },
+      "editor_scroll_event_to_tessellation": {
+        "probe": "realistic_frame_metrics",
+        "threshold_ms": 8.33,
+        "p99_budget_ms": 12
+      },
+      "search_workflow_active_dispatch": {
+        "probe": "search_workflow_metrics",
+        "threshold_ms": 50
+      },
+      "search_workflow_active_first_result": {
+        "probe": "search_workflow_metrics",
+        "threshold_ms": 100
+      },
+      "search_workflow_active_first_render": {
+        "probe": "search_workflow_metrics",
+        "threshold_ms": 120
+      },
+      "search_workflow_active_completion": {
+        "probe": "search_workflow_metrics",
+        "threshold_ms": 500
+      },
+      "search_workflow_current_dispatch": {
+        "probe": "search_workflow_metrics",
+        "threshold_ms": 50
+      },
+      "search_workflow_current_first_result": {
+        "probe": "search_workflow_metrics",
+        "threshold_ms": 100
+      },
+      "search_workflow_current_first_render": {
+        "probe": "search_workflow_metrics",
+        "threshold_ms": 120
+      },
+      "search_workflow_current_completion": {
+        "probe": "search_workflow_metrics",
+        "threshold_ms": 500
+      },
+      "search_workflow_all_dispatch": {
+        "probe": "search_workflow_metrics",
+        "threshold_ms": 50
+      },
+      "search_workflow_all_first_result": {
+        "probe": "search_workflow_metrics",
+        "threshold_ms": 100
+      },
+      "search_workflow_all_first_render": {
+        "probe": "search_workflow_metrics",
+        "threshold_ms": 120
+      },
+      "search_workflow_all_completion": {
+        "probe": "search_workflow_metrics",
+        "threshold_ms": 500
+      }
+    },
+    "fixtures": {
+      "large_dirty_buffer_save": {
+        "equals": {
+          "fixture_revision": 2,
+          "history_retention": "unbounded",
+          "inserted_bytes": 1,
+          "synchronous": "FULL"
+        },
+        "minimum": {
+          "buffer_bytes": 52428800,
+          "history_payload_bytes": 52428800,
+          "history_entries": 1025
+        }
+      }
+    },
+    "diagnostics": {
+      "session_maintenance": {
+        "samples_per_scenario": 9,
+        "fixture": {
+          "equals": {
+            "fixture_revision": 2,
+            "edit_preparation": "recorded_single_character_insert",
+            "buffer_bytes": 52428800,
+            "initial_archives": 128,
+            "synchronous": "FULL"
+          }
+        },
+        "scenarios": [
+          {
+            "id": "stored_usage",
+            "save_required": false
+          },
+          {
+            "id": "closed_token_lookup",
+            "save_required": false
+          },
+          {
+            "id": "closed_archive_append",
+            "save_required": false
+          },
+          {
+            "id": "save_after_branch",
+            "save_required": true
+          },
+          {
+            "id": "save_after_navigation",
+            "save_required": true
+          },
+          {
+            "id": "incremental_save",
+            "save_required": true
+          }
+        ]
+      }
+    },
+    "probe_fixture_groups": {
+      "resource_probe": [
+        {
+          "id": "session_cost",
+          "scenarios": [
+            "session_persist_cost",
+            "session_steady_persist_cost",
+            "session_restore_cost",
+            "startup_visible_restore_cost"
+          ]
+        },
+        {
+          "id": "aged_storage",
+          "scenarios": [
+            "cold_reads_during_save",
+            "aged_store_save",
+            "aged_store_restore",
+            "aged_store_close",
+            "aged_store_forget"
+          ]
+        }
+      ]
+    }
+  },
+  "benchmark_targets.json": {
+    "tab_reorder_latency": {
+      "description": "Reorder a tab from near the start to the end and back as tab count grows.",
+      "workload_family": "tab-management",
+      "parameter_unit": "tabs",
+      "kind": "workflow",
+      "threshold_ms": 16.0,
+      "targets": [
+        "src/app/domain/tab_manager.rs",
+        "src/app/domain/tab_manager/index.rs"
+      ],
+      "limiting_resource_hint": "cpu",
+      "measurement_contract": {
+        "text_backing": "owned",
+        "production_path": true,
+        "code_path": "src/app/domain/tab_manager.rs;src/app/domain/tab_manager/index.rs"
+      }
+    },
+    "paste_insert_phase": {
+      "description": "Diagnostic insertion phase for a 128 MiB mixed UTF-8 paste, excluding fixture setup and metadata refresh.",
+      "workload_family": "edit-paste",
+      "parameter_unit": "bytes",
+      "kind": "diagnostic",
+      "targets": [
+        "src/app/domain/buffer/piece_tree"
+      ],
+      "limiting_resource_hint": "cpu",
+      "measurement_contract": {
+        "text_backing": "owned",
+        "production_path": false,
+        "code_path": "src/app/domain/buffer/piece_tree"
+      }
+    },
+    "paste_metadata_phase": {
+      "description": "Diagnostic synchronous metadata-refresh phase after a 128 MiB mixed UTF-8 paste.",
+      "workload_family": "edit-paste",
+      "parameter_unit": "bytes",
+      "kind": "diagnostic",
+      "targets": [
+        "src/app/domain/buffer/state/metadata.rs"
+      ],
+      "limiting_resource_hint": "cpu",
+      "measurement_contract": {
+        "text_backing": "owned",
+        "production_path": false,
+        "code_path": "src/app/domain/buffer/state/metadata.rs"
+      }
+    },
+    "paste_stress_latency": {
+      "description": "Insert and synchronously refresh metadata for a 128 MiB mixed UTF-8 paste.",
+      "workload_family": "edit-paste",
+      "parameter_unit": "bytes",
+      "kind": "workflow",
+      "threshold_ms": 150.0,
+      "targets": [
+        "src/app/domain/buffer/document.rs",
+        "src/app/domain/buffer/state/metadata.rs",
+        "src/app/domain/buffer/piece_tree"
+      ],
+      "limiting_resource_hint": "cpu",
+      "measurement_contract": {
+        "text_backing": "owned",
+        "production_path": false,
+        "code_path": "src/app/domain/buffer/document.rs;src/app/domain/buffer/state/metadata.rs;src/app/domain/buffer/piece_tree"
+      }
+    },
+    "snapshot_shared_edit_latency": {
+      "description": "Edit a document with 16 MiB of inserted text while an immutable worker snapshot remains alive.",
+      "workload_family": "edit-paste",
+      "parameter_unit": "bytes",
+      "kind": "diagnostic",
+      "targets": [
+        "src/app/domain/buffer/document.rs",
+        "src/app/domain/buffer/piece_tree",
+        "src/app/domain/buffer/piece_tree/storage.rs"
+      ],
+      "limiting_resource_hint": "memory",
+      "measurement_contract": {
+        "text_backing": "owned",
+        "production_path": false,
+        "code_path": "src/app/domain/buffer/document.rs;src/app/domain/buffer/piece_tree;src/app/domain/buffer/piece_tree/storage.rs"
+      }
+    },
+    "snapshot_shared_fragmented_edit_latency": {
+      "description": "Edit a 20,000-fragment document while an immutable worker snapshot remains alive.",
+      "workload_family": "edit-paste",
+      "parameter_unit": "fragments",
+      "kind": "diagnostic",
+      "targets": [
+        "src/app/domain/buffer/document.rs",
+        "src/app/domain/buffer/piece_tree",
+        "src/app/domain/buffer/piece_tree/edit/rebalance.rs"
+      ],
+      "limiting_resource_hint": "memory",
+      "measurement_contract": {
+        "text_backing": "owned",
+        "production_path": false,
+        "code_path": "src/app/domain/buffer/document.rs;src/app/domain/buffer/piece_tree;src/app/domain/buffer/piece_tree/edit/rebalance.rs"
+      }
+    },
+    "dense_line_lookup_latency": {
+      "description": "Resolve 1,024 distributed lines in 4 MiB of dense short lines.",
+      "workload_family": "viewport",
+      "parameter_unit": "bytes",
+      "kind": "diagnostic",
+      "targets": [
+        "src/app/domain/buffer/piece_tree/support/lookup.rs",
+        "src/app/domain/buffer/piece_tree/support/text.rs"
+      ],
+      "limiting_resource_hint": "cpu",
+      "measurement_contract": {
+        "text_backing": "owned",
+        "production_path": false,
+        "code_path": "src/app/domain/buffer/piece_tree/support/lookup.rs;src/app/domain/buffer/piece_tree/support/text.rs"
+      }
+    },
+    "reverse_character_walk_latency": {
+      "description": "Walk backward through 8 Ki Unicode scalar values in one large piece.",
+      "workload_family": "viewport",
+      "parameter_unit": "characters",
+      "kind": "diagnostic",
+      "targets": [
+        "src/app/domain/buffer/piece_tree/query.rs",
+        "src/app/ui/editor_content/native_editor/word_boundary.rs"
+      ],
+      "limiting_resource_hint": "cpu",
+      "measurement_contract": {
+        "text_backing": "owned",
+        "production_path": false,
+        "code_path": "src/app/domain/buffer/piece_tree/query.rs;src/app/ui/editor_content/native_editor/word_boundary.rs"
+      }
+    },
+    "fragmented_tree_edit_latency": {
+      "description": "Insert into a live tree after 20,000 fragmenting edits.",
+      "workload_family": "edit-paste",
+      "parameter_unit": "fragments",
+      "kind": "diagnostic",
+      "targets": [
+        "src/app/domain/buffer/piece_tree.rs",
+        "src/app/domain/buffer/piece_tree/edit.rs",
+        "src/app/domain/buffer/piece_tree/metrics.rs"
+      ],
+      "limiting_resource_hint": "cpu",
+      "measurement_contract": {
+        "text_backing": "owned",
+        "production_path": false,
+        "code_path": "src/app/domain/buffer/piece_tree.rs;src/app/domain/buffer/piece_tree/edit.rs;src/app/domain/buffer/piece_tree/metrics.rs"
+      }
+    },
+    "large_paste_undo_latency": {
+      "description": "Undo a recorded 16 MiB mixed UTF-8 paste.",
+      "workload_family": "edit-paste",
+      "parameter_unit": "bytes",
+      "kind": "diagnostic",
+      "targets": [
+        "src/app/domain/buffer/document/history_ops.rs",
+        "src/app/domain/buffer/history.rs",
+        "src/app/domain/buffer/piece_tree"
+      ],
+      "limiting_resource_hint": "cpu",
+      "measurement_contract": {
+        "text_backing": "owned",
+        "production_path": false,
+        "code_path": "src/app/domain/buffer/document/history_ops.rs;src/app/domain/buffer/history.rs;src/app/domain/buffer/piece_tree"
+      }
+    },
+    "session_restore_latency": {
+      "description": "Restore the startup-visible tab from a persisted 10,000-tab session.",
+      "workload_family": "session-persistence",
+      "parameter_unit": "tabs",
+      "kind": "workflow",
+      "threshold_ms": 180.0,
+      "targets": [
+        "src/app/services/session_store"
+      ],
+      "limiting_resource_hint": "disk-io",
+      "measurement_contract": {
+        "text_backing": "store",
+        "production_path": true,
+        "code_path": "src/app/services/session_store"
+      }
+    },
+    "session_restore_background_completion": {
+      "description": "Diagnostic completion latency for hydrating a persisted 10,000-tab session after startup-visible restore.",
+      "workload_family": "session-persistence",
+      "parameter_unit": "tabs",
+      "kind": "diagnostic",
+      "targets": [
+        "src/app/services/session_store/restore.rs",
+        "src/app/services/session_store/database/read.rs",
+        "src/app/services/session_store/database/content.rs",
+        "src/app/services/session_store/parallel.rs"
+      ],
+      "limiting_resource_hint": "disk-io",
+      "measurement_contract": {
+        "text_backing": "store",
+        "production_path": true,
+        "code_path": "src/app/services/session_store/restore.rs;src/app/services/session_store/database/read.rs;src/app/services/session_store/database/content.rs;src/app/services/session_store/parallel.rs"
+      }
+    },
+    "session_persist_latency": {
+      "description": "Steady-state background persistence latency for an unchanged 10,000-tab session; unchanged snapshots must not be rewritten.",
+      "workload_family": "session-persistence",
+      "parameter_unit": "tabs",
+      "kind": "workflow",
+      "threshold_ms": 180.0,
+      "targets": [
+        "src/app/services/session_store/capture.rs",
+        "src/app/services/session_store/database"
+      ],
+      "limiting_resource_hint": "disk-io",
+      "measurement_contract": {
+        "text_backing": "store",
+        "production_path": true,
+        "code_path": "src/app/services/session_store/capture.rs;src/app/services/session_store/database"
+      }
+    }
+  },
+  "search_benchmark_targets.json": {
+    "search_active_file_size": {
+      "description": "Prepared plain-text scanner completion on one buffer; excludes app dispatch and result delivery.",
+      "mode": "active",
+      "latency_kind": "completion",
+      "scaling_axis": "file_size",
+      "kind": "component",
+      "workload_family": "search",
+      "parameter_unit": "bytes",
+      "fixed_item_count": 1,
+      "query": "needle",
+      "threshold_ms": 50.0,
+      "measurement_scope": "prepared_scanner_completion",
+      "targets": [
+        "src/app/services/search.rs"
+      ]
+    },
+    "search_current_files_completion": {
+      "description": "Prepared scanner completion over strings; not the current-workspace search pipeline.",
+      "mode": "current",
+      "latency_kind": "completion",
+      "scaling_axis": "aggregate_size",
+      "kind": "component",
+      "workload_family": "search",
+      "parameter_unit": "files",
+      "bytes_per_item": 16384,
+      "query": "needle",
+      "threshold_ms": 80.0,
+      "measurement_scope": "prepared_scanner_completion",
+      "targets": [
+        "src/app/services/search.rs"
+      ]
+    },
+    "search_current_files_first_response": {
+      "description": "Full scan of the first prepared target only; not first-match delivery latency.",
+      "mode": "current",
+      "latency_kind": "first_target_completion",
+      "scaling_axis": "aggregate_size",
+      "kind": "component",
+      "workload_family": "search",
+      "parameter_unit": "files",
+      "bytes_per_item": 16384,
+      "processed_item_count": 1,
+      "query": "needle",
+      "threshold_ms": 25.0,
+      "measurement_scope": "prepared_first_target_completion",
+      "targets": [
+        "src/app/services/search.rs"
+      ]
+    },
+    "search_all_tabs_completion": {
+      "description": "Prepared scanner completion over strings; not the all-tabs search pipeline.",
+      "mode": "all",
+      "latency_kind": "completion",
+      "scaling_axis": "aggregate_size",
+      "kind": "component",
+      "workload_family": "search",
+      "parameter_unit": "tabs",
+      "bytes_per_item": 16384,
+      "query": "needle",
+      "threshold_ms": 100.0,
+      "measurement_scope": "prepared_scanner_completion",
+      "targets": [
+        "src/app/services/search.rs"
+      ]
+    },
+    "search_all_tabs_first_response": {
+      "description": "Full scan of the first prepared target only; not first-match delivery latency.",
+      "mode": "all",
+      "latency_kind": "first_target_completion",
+      "scaling_axis": "aggregate_size",
+      "kind": "component",
+      "workload_family": "search",
+      "parameter_unit": "tabs",
+      "bytes_per_item": 16384,
+      "processed_item_count": 1,
+      "query": "needle",
+      "threshold_ms": 25.0,
+      "measurement_scope": "prepared_first_target_completion",
+      "targets": [
+        "src/app/services/search.rs"
+      ]
+    }
+  }
+}

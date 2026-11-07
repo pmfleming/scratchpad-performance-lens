@@ -112,6 +112,7 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
         ("frame_metrics", frames.as_slice()),
         ("search_workflows", scenarios_array(&workflows)),
     ];
+    let mut observed_noisy_sources = std::collections::BTreeSet::new();
     for (definition, scenario) in scenarios.iter().zip(&mut scenario_payload) {
         let relevant = noise::relevant_sources(
             definition,
@@ -123,9 +124,11 @@ pub fn performance_review(config: &LensConfig, _options: MeasureOptions) -> Resu
         if relevant.is_empty() {
             crate::baselines::annotate(config, &inputs.context, std::slice::from_mut(scenario))?;
         } else {
+            observed_noisy_sources.extend(relevant.iter().map(|s| s.to_string()));
             noise::flag(scenario, &relevant);
         }
     }
+    let noisy_sources = observed_noisy_sources.into_iter().collect();
     let target_promises: Vec<_> = scenarios
         .iter()
         .map(|scenario| scenario.promise.to_string())
@@ -321,7 +324,18 @@ fn build_review_scenario(
     } else {
         CoverageStatus::Missing
     };
-    let gaps = scenario_gaps(&axes);
+    let mut gaps = scenario_gaps(&axes);
+    let uncertain_resources: Vec<_> = resource_rows
+        .iter()
+        .filter(|row| row["budget_status"] == "uncertain")
+        .filter_map(|row| row["scenario"].as_str())
+        .collect();
+    if !uncertain_resources.is_empty() {
+        gaps.push(format!(
+            "Complete resource evidence straddles the budget: {}.",
+            uncertain_resources.join(", ")
+        ));
+    }
     let scale_checks = scale_checks(
         scenario,
         &capacity_rows,
@@ -361,13 +375,16 @@ fn build_review_scenario(
     let missing_scale_targets = scale_checks.iter().filter(|check| !check.met).count();
     let synthetic_evidence = (capacity_synthetic && !capacity_rows.is_empty())
         || (resources_synthetic && !resource_rows.is_empty());
-    let promise_health = promise_health(
+    let mut promise_health = promise_health(
         coverage_status,
         budget_misses,
         scale_failures,
         missing_scale_targets,
         synthetic_evidence,
     );
+    if promise_health == PromiseHealth::Pass && !uncertain_resources.is_empty() {
+        promise_health = PromiseHealth::AtRisk;
+    }
     let gaps_empty = gaps.is_empty();
     PerformanceReviewScenario {
         id: scenario.id.to_string(),

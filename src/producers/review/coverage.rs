@@ -28,7 +28,7 @@ pub(super) fn valid_latency(row: &Value) -> bool {
 pub(super) fn valid_resource(row: &Value) -> bool {
     if matches!(
         row["budget_status"].as_str(),
-        Some("uncertain" | "invalid" | "unbudgeted")
+        Some("invalid" | "unbudgeted")
     ) {
         return false;
     }
@@ -160,6 +160,16 @@ mod tests {
         assert!(!valid_resource(&row));
         row["closes_measurement_gap"] = json!(true);
         assert!(valid_resource(&row));
+    }
+
+    #[test]
+    fn uncertain_complete_resource_is_covered_but_invalid_is_not() {
+        let mut row = json!({"budget_status":"uncertain", "samples":[{
+            "status":"ok", "elapsed_ms":1, "measurement_scope":"prepared_operation",
+            "peak_live_bytes":100}]});
+        assert!(valid_resource(&row));
+        row["budget_status"] = json!("invalid");
+        assert!(!valid_resource(&row));
     }
 
     #[test]
