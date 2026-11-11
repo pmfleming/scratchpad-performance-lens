@@ -67,6 +67,11 @@ fn scenario_runs(
     group: &groups::Group<'_>,
     manifest: &Value,
 ) -> Result<ProbeEvents> {
+    let requested = requested_launches(
+        std::env::var("SPLENS_MIN_INDEPENDENT_LAUNCHES")
+            .ok()
+            .as_deref(),
+    )?;
     let minimum = group
         .scenarios
         .iter()
@@ -74,7 +79,8 @@ fn scenario_runs(
         .collect::<Result<Vec<_>>>()?
         .into_iter()
         .max()
-        .unwrap_or(1);
+        .unwrap_or(1)
+        .max(requested);
     let args: Vec<_> = group
         .scenarios
         .iter()
@@ -152,6 +158,19 @@ fn validate_group_output(result: &mut ProbeEvents, group: &groups::Group<'_>) {
             .as_str()
             .is_some_and(|id| group.scenarios.contains(&id))
     });
+}
+
+// A reproducibility option, never a retry-until-fast policy. Keep every launch,
+// including noisy/failed ones, and never lower the manifest's minimum.
+fn requested_launches(value: Option<&str>) -> Result<usize> {
+    match value {
+        None => Ok(1),
+        Some(value) => value
+            .parse::<usize>()
+            .ok()
+            .filter(|n| (1..=16).contains(n))
+            .context("SPLENS_MIN_INDEPENDENT_LAUNCHES must be an integer from 1 through 16"),
+    }
 }
 
 fn minimum_launches(manifest: &Value, bin: &str, scenario: &str) -> Result<usize> {
@@ -412,6 +431,15 @@ pub(in crate::producers) fn output_text(output: &std::process::Output) -> String
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn requested_launch_count_is_bounded_and_explicit() {
+        assert_eq!(super::requested_launches(None).unwrap(), 1);
+        assert_eq!(super::requested_launches(Some("3")).unwrap(), 3);
+        for value in ["", "0", "17", "1.5", "invalid"] {
+            assert!(super::requested_launches(Some(value)).is_err());
+        }
+    }
+
     #[test]
     fn declared_minimum_runs_are_enforced_even_away_from_a_budget() {
         use serde_json::json;

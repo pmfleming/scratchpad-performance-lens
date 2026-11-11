@@ -97,7 +97,7 @@ pub fn identity(root: &Path) -> Value {
     json!({"project_filesystem":filesystem(root),"temp_filesystem":filesystem(&std::env::temp_dir()),
         "target_filesystem":filesystem(&crate::shared::cargo_target_directory(root)),
         "governors":governors,"power_supplies":power,"power_profile":command("powerprofilesctl",&["get"]),
-        "kernel":command("uname",&["-r"]),"control_revision":2,"power_identity_revision":2})
+        "kernel":command("uname",&["-r"]),"control_revision":3,"minimum_independent_launches":std::env::var("SPLENS_MIN_INDEPENDENT_LAUNCHES").unwrap_or_else(|_| "1".into()),"power_identity_revision":2})
 }
 
 pub fn conditions() -> Value {
@@ -123,7 +123,7 @@ pub fn control() -> Value {
     // Warm the fixed control itself before sampling; operation timings are untouched.
     let warmup = Instant::now();
     let mut warmup_iterations = 0_u64;
-    while warmup.elapsed() < std::time::Duration::from_millis(20) {
+    while warmup.elapsed() < std::time::Duration::from_millis(100) {
         std::hint::black_box(crate::provenance::fingerprint(&bytes));
         warmup_iterations += 1;
     }
@@ -131,11 +131,13 @@ pub fn control() -> Value {
     let mut samples = Vec::new();
     for _ in 0..7 {
         let start = Instant::now();
-        std::hint::black_box(crate::provenance::fingerprint(std::hint::black_box(&bytes)));
-        samples.push(start.elapsed().as_nanos() as u64);
+        for _ in 0..16 {
+            std::hint::black_box(crate::provenance::fingerprint(std::hint::black_box(&bytes)));
+        }
+        samples.push((start.elapsed().as_nanos() / 16) as u64);
     }
     samples.sort_unstable();
-    json!({"revision":2,"warmup_ns":warmup_ns,"warmup_iterations":warmup_iterations,"metric":"fixed_256_kib_hash_ns","median_ns":samples[3],"min_ns":samples[0],"max_ns":samples[6],"samples_ns":samples})
+    json!({"revision":3,"iterations_per_sample":16,"warmup_ns":warmup_ns,"warmup_iterations":warmup_iterations,"metric":"fixed_256_kib_hash_ns","median_ns":samples[3],"min_ns":samples[0],"max_ns":samples[6],"samples_ns":samples})
 }
 
 pub fn quality(before: &Value, after: &Value) -> Value {

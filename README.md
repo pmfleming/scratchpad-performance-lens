@@ -399,3 +399,10 @@ artifacts into this repository's `target/analysis` directory. The architecture
 map treats `slowspots.json` as optional; if this Scratchpad-specific performance
 artifact has not been produced, map-level `performance_risk` and `total_score`
 remain unknown rather than being scored as zero.
+
+For before/after resource or capacity comparisons, set
+`SPLENS_MIN_INDEPENDENT_LAUNCHES=3` (1–16). This raises the manifest's
+minimum; every launch, including failures and noisy controls, remains in the
+artifact. The sampling policy is part of measurement identity. Controls use
+100 ms warm-up and seven batches of 16 hashes to reduce timer and scheduler
+noise; operation timings and budget thresholds are unchanged.
